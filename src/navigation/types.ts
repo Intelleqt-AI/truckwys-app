@@ -1,0 +1,51 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
+
+// Detail screens map to the design's slide-over overlays. Where a preview object
+// is available we pass a lightweight snapshot for instant render; the screen then
+// fetches fresh data by id via React Query.
+type Id = number | string;
+
+export type BookingsTab = 'quotes' | 'orders' | 'history';
+export type FleetTab = 'vehicles' | 'drivers';
+export type FinanceTab = 'invoices' | 'expenses' | 'reports';
+
+export type TabParamList = {
+  Home: undefined;
+  Bookings: { tab?: BookingsTab } | undefined;
+  Fleet: { tab?: FleetTab } | undefined;
+  Finance: { tab?: FinanceTab } | undefined;
+  More: undefined;
+};
+
+export type AppStackParamList = {
+  Tabs: NavigatorScreenParams<TabParamList> | undefined;
+  LoadDetail: { id: Id; preview?: Record<string, unknown> };
+  QuoteDetail: { id: Id; preview?: Record<string, unknown> };
+  CreateQuote: { ai?: boolean } | undefined;
+  VehicleDetail: { id: Id; preview?: Record<string, unknown> };
+  DriverDetail: { id: Id; preview?: Record<string, unknown> };
+  InvoiceDetail: { id: Id; preview?: Record<string, unknown> };
+  Customers: undefined;
+  CustomerDetail: { id: Id; preview?: Record<string, unknown> };
+  AddCustomer: { id?: Id; preview?: Record<string, unknown> } | undefined;
+  Settings: { section?: string } | undefined;
+  Activity: undefined;
+  Copilot: undefined;
+  Insights: undefined;
+  Capital: undefined;
+  Notifications: undefined;
+  Stub: { title: string; body?: string };
+};
+
+export type AuthStackParamList = {
+  Login: undefined;
+  VerifyOtp: { pendingToken: string; email: string };
+  Signup: undefined;
+  ForgotPassword: undefined;
+};
+
+declare global {
+  namespace ReactNavigation {
+    interface RootParamList extends AppStackParamList {}
+  }
+}

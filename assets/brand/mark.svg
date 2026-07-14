@@ -1,0 +1,24 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Truckwys Logo - Logistics Platform -->
+  <rect width="32" height="32" rx="8" fill="url(#gradient)"/>
+  
+  <!-- Truck Icon - Simplified logistics symbol -->
+  <path d="M6 18h2l1-4h6l1 4h2v-6h4l2 4h2v6h-2a2 2 0 01-4 0h-8a2 2 0 01-4 0H6z" 
+        fill="white" 
+        stroke="white" 
+        stroke-width="0.5"/>
+  
+  <!-- Wheels -->
+  <circle cx="10" cy="22" r="2" fill="white"/>
+  <circle cx="22" cy="22" r="2" fill="white"/>
+  
+  <!-- Route indicator lines -->
+  <path d="M4 8h24M4 26h24" stroke="white" stroke-width="1" opacity="0.6"/>
+  
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563EB;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#93C5FD;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+</svg>

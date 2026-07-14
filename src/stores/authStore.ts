@@ -1,0 +1,76 @@
+import { create } from 'zustand';
+import { setAuthToken } from '@/lib/api/client';
+import { storage } from '@/lib/storage';
+import { authApi } from '@/features/auth/api';
+import type { AuthUser } from '@/types/auth';
+
+// Client-side session state. Server data is owned by React Query; this store owns
+// only identity: the DRF token + cached user + hydration status. Persistence is
+// via SecureStore/AsyncStorage (see storage.ts).
+
+type Status = 'loading' | 'authed' | 'guest';
+
+interface AuthState {
+  status: Status;
+  token: string | null;
+  user: AuthUser | null;
+  hydrate: () => Promise<void>;
+  setSession: (token: string, user: AuthUser) => Promise<void>;
+  refreshUser: () => Promise<void>;
+  signOut: () => Promise<void>;
+}
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  status: 'loading',
+  token: null,
+  user: null,
+
+  // Boot: restore token/user so the app opens straight to the right stack.
+  hydrate: async () => {
+    const [token, user] = await Promise.all([storage.getToken(), storage.getUser()]);
+    if (token) {
+      setAuthToken(token);
+      set({ token, user, status: 'authed' });
+      // Sync fresh role/profile in the background (non-blocking).
+      get().refreshUser();
+    } else {
+      set({ status: 'guest' });
+    }
+  },
+
+  setSession: async (token, user) => {
+    setAuthToken(token);
+    await Promise.all([storage.setToken(token), storage.setUser(user)]);
+    set({ token, user, status: 'authed' });
+  },
+
+  // Pull latest profile; ignore failures (a hard 401 is handled by the client).
+  refreshUser: async () => {
+    if (!get().token) return;
+    try {
+      const user = await authApi.me();
+      await storage.setUser(user);
+      set({ user });
+    } catch {
+      // swallow — background refresh
+    }
+  },
+
+  signOut: async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // revoking server-side is best-effort; always clear locally
+    }
+    setAuthToken(null);
+    await storage.clear();
+    set({ token: null, user: null, status: 'guest' });
+  },
+}));
+
+// Called by the API client on an unexpected 401 (expired/revoked token).
+export const forceSignOut = () => {
+  setAuthToken(null);
+  void storage.clear();
+  useAuthStore.setState({ token: null, user: null, status: 'guest' });
+};

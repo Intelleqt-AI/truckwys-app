@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Truckwys theme variables. Dark is the default (:root); the OS
+   light preference swaps the themeable roles. Values verbatim
+   from the design system tokens/colors.css.
+   ============================================================ */
+@layer base {
+  :root {
+    --bg-deep: #030303;
+    --bg-surface: #0a0a0a;
+    --bg-surface-hover: #121212;
+    --bg-elevated: #141414;
+
+    --border-subtle: #1f1f1f;
+    --border-active: #333333;
+    --border-row: #141414;
+
+    --accent-primary: #4d9eff;
+    --accent-dim: #1a3a6b;
+
+    --text-primary: #ededed;
+    --text-secondary: #888888;
+    --text-tertiary: #444444;
+    --text-on-accent: #030303;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg-deep: #f3f4f6;
+      --bg-surface: #ffffff;
+      --bg-surface-hover: #f9fafb;
+      --bg-elevated: #ffffff;
+
+      --border-subtle: #e5e7eb;
+      --border-active: #d1d5db;
+      --border-row: #e5e7eb;
+
+      --accent-primary: #2563eb;
+      --accent-dim: #eff6ff;
+
+      --text-primary: #111827;
+      --text-secondary: #374151;
+      --text-tertiary: #6b7280;
+      --text-on-accent: #ffffff;
+    }
+  }
+}

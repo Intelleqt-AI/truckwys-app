@@ -130,19 +130,53 @@ export function IconButton({
   );
 }
 
-// ── Badge: small mono chip ─────────────────────────────────────────────────
+// ── Badge: status token — square 2px chip, 1px tone border, tinted bg, dot ──
+// Matches the design system Badge (components/core/Badge.jsx).
+export type BadgeTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'accent';
+
 export function Badge({
   label,
-  className = '',
-  textClassName = '',
+  tone = 'neutral',
+  shape = 'square',
+  dot = false,
+  outline = false,
 }: {
   label: string;
-  className?: string;
-  textClassName?: string;
+  tone?: BadgeTone;
+  shape?: 'square' | 'pill';
+  dot?: boolean;
+  outline?: boolean;
 }) {
+  const { colors } = useTheme();
+  const TONES: Record<BadgeTone, { fg: string; bg: string }> = {
+    success: { fg: '#22C55E', bg: 'rgba(34,197,94,0.12)' },
+    warning: { fg: '#F59E0B', bg: 'rgba(245,158,11,0.10)' },
+    danger: { fg: '#FF4949', bg: 'rgba(255,73,73,0.10)' },
+    info: { fg: '#4D9EFF', bg: 'rgba(77,158,255,0.10)' },
+    neutral: { fg: colors.muted, bg: 'rgba(136,136,136,0.12)' },
+    accent: { fg: colors.accent, bg: colors.glow },
+  };
+  const t = TONES[tone];
+  const square = shape === 'square';
   return (
-    <View className={`self-start rounded-xs px-1.5 py-0.5 ${className}`}>
-      <Mono className={`text-nano tracking-label uppercase ${textClassName}`}>{label}</Mono>
+    <View
+      className="flex-row items-center"
+      style={{
+        gap: 6,
+        paddingHorizontal: square ? 8 : 9,
+        paddingVertical: 3,
+        borderWidth: 1,
+        borderColor: outline || square ? t.fg : 'transparent',
+        backgroundColor: outline ? 'transparent' : t.bg,
+        borderRadius: square ? 2 : 100,
+      }}
+    >
+      {dot && <View style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: t.fg }} />}
+      <Mono
+        style={{ fontSize: 10, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', color: t.fg }}
+      >
+        {label}
+      </Mono>
     </View>
   );
 }
@@ -200,58 +234,69 @@ export function LiveDot({ label }: { label?: string }) {
   );
 }
 
-// ── Status vocabulary → tone ───────────────────────────────────────────────
-export type Tone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
+// ── Status vocabulary → tone + label ────────────────────────────────────────
+// Verbatim from the design system StatusPill (components/status/StatusPill.jsx),
+// extended with the extra codes the API returns.
+export type Tone = BadgeTone;
 
-const TONE_BY_STATUS: Record<string, Tone> = {
-  // loads
-  pending: 'warning',
-  assigned: 'info',
-  in_transit: 'info',
-  intransit: 'info',
-  delivered: 'success',
-  invoiced: 'success',
-  completed: 'success',
-  cancelled: 'danger',
-  // quotes
-  draft: 'neutral',
-  sent: 'warning',
-  viewed: 'info',
-  accepted: 'success',
-  approved: 'success',
-  rejected: 'danger',
-  expired: 'danger',
-  lost: 'danger',
-  won: 'success',
-  // vehicles
-  available: 'success',
-  in_use: 'info',
-  maintenance: 'warning',
-  inactive: 'neutral',
-  // invoices
-  paid: 'success',
-  overdue: 'danger',
-  unpaid: 'warning',
-  partial: 'warning',
+const STATUS_MAP: Record<string, { tone: BadgeTone; label: string }> = {
+  // Vehicle
+  AVAILABLE: { tone: 'success', label: 'Available' },
+  ACTIVE: { tone: 'success', label: 'Active' },
+  IN_USE: { tone: 'info', label: 'In Use' },
+  ON_DUTY: { tone: 'info', label: 'On Duty' },
+  MAINTENANCE: { tone: 'warning', label: 'Maintenance' },
+  INACTIVE: { tone: 'neutral', label: 'Inactive' },
+  OUT_OF_SERVICE: { tone: 'neutral', label: 'Out of Service' },
+  // Load / job
+  PENDING: { tone: 'warning', label: 'Pending' },
+  ASSIGNED: { tone: 'info', label: 'Assigned' },
+  LOADING: { tone: 'info', label: 'Loading' },
+  SCHEDULED: { tone: 'info', label: 'Scheduled' },
+  IN_TRANSIT: { tone: 'info', label: 'In Transit' },
+  DELIVERED: { tone: 'success', label: 'Delivered' },
+  INVOICED: { tone: 'success', label: 'Invoiced' },
+  COMPLETED: { tone: 'success', label: 'Completed' },
+  CANCELLED: { tone: 'danger', label: 'Cancelled' },
+  // Quote
+  DRAFT: { tone: 'neutral', label: 'Draft' },
+  SENT: { tone: 'warning', label: 'Sent' },
+  VIEWED: { tone: 'info', label: 'Viewed' },
+  QUOTED: { tone: 'info', label: 'Viewed' },
+  ACCEPTED: { tone: 'success', label: 'Accepted' },
+  APPROVED: { tone: 'success', label: 'Approved' },
+  REJECTED: { tone: 'danger', label: 'Rejected' },
+  EXPIRED: { tone: 'danger', label: 'Expired' },
+  WON: { tone: 'success', label: 'Won' },
+  LOST: { tone: 'danger', label: 'Lost' },
+  // Invoice
+  PAID: { tone: 'success', label: 'Paid' },
+  OVERDUE: { tone: 'danger', label: 'Overdue' },
+  UNPAID: { tone: 'warning', label: 'Unpaid' },
+  PARTIAL: { tone: 'warning', label: 'Partial' },
 };
 
 export const toneForStatus = (status?: string): Tone =>
-  TONE_BY_STATUS[(status ?? '').toLowerCase().replace(/[\s-]/g, '_')] ?? 'neutral';
+  STATUS_MAP[String(status ?? '').toUpperCase().replace(/[\s-]/g, '_')]?.tone ?? 'neutral';
 
-const TONE_CLASSES: Record<Tone, { bg: string; text: string }> = {
-  success: { bg: 'bg-success-bg', text: 'text-success' },
-  warning: { bg: 'bg-warning-bg', text: 'text-warning' },
-  danger: { bg: 'bg-danger-bg', text: 'text-danger' },
-  info: { bg: 'bg-info-bg', text: 'text-info' },
-  neutral: { bg: 'bg-neutral-bg', text: 'text-muted' },
-};
-
-// ── StatusPill ─────────────────────────────────────────────────────────────
-export function StatusPill({ status, label }: { status?: string; label?: string }) {
-  const tone = toneForStatus(status);
-  const c = TONE_CLASSES[tone];
-  const text = (label ?? status ?? '').replace(/_/g, ' ');
-  return <Badge label={text} className={c.bg} textClassName={c.text} />;
+// ── StatusPill: square chip with leading dot (design default) ───────────────
+export function StatusPill({
+  status,
+  label,
+  shape = 'square',
+  dot = true,
+}: {
+  status?: string;
+  label?: string;
+  shape?: 'square' | 'pill';
+  dot?: boolean;
+}) {
+  const key = String(status ?? '').toUpperCase().replace(/[\s-]/g, '_');
+  const cfg = STATUS_MAP[key] ?? {
+    tone: 'neutral' as BadgeTone,
+    label: (status ?? '—').replace(/_/g, ' '),
+  };
+  return <Badge label={label ?? cfg.label} tone={cfg.tone} shape={shape} dot={dot} />;
 }
 
 // ── PipelineBadge: distinct hue per quote stage ────────────────────────────

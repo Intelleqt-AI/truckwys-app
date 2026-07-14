@@ -65,7 +65,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
       footer={<Button label="Delete vehicle" variant="danger" icon="x" onPress={confirmDelete} fullWidth />}
     >
-      <View className="mb-4">
+      <View className="mb-4 flex-row">
         <StatusPill status={status} />
       </View>
 

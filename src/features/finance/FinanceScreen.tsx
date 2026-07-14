@@ -88,7 +88,7 @@ function InvoicesTab() {
                   {formatCurrency(item.total, { maximumFractionDigits: 0 })}
                 </Mono>
                 <View className="flex-row items-center gap-1.5">
-                  {item.earlyPayEligible && <Badge label="Fast Pay" className="bg-info-bg" textClassName="text-info" />}
+                  {item.earlyPayEligible && <Badge label="Fast Pay" tone="info" />}
                   <StatusPill status={item.status} />
                 </View>
               </View>

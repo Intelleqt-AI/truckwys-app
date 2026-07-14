@@ -49,7 +49,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     >
       <View className="mb-4 flex-row items-center gap-2.5">
         <StatusPill status={str(pick(inv, ['status']), 'UNPAID')} />
-        {eligible && <Badge label="Fast Pay eligible" className="bg-info-bg" textClassName="text-info" />}
+        {eligible && <Badge label="Fast Pay eligible" tone="info" />}
       </View>
 
       <View className="mb-5 flex-row gap-3">

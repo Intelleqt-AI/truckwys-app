@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, TextInput, Modal, ScrollView } from 'react-native';
+import { View, Pressable, TextInput, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -36,7 +36,7 @@ import {
 } from './api';
 import { useCustomers } from '@/features/customers/api';
 import { num, str, pick, asArray } from '@/lib/api/list';
-import { formatCurrency, formatDuration } from '@/lib/formatters';
+import { formatCurrency, formatCurrencyCompact, formatDuration } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -119,6 +119,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null);
   const [guard, setGuard] = useState<Record<string, unknown> | null>(null);
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const [tollModal, setTollModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const savedId = useRef<string | number | null>(null);
@@ -194,6 +196,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!ready || !pickup || !delivery) return;
     const id = ++routeReq.current;
     const t = setTimeout(async () => {
+      setRouteBusy(true);
       try {
         const res = await calculateRoute({
           origin: pickup.label,
@@ -214,6 +217,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         }
       } catch {
         /* leave prior route */
+      } finally {
+        if (id === routeReq.current) setRouteBusy(false);
       }
     }, 500);
     return () => clearTimeout(t);
@@ -293,6 +298,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!routeData || costs.total <= 0 || !pickup || !delivery) return;
     const id = ++aiReq.current;
     const t = setTimeout(async () => {
+      setAiBusy(true);
       const [a, g] = await Promise.all([
         analyzeQuote({
           quote_total: costs.total,
@@ -321,6 +327,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       if (id === aiReq.current) {
         setAnalysis(a);
         setGuard(g);
+        setAiBusy(false);
       }
       benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType).catch(() => null);
     }, 700);
@@ -516,39 +523,50 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <View className="p-4">
                   {/* Recommended price — full width */}
                   <Label className="text-faint">Recommended price</Label>
-                  <Mono className="mt-1 text-accent" style={{ fontSize: 26, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatCurrency(recPrice)}
-                  </Mono>
+                  {aiBusy && !analysis ? (
+                    <View className="mt-2 flex-row items-center gap-2">
+                      <ActivityIndicator size="small" color="#4D9EFF" />
+                      <Mono className="text-callout text-muted">Optimising price…</Mono>
+                    </View>
+                  ) : (
+                    <Mono className="mt-1 text-accent" style={{ fontSize: 26, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit>
+                      {formatCurrency(recPrice)}
+                    </Mono>
+                  )}
 
                   {/* Margin + win probability */}
-                  <View className="mt-4 flex-row gap-4">
+                  <View className="mt-4 flex-row gap-8">
                     <View className="flex-1">
                       <Label className="text-faint">Margin</Label>
-                      <View className="mt-1 flex-row items-baseline gap-2">
-                        <Mono className="text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
-                          {Math.round(optMargin)}%
-                        </Mono>
-                        <Mono className="text-micro text-success">{formatCurrency(expProfit)} profit</Mono>
-                      </View>
+                      <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
+                        {aiBusy && !analysis ? '—' : `${Math.round(optMargin)}%`}
+                      </Mono>
+                      {!(aiBusy && !analysis) && (
+                        <Mono className="text-micro text-success">{formatCurrencyCompact(expProfit)} profit</Mono>
+                      )}
                     </View>
                     <View className="flex-1">
                       <Label className="text-faint">Win probability</Label>
-                      <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
-                        {winProb > 0 ? `${Math.round(winProb * 100)}%` : '—'}
+                      <Mono className="mt-1 text-fg" style={{ fontSize: 15, fontWeight: '600' }}>
+                        {aiBusy && !analysis ? '—' : winProb > 0 ? `${Math.round(winProb * 100)}%` : '—'}
                       </Mono>
-                      <View className="mt-1 h-1 overflow-hidden rounded-pill bg-surface-hover">
+                      <View className="mt-1.5 h-1 overflow-hidden rounded-pill bg-surface-hover">
                         <View style={{ width: `${Math.min(100, Math.round(winProb * 100))}%`, height: '100%' }} className="bg-accent" />
                       </View>
                     </View>
                   </View>
 
-                  {/* Profit sweet-spot — full width */}
-                  {curveData.length > 1 && (
-                    <View className="mt-4">
-                      <Label className="mb-1 text-faint">Profit sweet-spot</Label>
+                  {/* Profit sweet-spot — full width, tap to inspect */}
+                  <View className="mt-4">
+                    <Label className="mb-1 text-faint">Profit sweet-spot · tap to inspect</Label>
+                    {aiBusy && !analysis ? (
+                      <View style={{ height: 56 }} className="items-center justify-center">
+                        <ActivityIndicator size="small" color="#4D9EFF" />
+                      </View>
+                    ) : (
                       <ProfitCurve points={curveData} optimalMargin={Math.round(optMargin)} height={56} />
-                    </View>
-                  )}
+                    )}
+                  </View>
 
                   {(num(pick(opt, ['optimal_price'])) > 0 || num(pick(analysis ?? {}, ['suggested_price'])) > 0) && (
                     <Button label="Apply recommended" variant="secondary" icon="sparkle" onPress={applyRecommended} fullWidth className="mt-4" />

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { View, type LayoutChangeEvent } from 'react-native';
-import Svg, { Path, Line, Defs, LinearGradient, Stop } from 'react-native-svg';
+import { View, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native';
+import Svg, { Path, Line, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Mono } from './Text';
+import { formatCurrencyCompact } from '@/lib/formatters';
 
 export interface CurvePoint {
   margin: number;
@@ -9,7 +10,7 @@ export interface CurvePoint {
 }
 
 // Profit-vs-margin "sweet-spot" sparkline (area + dashed reference at optimal
-// margin). Mirrors the web QuoteBuilder chart; x = margin, y = expected profit.
+// margin). Tap/drag to inspect a point — shows its margin% + expected profit.
 export function ProfitCurve({
   points,
   optimalMargin,
@@ -22,6 +23,7 @@ export function ProfitCurve({
   color?: string;
 }) {
   const [w, setW] = useState(0);
+  const [active, setActive] = useState<number | null>(null);
   const onLayout = (e: LayoutChangeEvent) => setW(e.nativeEvent.layout.width);
 
   if (points.length < 2) {
@@ -49,23 +51,63 @@ export function ProfitCurve({
   const area = `${line} L${sx(maxX).toFixed(1)},${height - pad} L${sx(minX).toFixed(1)},${height - pad} Z`;
   const refX = optimalMargin != null ? sx(optimalMargin) : null;
 
+  const pick = (e: GestureResponderEvent) => {
+    if (!w) return;
+    const x = e.nativeEvent.locationX;
+    let best = 0;
+    let bestD = Infinity;
+    sorted.forEach((p, i) => {
+      const d = Math.abs(sx(p.margin) - x);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    setActive(best);
+  };
+
+  const sel = active != null ? sorted[active] : null;
+
   return (
-    <View onLayout={onLayout} style={{ height }}>
-      {w > 0 && (
-        <Svg width={w} height={height}>
-          <Defs>
-            <LinearGradient id="pc" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={color} stopOpacity={0.35} />
-              <Stop offset="1" stopColor={color} stopOpacity={0.02} />
-            </LinearGradient>
-          </Defs>
-          <Path d={area} fill="url(#pc)" />
-          <Path d={line} stroke={color} strokeWidth={1.5} fill="none" />
-          {refX != null && (
-            <Line x1={refX} y1={pad} x2={refX} y2={height - pad} stroke={color} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
-          )}
-        </Svg>
-      )}
+    <View>
+      <View style={{ height: 16 }} className="flex-row justify-end">
+        {sel && (
+          <Mono className="text-micro text-fg">
+            {sel.margin}% · {formatCurrencyCompact(sel.profit)}
+          </Mono>
+        )}
+      </View>
+      <View
+        onLayout={onLayout}
+        style={{ height }}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={pick}
+        onResponderMove={pick}
+        onResponderRelease={() => setActive(null)}
+      >
+        {w > 0 && (
+          <Svg width={w} height={height}>
+            <Defs>
+              <LinearGradient id="pc" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={color} stopOpacity={0.35} />
+                <Stop offset="1" stopColor={color} stopOpacity={0.02} />
+              </LinearGradient>
+            </Defs>
+            <Path d={area} fill="url(#pc)" />
+            <Path d={line} stroke={color} strokeWidth={1.5} fill="none" />
+            {refX != null && (
+              <Line x1={refX} y1={pad} x2={refX} y2={height - pad} stroke={color} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
+            )}
+            {sel && (
+              <>
+                <Line x1={sx(sel.margin)} y1={pad} x2={sx(sel.margin)} y2={height - pad} stroke="#888888" strokeWidth={1} />
+                <Circle cx={sx(sel.margin)} cy={sy(sel.profit)} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
+              </>
+            )}
+          </Svg>
+        )}
+      </View>
     </View>
   );
 }

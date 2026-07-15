@@ -506,13 +506,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   );
                 })}
               </ScrollView>
-              <View className="mt-2 flex-row flex-wrap gap-x-4 gap-y-1">
-                <Meta label="Duration" value={costs.duration ? formatDuration(costs.duration / 60) : '—'} />
-                <Meta label="Fuel" value={formatCurrency(num(pick(currentRoute, ['fuel_cost_zar'])))} />
-                <Meta label="Tolls" value={formatCurrency(num(pick(currentRoute, ['toll_cost_zar'])))} />
-                <Meta label="Total" value={formatCurrency(num(pick(currentRoute, ['total_cost_zar'])))} />
-                {pick(currentRoute, ['road_type']) ? <Meta label="Road" value={str(pick(currentRoute, ['road_type']))} /> : null}
-              </View>
             </View>
           )}
 
@@ -521,37 +514,44 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               {/* AI recommendation card */}
               <Group label="AI recommendation">
                 <View className="p-4">
-                  <View className="flex-row flex-wrap gap-y-3">
-                    <View style={{ width: '50%' }}>
-                      <Label className="text-faint">Recommended price</Label>
-                      <Mono className="mt-1 text-accent" style={{ fontSize: 22, fontWeight: '600' }}>
-                        {formatCurrency(recPrice)}
-                      </Mono>
-                    </View>
-                    <View style={{ width: '50%' }}>
+                  {/* Recommended price — full width */}
+                  <Label className="text-faint">Recommended price</Label>
+                  <Mono className="mt-1 text-accent" style={{ fontSize: 26, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit>
+                    {formatCurrency(recPrice)}
+                  </Mono>
+
+                  {/* Margin + win probability */}
+                  <View className="mt-4 flex-row gap-4">
+                    <View className="flex-1">
                       <Label className="text-faint">Margin</Label>
-                      <Mono className="mt-1 text-fg" style={{ fontSize: 22, fontWeight: '600' }}>
-                        {Math.round(optMargin)}%
-                      </Mono>
-                      <Mono className="text-micro text-success">{formatCurrency(expProfit)} profit</Mono>
+                      <View className="mt-1 flex-row items-baseline gap-2">
+                        <Mono className="text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
+                          {Math.round(optMargin)}%
+                        </Mono>
+                        <Mono className="text-micro text-success">{formatCurrency(expProfit)} profit</Mono>
+                      </View>
                     </View>
-                    <View style={{ width: '50%' }}>
+                    <View className="flex-1">
                       <Label className="text-faint">Win probability</Label>
-                      <Mono className="mt-1 text-fg" style={{ fontSize: 16, fontWeight: '600' }}>
+                      <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
                         {winProb > 0 ? `${Math.round(winProb * 100)}%` : '—'}
                       </Mono>
                       <View className="mt-1 h-1 overflow-hidden rounded-pill bg-surface-hover">
-                        <View style={{ width: `${Math.round(winProb * 100)}%`, height: '100%' }} className="bg-accent" />
+                        <View style={{ width: `${Math.min(100, Math.round(winProb * 100))}%`, height: '100%' }} className="bg-accent" />
                       </View>
-                    </View>
-                    <View style={{ width: '50%' }} className="pl-3">
-                      <Label className="text-faint">Profit sweet-spot</Label>
-                      <ProfitCurve points={curveData} optimalMargin={Math.round(optMargin)} height={54} />
                     </View>
                   </View>
 
+                  {/* Profit sweet-spot — full width */}
+                  {curveData.length > 1 && (
+                    <View className="mt-4">
+                      <Label className="mb-1 text-faint">Profit sweet-spot</Label>
+                      <ProfitCurve points={curveData} optimalMargin={Math.round(optMargin)} height={56} />
+                    </View>
+                  )}
+
                   {(num(pick(opt, ['optimal_price'])) > 0 || num(pick(analysis ?? {}, ['suggested_price'])) > 0) && (
-                    <Button label="Apply recommended" variant="secondary" icon="sparkle" onPress={applyRecommended} fullWidth className="mt-3" />
+                    <Button label="Apply recommended" variant="secondary" icon="sparkle" onPress={applyRecommended} fullWidth className="mt-4" />
                   )}
                 </View>
 
@@ -661,14 +661,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <View className="flex-row items-center gap-1.5">
-      <Label className="text-faint">{label}</Label>
-      <Mono className="text-caption text-muted">{value}</Mono>
-    </View>
-  );
-}
 
 // ── Location autocomplete with coordinates ──────────────────────────────────
 function LocationField({

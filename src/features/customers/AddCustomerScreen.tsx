@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, TextField, SelectField, Button, Label, type IconName } from '@/components/ui';
+import { SheetScreen, TextField, SelectField, Button, type IconName } from '@/components/ui';
 import { createCustomer, updateCustomer } from './api';
 import { str, num, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';

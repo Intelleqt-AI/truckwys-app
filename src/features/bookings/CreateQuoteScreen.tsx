@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, TextInput } from 'react-native';
+import { View, Pressable, TextInput, Modal, ScrollView } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import {
   Group,
   DetailRow,
   RoutePreview,
+  ProfitCurve,
   SegmentedControl,
   SelectField,
   TextField,
@@ -17,11 +18,13 @@ import {
   Txt,
   Mono,
   Label,
+  type CurvePoint,
 } from '@/components/ui';
 import {
   useVehicleTypes,
   useCompanyProfileData,
   useFuelPrice,
+  useModelStats,
   suggestLocations,
   calculateRoute,
   analyzeQuote,
@@ -33,7 +36,7 @@ import {
 } from './api';
 import { useCustomers } from '@/features/customers/api';
 import { num, str, pick, asArray } from '@/lib/api/list';
-import { formatCurrency } from '@/lib/formatters';
+import { formatCurrency, formatDuration } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -93,6 +96,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const { data: vtypes } = useVehicleTypes();
   const { data: company } = useCompanyProfileData();
   const { data: fuel } = useFuelPrice();
+  const { data: modelStats } = useModelStats();
 
   const [customerId, setCustomerId] = useState('');
   const [vehicleType, setVehicleType] = useState('');
@@ -100,7 +104,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [delivery, setDelivery] = useState<Loc | null>(null);
   const [weight, setWeight] = useState(str(prefill?.weight, '28'));
   const [pickupDate, setPickupDate] = useState('');
-  const [deliveryDate] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState('');
   const [validUntil, setValidUntil] = useState(plusDays(7));
   const [cargo, setCargo] = useState(str(prefill?.cargo_description));
   const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ROUND_TRIP');
@@ -112,8 +116,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [serviceCharge, setServiceCharge] = useState(0);
 
   const [routeData, setRouteData] = useState<Record<string, unknown> | null>(null);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null);
   const [guard, setGuard] = useState<Record<string, unknown> | null>(null);
+  const [tollModal, setTollModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const savedId = useRef<string | number | null>(null);
   const routeReq = useRef(0);
@@ -157,6 +163,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
       setValidUntil(str(pick(q, ['valid_until'])) || plusDays(7));
       setPickupDate(str(pick(q, ['pickup_date'])));
+      setDeliveryDate(str(pick(q, ['delivery_date'])));
       savedId.current = editId ?? null;
       setRouteData({
         distance_km: dist,
@@ -203,6 +210,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         });
         if (id === routeReq.current && (res as { success?: boolean }).success !== false) {
           setRouteData(res);
+          setSelectedRouteIndex(num(pick(res, ['best_index'])) || 0);
         }
       } catch {
         /* leave prior route */
@@ -211,16 +219,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     return () => clearTimeout(t);
   }, [ready, pickup, delivery, vehicleType, weight]);
 
+  const routes = useMemo(
+    () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
+    [routeData],
+  );
+  const currentRoute = useMemo(
+    () => (routes[selectedRouteIndex] ?? routes[0] ?? {}) as Record<string, unknown>,
+    [routes, selectedRouteIndex],
+  );
+
   // ── Cost breakdown ──────────────────────────────────────────────────────
   const costs = useMemo(() => {
-    const bestRoute = (() => {
-      const routes = asArray(pick(routeData ?? {}, ['routes']));
-      const bi = num(pick(routeData ?? {}, ['best_index']));
-      return (routes[bi] ?? routes[0] ?? {}) as Record<string, unknown>;
-    })();
-    const distance = num(pick(bestRoute, ['distance_km'])) || num(pick(routeData ?? {}, ['distance_km']));
+    const distance = num(pick(currentRoute, ['distance_km'])) || num(pick(routeData ?? {}, ['distance_km']));
     const legs = tripType === 'ROUND_TRIP' ? 2 : 1;
     const chargeDistance = distance * legs;
+    const surchargePctBase = num(pick(company ?? {}, ['weight_surcharge_pct'])) || 15;
 
     const consumption =
       (vtypes ?? []).find((v) => v.name === vehicleType)?.fuel_consumption_l_per_100km ??
@@ -230,8 +243,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const fuelCost = Math.round((chargeDistance * consumption * fuelPrice) / 100);
 
     const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
-    const routeToll = num(pick(bestRoute, ['toll_cost_zar'])) || num(pick(routeData ?? {}, ['toll_cost_zar'])) || distance * tollRate;
-    const tollCost = tollEdited ? Number(tollOverride) || 0 : Math.round(routeToll * legs);
+    const routeTollOneWay = num(pick(currentRoute, ['toll_cost_zar'])) || num(pick(routeData ?? {}, ['toll_cost_zar'])) || distance * tollRate;
+    const tollCost = tollEdited ? Number(tollOverride) || 0 : Math.round(routeTollOneWay * legs);
+    const tollBreakdown = (asArray(pick(currentRoute, ['toll_breakdown'])).length
+      ? asArray(pick(currentRoute, ['toll_breakdown']))
+      : asArray(pick(routeData ?? {}, ['toll_breakdown']))) as Record<string, unknown>[];
 
     const add = (pick(routeData ?? {}, ['additional_costs']) ?? {}) as Record<string, unknown>;
     const crossBorderCost = Math.round(
@@ -240,25 +256,28 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
     const weightKg = Number(weight) * 1000 || 0;
     const threshold = num(pick(company ?? {}, ['weight_surcharge_threshold_kg'])) || 5000;
-    const pct = num(pick(company ?? {}, ['weight_surcharge_pct'])) || 15;
     const baseCost = Math.round(chargeDistance * (Number(baseRatePerKm) || 0));
-    const weightSurcharge = weightKg > threshold ? Math.round((baseCost * pct) / 100) : 0;
+    const weightSurcharge = weightKg > threshold ? Math.round((baseCost * surchargePctBase) / 100) : 0;
     const driver = Number(driverAllowance) || 0;
 
     const total = baseCost + fuelCost + tollCost + crossBorderCost + driver + weightSurcharge + serviceCharge;
     const directCost = total - serviceCharge;
     const marginPct = total > 0 ? Math.round(((total - directCost) / total) * 100) : 0;
-    const duration = num(pick(bestRoute, ['duration_minutes'])) || num(pick(bestRoute, ['duration_min']));
+    const duration = num(pick(currentRoute, ['duration_minutes'])) || num(pick(currentRoute, ['duration_min']));
 
     return {
       distance,
+      legs,
       chargeDistance,
+      consumption,
       fuelCost,
       tollCost,
-      routeToll: Math.round(routeToll * legs),
+      tollBreakdownOneWay: Math.round(routeTollOneWay),
+      tollBreakdown,
       crossBorderCost,
       baseCost,
       weightSurcharge,
+      surchargePct: surchargePctBase,
       driver,
       total,
       directCost,
@@ -267,7 +286,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       fuelUsage: Math.round((chargeDistance * consumption) / 100),
       fuelPrice,
     };
-  }, [routeData, tripType, vtypes, vehicleType, fuel, company, weight, baseRatePerKm, tollEdited, tollOverride, driverAllowance, serviceCharge]);
+  }, [currentRoute, routeData, tripType, vtypes, vehicleType, fuel, company, weight, baseRatePerKm, tollEdited, tollOverride, driverAllowance, serviceCharge]);
 
   // AI analyze + guard (debounced 700ms, stale-guarded).
   useEffect(() => {
@@ -306,12 +325,28 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType).catch(() => null);
     }, 700);
     return () => clearTimeout(t);
-  }, [routeData, costs, pickup, delivery, vehicleType, weight]);
+  }, [routeData, costs, pickup, delivery, vehicleType, weight, selectedRouteIndex]);
 
-  const opt = (pick(analysis ?? {}, ['price_optimization']) ?? {}) as Record<string, unknown>;
+  const opt = useMemo(
+    () => (pick(analysis ?? {}, ['price_optimization']) ?? {}) as Record<string, unknown>,
+    [analysis],
+  );
   const recPrice = num(pick(opt, ['optimal_price'])) || num(pick(analysis ?? {}, ['suggested_price'])) || costs.total;
+  const optMargin = num(pick(opt, ['optimal_margin_pct'])) || costs.marginPct;
   const winProb = num(pick(opt, ['win_probability_at_optimal']));
+  const expProfit = pick(opt, ['expected_profit']) != null ? num(pick(opt, ['expected_profit'])) : recPrice - costs.directCost;
   const riskLevel = str(pick(guard ?? {}, ['risk_level']), 'SAFE');
+  const curveData = useMemo<CurvePoint[]>(
+    () =>
+      asArray(pick(opt, ['curve'])).map((c) => {
+        const o = c as Record<string, unknown>;
+        const m = pick(o, ['margin_pct']) != null ? num(pick(o, ['margin_pct'])) : num(pick(o, ['margin'])) * 100;
+        return { margin: Math.round(m), profit: Math.round(num(pick(o, ['expected_profit']))) };
+      }),
+    [opt],
+  );
+  const winModel = (pick(modelStats ?? {}, ['win_model']) ?? {}) as Record<string, unknown>;
+  const aiLearning = str(pick(winModel, ['mode'])) === 'heuristic';
   const guardMsg =
     (asArray<string>(pick(guard ?? {}, ['explanations']))[0] as unknown as string) ||
     (asArray<string>(pick(guard ?? {}, ['warnings']))[0] as unknown as string) ||
@@ -431,9 +466,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             <DateField label="Pickup date" value={pickupDate} onChange={setPickupDate} />
           </View>
           <View className="flex-1">
-            <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />
+            <DateField label="Delivery date" value={deliveryDate} onChange={setDeliveryDate} />
           </View>
         </View>
+        <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />
       </View>
 
       {/* Route + estimate */}
@@ -443,103 +479,193 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             origin={pickup!.label}
             dest={delivery!.label}
             distance={costs.distance ? `${Math.round(costs.chargeDistance)} km` : 'Calculating…'}
-            duration={costs.duration ? `${Math.round(costs.duration / 60)}h ${Math.round(costs.duration % 60)}m` : undefined}
+            duration={costs.duration ? formatDuration(costs.duration / 60) : undefined}
           />
+
+          {/* Alternative routes */}
+          {routes.length > 1 && (
+            <View>
+              <Label className="mb-2 text-muted">Alternative routes</Label>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {routes.map((r, i) => {
+                  const active = i === selectedRouteIndex;
+                  return (
+                    <Pressable
+                      key={i}
+                      onPress={() => {
+                        setSelectedRouteIndex(i);
+                        setAnalysis(null);
+                        setGuard(null);
+                      }}
+                      className={`min-h-[34px] justify-center rounded-xs border px-3 ${active ? 'border-accent bg-accent-dim' : 'border-line bg-surface'}`}
+                    >
+                      <Mono className={`text-micro tracking-wide uppercase ${active ? 'text-accent' : 'text-muted'}`}>
+                        {str(pick(r, ['label', 'summary']), `Route ${i + 1}`)} · {Math.round(num(pick(r, ['distance_km'])))} km
+                      </Mono>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <View className="mt-2 flex-row flex-wrap gap-x-4 gap-y-1">
+                <Meta label="Duration" value={costs.duration ? formatDuration(costs.duration / 60) : '—'} />
+                <Meta label="Fuel" value={formatCurrency(num(pick(currentRoute, ['fuel_cost_zar'])))} />
+                <Meta label="Tolls" value={formatCurrency(num(pick(currentRoute, ['toll_cost_zar'])))} />
+                <Meta label="Total" value={formatCurrency(num(pick(currentRoute, ['total_cost_zar'])))} />
+                {pick(currentRoute, ['road_type']) ? <Meta label="Road" value={str(pick(currentRoute, ['road_type']))} /> : null}
+              </View>
+            </View>
+          )}
 
           {costs.total > 0 && (
             <>
-              {/* AI recommendation */}
-              <View className="rounded-xs border border-accent bg-surface px-4 py-3.5">
-                <View className="flex-row items-center justify-between">
-                  <View>
-                    <Label className="text-accent" style={{ fontSize: 10 }}>
-                      Recommended{costs.marginPct ? ` · ${costs.marginPct}% margin` : ''}
-                    </Label>
-                    <Mono className="mt-1 text-fg" style={{ fontSize: 24, fontWeight: '600' }}>
-                      {formatCurrency(recPrice)}
-                    </Mono>
-                  </View>
-                  {winProb > 0 && (
-                    <View className="items-end">
-                      <Label className="text-faint">Win prob</Label>
-                      <Mono className="text-accent" style={{ fontSize: 16, fontWeight: '600' }}>
-                        {Math.round(winProb * 100)}%
+              {/* AI recommendation card */}
+              <Group label="AI recommendation">
+                <View className="p-4">
+                  <View className="flex-row flex-wrap gap-y-3">
+                    <View style={{ width: '50%' }}>
+                      <Label className="text-faint">Recommended price</Label>
+                      <Mono className="mt-1 text-accent" style={{ fontSize: 22, fontWeight: '600' }}>
+                        {formatCurrency(recPrice)}
                       </Mono>
                     </View>
+                    <View style={{ width: '50%' }}>
+                      <Label className="text-faint">Margin</Label>
+                      <Mono className="mt-1 text-fg" style={{ fontSize: 22, fontWeight: '600' }}>
+                        {Math.round(optMargin)}%
+                      </Mono>
+                      <Mono className="text-micro text-success">{formatCurrency(expProfit)} profit</Mono>
+                    </View>
+                    <View style={{ width: '50%' }}>
+                      <Label className="text-faint">Win probability</Label>
+                      <Mono className="mt-1 text-fg" style={{ fontSize: 16, fontWeight: '600' }}>
+                        {winProb > 0 ? `${Math.round(winProb * 100)}%` : '—'}
+                      </Mono>
+                      <View className="mt-1 h-1 overflow-hidden rounded-pill bg-surface-hover">
+                        <View style={{ width: `${Math.round(winProb * 100)}%`, height: '100%' }} className="bg-accent" />
+                      </View>
+                    </View>
+                    <View style={{ width: '50%' }} className="pl-3">
+                      <Label className="text-faint">Profit sweet-spot</Label>
+                      <ProfitCurve points={curveData} optimalMargin={Math.round(optMargin)} height={54} />
+                    </View>
+                  </View>
+
+                  {(num(pick(opt, ['optimal_price'])) > 0 || num(pick(analysis ?? {}, ['suggested_price'])) > 0) && (
+                    <Button label="Apply recommended" variant="secondary" icon="sparkle" onPress={applyRecommended} fullWidth className="mt-3" />
                   )}
                 </View>
-                {Math.abs(recPrice - costs.total) > 1 && (
-                  <Pressable onPress={applyRecommended} className="mt-2 self-start">
-                    <Mono className="text-micro tracking-wide uppercase text-accent">Apply recommended →</Mono>
-                  </Pressable>
+
+                {riskLevel !== 'SAFE' && (
+                  <View className={`flex-row items-center gap-2.5 border-t border-line p-3 ${riskLevel === 'AT_RISK' ? 'bg-danger-bg' : 'bg-warning-bg'}`}>
+                    <Icon name="alert" size={16} color={riskLevel === 'AT_RISK' ? '#FF4949' : '#F59E0B'} />
+                    <Txt className="flex-1 text-sub text-muted">{guardMsg}</Txt>
+                  </View>
                 )}
-              </View>
 
-              {riskLevel !== 'SAFE' && (
-                <View className={`flex-row items-center gap-2.5 rounded-xs border p-3 ${riskLevel === 'AT_RISK' ? 'border-danger bg-danger-bg' : 'border-warning bg-warning-bg'}`}>
-                  <Icon name="alert" size={17} color={riskLevel === 'AT_RISK' ? '#FF4949' : '#F59E0B'} />
-                  <Txt className="flex-1 text-sub text-muted">{guardMsg}</Txt>
-                </View>
-              )}
+                {aiLearning && (
+                  <View className="flex-row gap-2.5 border-t border-line bg-warning-bg p-3">
+                    <Icon name="sparkle" size={16} color="#F59E0B" />
+                    <Txt className="flex-1 text-sub text-muted">
+                      <Txt className="text-sub font-semibold text-fg">AI pricing is still learning your fleet. </Txt>
+                      Priced on true cost + your {vehicleType} base rate for now — needs ~
+                      {num(pick(winModel, ['outcomes_needed']))} completed loads (
+                      {num(pick(winModel, ['outcomes_collected']))}/{num(pick(winModel, ['outcomes_needed']))} logged).
+                    </Txt>
+                  </View>
+                )}
+              </Group>
 
-              <Group label="Cost breakdown">
-                <DetailRow label="Base rate" value={formatCurrency(costs.baseCost)} />
-                <DetailRow label="Fuel" value={formatCurrency(costs.fuelCost)} />
-                <TollRow value={tollEdited ? tollOverride : String(costs.tollCost)} onEdit={(v) => { setTollEdited(true); setTollOverride(v); }} />
-                {costs.crossBorderCost > 0 && <DetailRow label="Cross-border" value={formatCurrency(costs.crossBorderCost)} />}
-                {costs.weightSurcharge > 0 && <DetailRow label="Weight surcharge" value={formatCurrency(costs.weightSurcharge)} />}
-                <DriverRow value={driverAllowance} onEdit={setDriverAllowance} />
+              {/* Cost breakdown */}
+              <Group label={`Cost breakdown · ${vehicleType || '—'}`}>
+                <DetailRow label={`Fuel — ${costs.consumption} L/100km @ R${costs.fuelPrice}`} value={formatCurrency(costs.fuelCost)} />
+                <Pressable onPress={() => setTollModal(true)} className="flex-row items-center justify-between border-b border-line-row px-3.5 py-3">
+                  <View className="flex-row items-center gap-1.5">
+                    <Txt className="text-callout text-muted">Tolls (SA plazas)</Txt>
+                    <Icon name="alert" size={13} color="#888888" />
+                  </View>
+                  <Mono className="text-sub font-medium text-fg">{formatCurrency(costs.tollCost)}</Mono>
+                </Pressable>
+                {costs.crossBorderCost > 0 && <DetailRow label="Cross-border / weighbridge" value={formatCurrency(costs.crossBorderCost)} />}
+                <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} />
+                {costs.weightSurcharge > 0 && <DetailRow label={`Weight surcharge (${costs.surchargePct}%)`} value={formatCurrency(costs.weightSurcharge)} />}
+                <DetailRow label={`Base rate (${vehicleType || '—'} · R${baseRatePerKm || 0}/km)`} value={formatCurrency(costs.baseCost)} />
                 {serviceCharge !== 0 && <DetailRow label="Service adjustment" value={formatCurrency(serviceCharge)} />}
                 <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
-                  <Txt className="text-callout font-semibold text-fg">Total · {costs.marginPct}% margin</Txt>
+                  <Txt className="text-callout font-semibold text-fg">Quote total · {costs.marginPct}% margin</Txt>
                   <Mono className="text-heading font-semibold text-accent">{formatCurrency(costs.total)}</Mono>
                 </View>
+                <View className="px-3.5 py-2">
+                  <Mono className="text-micro text-faint">
+                    {Math.round(costs.distance)} km one way · {Math.round(costs.chargeDistance)} km {tripType === 'ROUND_TRIP' ? 'round trip' : 'total'}
+                  </Mono>
+                </View>
               </Group>
+
+              {/* Editable overrides */}
+              <View className="flex-row gap-3">
+                <View className="flex-1">
+                  <TextField
+                    label="Tolls (R)"
+                    keyboardType="numeric"
+                    value={tollEdited ? tollOverride : String(costs.tollCost)}
+                    onChangeText={(v) => {
+                      setTollEdited(true);
+                      setTollOverride(v);
+                    }}
+                  />
+                </View>
+                <View className="flex-1">
+                  <TextField label="Driver (R)" keyboardType="numeric" value={driverAllowance} onChangeText={setDriverAllowance} />
+                </View>
+                <View className="flex-1">
+                  <TextField label="R / km" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
+                </View>
+              </View>
             </>
           )}
         </View>
       )}
+
+      {/* Toll plaza breakdown modal */}
+      <Modal visible={tollModal} transparent animationType="fade" onRequestClose={() => setTollModal(false)}>
+        <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={() => setTollModal(false)}>
+          <Pressable className="rounded-md border border-line bg-elevated p-4" onPress={(e) => e.stopPropagation()}>
+            <Label className="mb-3 text-muted">Toll plazas on this route</Label>
+            {costs.tollBreakdown.length === 0 ? (
+              <Txt className="text-callout text-muted">No SANRAL plazas matched on this route.</Txt>
+            ) : (
+              <View>
+                {costs.tollBreakdown.map((b, i) => (
+                  <View key={i} className="flex-row items-center justify-between border-b border-line-row py-2">
+                    <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
+                      {str(pick(b, ['plaza']), 'Plaza')}
+                      {pick(b, ['route']) ? ` (${str(pick(b, ['route']))})` : ''}
+                    </Txt>
+                    <Mono className="text-sub text-muted">{formatCurrency(num(pick(b, ['tariff'])))}</Mono>
+                  </View>
+                ))}
+                <View className="mt-2 flex-row items-center justify-between">
+                  <Txt className="text-callout font-semibold text-fg">One way total</Txt>
+                  <Mono className="text-callout font-semibold text-fg">{formatCurrency(costs.tollBreakdownOneWay)}</Mono>
+                </View>
+                {costs.legs === 2 && (
+                  <Mono className="mt-1 text-micro text-faint">× 2 for round trip = {formatCurrency(costs.tollBreakdownOneWay * 2)}</Mono>
+                )}
+              </View>
+            )}
+            <Button label="Close" variant="secondary" onPress={() => setTollModal(false)} fullWidth className="mt-4" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SheetScreen>
   );
 }
 
-// Editable rows for toll + driver allowance.
-function TollRow({ value, onEdit }: { value: string; onEdit: (v: string) => void }) {
-  const { colors } = useTheme();
+function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <View className="flex-row items-center justify-between border-b border-line-row px-3.5 py-2.5">
-      <Txt className="text-callout text-muted">Tolls</Txt>
-      <View className="flex-row items-center gap-1">
-        <Mono className="text-sub text-faint">R</Mono>
-        <TextInput
-          className="min-w-[70px] text-right text-sub text-fg"
-          keyboardType="numeric"
-          value={value}
-          onChangeText={onEdit}
-          style={{ fontFamily: 'Menlo' }}
-          placeholderTextColor={colors.faint}
-        />
-      </View>
-    </View>
-  );
-}
-
-function DriverRow({ value, onEdit }: { value: string; onEdit: (v: string) => void }) {
-  const { colors } = useTheme();
-  return (
-    <View className="flex-row items-center justify-between border-b border-line-row px-3.5 py-2.5">
-      <Txt className="text-callout text-muted">Driver allowance</Txt>
-      <View className="flex-row items-center gap-1">
-        <Mono className="text-sub text-faint">R</Mono>
-        <TextInput
-          className="min-w-[70px] text-right text-sub text-fg"
-          keyboardType="numeric"
-          value={value}
-          onChangeText={onEdit}
-          style={{ fontFamily: 'Menlo' }}
-          placeholderTextColor={colors.faint}
-        />
-      </View>
+    <View className="flex-row items-center gap-1.5">
+      <Label className="text-faint">{label}</Label>
+      <Mono className="text-caption text-muted">{value}</Mono>
     </View>
   );
 }

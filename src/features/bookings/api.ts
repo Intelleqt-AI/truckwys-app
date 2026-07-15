@@ -69,6 +69,16 @@ export function useFuelPrice() {
   });
 }
 
+// Win-model training status — drives the "still learning" banner.
+export function useModelStats() {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['quote-model-stats'],
+    queryFn: () => fetchData('quotes/model-stats/'),
+    retry: false,
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
 // ── Quote builder network calls ─────────────────────────────────────────────
 export const suggestLocations = (q: string) =>
   fetchData<unknown>(`location/suggest/?q=${encodeURIComponent(q)}`);

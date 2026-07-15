@@ -11,6 +11,7 @@ import {
   SegmentedControl,
   SelectField,
   TextField,
+  DateField,
   Button,
   Icon,
   Txt,
@@ -427,10 +428,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <TextField label="Cargo" placeholder="e.g. Steel coils" value={cargo} onChangeText={setCargo} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Pickup date" placeholder="YYYY-MM-DD" value={pickupDate} onChangeText={setPickupDate} />
+            <DateField label="Pickup date" value={pickupDate} onChange={setPickupDate} />
           </View>
           <View className="flex-1">
-            <TextField label="Valid until" placeholder="YYYY-MM-DD" value={validUntil} onChangeText={setValidUntil} />
+            <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />
           </View>
         </View>
       </View>

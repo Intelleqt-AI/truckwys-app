@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, SelectField, TextField, Button, Label } from '@/components/ui';
+import { SheetScreen, SelectField, TextField, DateField, Button, Label } from '@/components/ui';
 import {
   createUser,
   updateUser,
@@ -169,17 +169,17 @@ export function AddDriverScreen({ route, navigation }: Props) {
         </View>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Licence expiry" placeholder="YYYY-MM-DD" value={licenseExpiry} onChangeText={setLicenseExpiry} />
+            <DateField label="Licence expiry" value={licenseExpiry} onChange={setLicenseExpiry} />
           </View>
           <View className="flex-1">
-            <TextField label="Medical expiry" placeholder="YYYY-MM-DD" value={medicalExpiry} onChangeText={setMedicalExpiry} />
+            <DateField label="Medical expiry" value={medicalExpiry} onChange={setMedicalExpiry} />
           </View>
         </View>
 
         <Label className="mt-1 text-muted">Employment</Label>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Hire date" placeholder="YYYY-MM-DD" value={hireDate} onChangeText={setHireDate} />
+            <DateField label="Hire date" value={hireDate} onChange={setHireDate} />
           </View>
           <View className="flex-1">
             <SelectField label="Status" options={STATUSES} value={status} onSelect={setStatus} />

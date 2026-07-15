@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, SelectField, TextField, Button } from '@/components/ui';
+import { SheetScreen, SelectField, TextField, DateField, Button } from '@/components/ui';
 import { createExpense } from './api';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -63,7 +63,7 @@ export function AddExpenseScreen({ navigation }: Props) {
         <SelectField label="Category" icon="dollar" options={CATEGORIES} value={category} onSelect={setCategory} />
         <TextField label="Amount (ZAR)" icon="dollar" keyboardType="numeric" value={amount} onChangeText={setAmount} />
         <TextField label="Description" placeholder="Optional note" value={description} onChangeText={setDescription} />
-        <TextField label="Date" placeholder="YYYY-MM-DD" value={date} onChangeText={setDate} />
+        <DateField label="Date" value={date} onChange={setDate} />
       </View>
     </SheetScreen>
   );

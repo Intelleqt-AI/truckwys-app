@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, SelectField, TextField, Button, DetailRow, Group } from '@/components/ui';
+import { SheetScreen, SelectField, TextField, DateField, Button, DetailRow, Group } from '@/components/ui';
 import { createInvoice } from './api';
 import { useCustomers } from '@/features/customers/api';
 import { formatCurrency } from '@/lib/formatters';
@@ -68,7 +68,7 @@ export function CreateInvoiceScreen({ navigation }: Props) {
         <SelectField label="Customer" icon="building" placeholder="Select customer" options={options} value={customerId} onSelect={setCustomerId} />
         <TextField label="Amount (excl. VAT)" icon="dollar" keyboardType="numeric" value={subtotal} onChangeText={setSubtotal} />
         <TextField label="Description" placeholder="What is this invoice for?" value={description} onChangeText={setDescription} />
-        <TextField label="Due date" placeholder="YYYY-MM-DD" value={dueDate} onChangeText={setDueDate} />
+        <DateField label="Due date" value={dueDate} onChange={setDueDate} />
 
         <Group label="Summary">
           <DetailRow label="Subtotal" value={formatCurrency(sub)} />

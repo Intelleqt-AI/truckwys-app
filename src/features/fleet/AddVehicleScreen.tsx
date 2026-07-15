@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, SelectField, TextField, Button, Label } from '@/components/ui';
+import { SheetScreen, SelectField, TextField, DateField, Button, Label } from '@/components/ui';
 import { createVehicle, updateVehicle, useVehicleTypesList, useDrivers } from './api';
 import { str, num, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
@@ -146,8 +146,8 @@ export function AddVehicleScreen({ route, navigation }: Props) {
         <SelectField label="Assigned driver" icon="user" options={driverOptions} value={driver} onSelect={setDriver} />
 
         <Label className="mt-1 text-muted">Service & compliance</Label>
-        <TextField label="Registration expiry" placeholder="YYYY-MM-DD" value={regExpiry} onChangeText={setRegExpiry} />
-        <TextField label="Last maintenance date" placeholder="YYYY-MM-DD" value={lastMaint} onChangeText={setLastMaint} />
+        <DateField label="Registration expiry" value={regExpiry} onChange={setRegExpiry} />
+        <DateField label="Last maintenance date" value={lastMaint} onChange={setLastMaint} />
         <View className="flex-row gap-3">
           <View className="flex-1">
             <TextField label="Service interval (km)" keyboardType="numeric" value={serviceInterval} onChangeText={setServiceInterval} />

@@ -36,9 +36,15 @@ export function SelectField({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const selected = options.find((o) => o.value === value);
+  // De-duplicate by value so lists (e.g. vehicle types returned more than once)
+  // never render duplicate keys.
+  const unique = useMemo(() => {
+    const seen = new Set<string>();
+    return options.filter((o) => (seen.has(o.value) ? false : (seen.add(o.value), true)));
+  }, [options]);
   const filtered = useMemo(
-    () => (q ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : options),
-    [options, q],
+    () => (q ? unique.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : unique),
+    [unique, q],
   );
 
   return (
@@ -71,7 +77,7 @@ export function SelectField({
           </View>
           <FlatList
             data={filtered}
-            keyExtractor={(o) => o.value}
+            keyExtractor={(o, i) => `${o.value}-${i}`}
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24 }}
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => {

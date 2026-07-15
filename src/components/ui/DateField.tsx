@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Pressable, Modal, Platform } from 'react-native';
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon } from './icons';
@@ -33,12 +33,6 @@ export function DateField({
   const [open, setOpen] = useState(false);
   const parsed = value ? new Date(value) : new Date();
   const current = isNaN(parsed.getTime()) ? new Date() : parsed;
-
-  const onNative = (e: DateTimePickerEvent, d?: Date) => {
-    // Android fires once and dismisses; only set on "set".
-    if (Platform.OS !== 'ios') setOpen(false);
-    if (e.type === 'set' && d) onChange(toISODate(d));
-  };
 
   return (
     <View>
@@ -76,9 +70,8 @@ export function DateField({
                 value={current}
                 mode="date"
                 display="spinner"
-                themeVariant={undefined}
                 textColor={colors.fg}
-                onChange={(_e, d) => d && onChange(toISODate(d))}
+                onValueChange={(_e, d) => d && onChange(toISODate(d))}
               />
             </Pressable>
           </Pressable>
@@ -86,7 +79,16 @@ export function DateField({
       )}
 
       {open && Platform.OS !== 'ios' && (
-        <DateTimePicker value={current} mode="date" display="default" onChange={onNative} />
+        <DateTimePicker
+          value={current}
+          mode="date"
+          display="default"
+          onValueChange={(_e, d) => {
+            setOpen(false);
+            if (d) onChange(toISODate(d));
+          }}
+          onDismiss={() => setOpen(false)}
+        />
       )}
     </View>
   );

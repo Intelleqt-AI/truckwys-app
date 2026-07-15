@@ -21,7 +21,7 @@ export type AppStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   LoadDetail: { id: Id; preview?: Record<string, unknown> };
   QuoteDetail: { id: Id; preview?: Record<string, unknown> };
-  CreateQuote: { ai?: boolean; prefill?: Record<string, unknown> } | undefined;
+  CreateQuote: { ai?: boolean; prefill?: Record<string, unknown>; quoteId?: Id } | undefined;
   AIQuoteChat: undefined;
   VehicleDetail: { id: Id; preview?: Record<string, unknown> };
   DriverDetail: { id: Id; preview?: Record<string, unknown> };

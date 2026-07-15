@@ -125,8 +125,8 @@ function VehiclesTab() {
             subtitle={item.plate}
             trailing={
               <View className="items-end gap-1">
-                {item.healthScore != null && (
-                  <Mono className="text-caption text-muted">{item.healthScore}/100</Mono>
+                {item.aiHealthScore != null && (
+                  <Mono className="text-caption text-muted">{item.aiHealthScore}/100</Mono>
                 )}
                 <StatusPill status={item.status} />
               </View>

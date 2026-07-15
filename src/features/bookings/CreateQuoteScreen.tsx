@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Pressable, TextInput } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   SheetScreen,
@@ -75,7 +76,17 @@ function plusDays(days: number): string {
 export function CreateQuoteScreen({ route, navigation }: Props) {
   const ai = route.params?.ai;
   const prefill = route.params?.prefill as Record<string, unknown> | undefined;
+  const editId = route.params?.quoteId;
+  const editing = editId != null;
   const qc = useQueryClient();
+
+  const { data: existing } = useQuery<Record<string, unknown>>({
+    queryKey: ['quote', editId],
+    queryFn: () => fetchData(`quotes/${editId}/`),
+    enabled: editing,
+    retry: false,
+  });
+  const [hydrated, setHydrated] = useState(false);
 
   const { data: customers } = useCustomers();
   const { data: vtypes } = useVehicleTypes();
@@ -109,10 +120,52 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // Defaults from company profile (deferred to avoid sync setState in effect).
   useEffect(() => {
-    if (!company || baseRatePerKm) return;
+    if (!company || baseRatePerKm || editing) return;
     const t = setTimeout(() => setBaseRatePerKm(String(num(pick(company, ['default_base_rate_per_km']), 10))), 0);
     return () => clearTimeout(t);
-  }, [company, baseRatePerKm]);
+  }, [company, baseRatePerKm, editing]);
+
+  // Hydrate from an existing quote (edit mode).
+  useEffect(() => {
+    if (!editing || hydrated || !existing) return;
+    const q = existing;
+    const t = setTimeout(() => {
+      setCustomerId(str(pick(q, ['customer'])));
+      setVehicleType(str(pick(q, ['vehicle_type'])));
+      setPickup({
+        label: str(pick(q, ['pickup_location'])),
+        lat: num(pick(q, ['pickup_lat'])),
+        lon: num(pick(q, ['pickup_lng'])),
+      });
+      setDelivery({
+        label: str(pick(q, ['delivery_location'])),
+        lat: num(pick(q, ['delivery_lat'])),
+        lon: num(pick(q, ['delivery_lng'])),
+      });
+      setWeight(String((num(pick(q, ['weight'])) || 0) / 1000 || ''));
+      setCargo(str(pick(q, ['cargo_description'])));
+      setDriverAllowance(String(num(pick(q, ['driver_allowance']))));
+      setTollOverride(String(num(pick(q, ['toll_charges']))));
+      const trip = (str(pick(q, ['trip_type'])) as 'ONE_WAY' | 'ROUND_TRIP') || 'ROUND_TRIP';
+      setTripType(trip);
+      const dist = num(pick(q, ['distance']));
+      const baseRate = num(pick(q, ['base_rate']));
+      if (dist && baseRate) {
+        const legs = trip === 'ROUND_TRIP' ? 2 : 1;
+        setBaseRatePerKm(String(Math.round((baseRate / (dist * legs)) * 100) / 100));
+      }
+      setValidUntil(str(pick(q, ['valid_until'])) || plusDays(7));
+      setPickupDate(str(pick(q, ['pickup_date'])));
+      savedId.current = editId ?? null;
+      setRouteData({
+        distance_km: dist,
+        toll_cost_zar: num(pick(q, ['toll_charges'])),
+        routes: [{ distance_km: dist, toll_cost_zar: num(pick(q, ['toll_charges'])) }],
+      });
+      setHydrated(true);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [editing, hydrated, existing, editId]);
 
   const customerOptions = useMemo(
     () => (customers ?? []).map((c) => ({ label: c.name, value: String(c.id) })),
@@ -331,8 +384,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow={ai ? 'AI quote' : 'New quote'}
-      title="Build quote"
+      eyebrow={editing ? 'Edit' : ai ? 'AI quote' : 'New quote'}
+      title={editing ? 'Edit quote' : 'Build quote'}
       onBack={() => navigation.goBack()}
       footer={
         <View className="flex-row gap-2.5">
@@ -507,6 +560,14 @@ function LocationField({
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<Loc[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reflect an externally-set value (e.g. edit-mode hydration) into the input.
+  useEffect(() => {
+    if (!value?.label || value.label === text) return;
+    const t = setTimeout(() => setText(value.label), 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value?.label]);
 
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);

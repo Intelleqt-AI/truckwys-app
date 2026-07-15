@@ -6,7 +6,7 @@ import { SheetScreen, StatCard, StatusPill, Group, DetailRow, SectionLabel, Butt
 import { ErrorState } from '@/components/feedback';
 import { useVehicle, updateVehicle, deleteVehicle, VEHICLE_STATUSES } from './api';
 import { num, str, pick } from '@/lib/api/list';
-import { formatDate } from '@/lib/formatters';
+import { formatDate, formatNumber } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -95,16 +95,16 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
 
       <View className="mb-5 flex-row flex-wrap gap-3">
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Health" value={`${num(pick(v, ['health_score']))}/100`} />
+          <StatCard label="AI health score" value={`${num(pick(v, ['ai_health_score', 'health_score']))}/100`} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Utilisation" value={`${num(pick(v, ['utilisation', 'utilisation_pct']))}%`} />
+          <StatCard label="Fuel efficiency" value={`${num(pick(v, ['fuel_efficiency_score']))}/100`} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Uptime" value={`${num(pick(v, ['uptime_score', 'uptime']))}%`} />
+          <StatCard label="Uptime" value={`${num(pick(v, ['uptime_percentage'])).toFixed(1)}%`} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Efficiency" value={`${num(pick(v, ['efficiency_score', 'efficiency']))}%`} />
+          <StatCard label="Mileage" value={`${formatNumber(num(pick(v, ['mileage'])))} km`} />
         </View>
       </View>
 

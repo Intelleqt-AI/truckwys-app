@@ -83,20 +83,30 @@ export interface VehicleLite {
   name: string;
   plate: string;
   status: string;
-  healthScore?: number;
+  aiHealthScore?: number;
+  fuelEfficiency?: number;
+  uptime?: number;
+  mileage?: number;
   raw: Raw;
 }
 
-export const normalizeVehicle = (v: Raw): VehicleLite => ({
-  id: (pick(v, ['id', 'pk']) as string | number) ?? '',
-  name: str(pick(v, ['name', 'make_model', 'model', 'registration']), 'Vehicle'),
-  plate: str(pick(v, ['registration', 'plate', 'license_plate', 'reg_number']), '—'),
-  status: str(pick(v, ['status']), 'AVAILABLE').toUpperCase(),
-  healthScore: pick(v, ['health_score', 'healthScore']) != null
-    ? num(pick(v, ['health_score', 'healthScore']))
-    : undefined,
-  raw: v,
-});
+export const normalizeVehicle = (v: Raw): VehicleLite => {
+  const makeModel = [str(pick(v, ['make'])), str(pick(v, ['model']))].filter(Boolean).join(' ');
+  const plate = str(pick(v, ['registration', 'plate', 'license_plate', 'reg_number']), '—');
+  return {
+    id: (pick(v, ['id', 'pk']) as string | number) ?? '',
+    name: makeModel || str(pick(v, ['make_model', 'name']), '') || plate || 'Vehicle',
+    plate,
+    status: str(pick(v, ['status']), 'AVAILABLE').toUpperCase(),
+    aiHealthScore: pick(v, ['ai_health_score', 'health_score']) != null
+      ? num(pick(v, ['ai_health_score', 'health_score']))
+      : undefined,
+    fuelEfficiency: pick(v, ['fuel_efficiency_score']) != null ? num(pick(v, ['fuel_efficiency_score'])) : undefined,
+    uptime: pick(v, ['uptime_percentage']) != null ? num(pick(v, ['uptime_percentage'])) : undefined,
+    mileage: pick(v, ['mileage']) != null ? num(pick(v, ['mileage'])) : undefined,
+    raw: v,
+  };
+};
 
 export interface DriverLite {
   id: string | number;

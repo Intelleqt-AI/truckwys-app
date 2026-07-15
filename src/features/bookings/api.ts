@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
+import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
 import { normalizeQuote, normalizeLoad, type QuoteLite, type LoadLite } from '@/types/domain';
 
@@ -128,6 +128,12 @@ export const convertQuoteToLoad = (id: string | number) =>
   postData({ url: `quotes/${id}/convert_to_load/`, data: {} });
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
+
+// Quote PDF is a GET that streams a PDF blob (web uses downloadBlob).
+export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
+  const res = await api.get(`quotes/${id}/generate_pdf/`, { responseType: 'blob' });
+  return res.data as Blob;
+};
 
 // ── Load mutations / actions ────────────────────────────────────────────────
 // Correct: dedicated action that validates the transition.

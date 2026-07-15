@@ -78,9 +78,9 @@ const QUOTE_FILTERS = [
   { label: 'All', value: 'ALL' },
   { label: 'Draft', value: 'DRAFT' },
   { label: 'Sent', value: 'SENT' },
-  { label: 'Viewed', value: 'VIEWED' },
   { label: 'Accepted', value: 'ACCEPTED' },
-  { label: 'Expired', value: 'EXPIRED' },
+  { label: 'In-Transit', value: 'IT' },
+  { label: 'Completed', value: 'COMPLETED' },
 ];
 
 function QuotesTab() {
@@ -91,7 +91,7 @@ function QuotesTab() {
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load quotes." />;
 
-  const list = data.filter((q) => filter === 'ALL' || q.status.includes(filter));
+  const list = data.filter((q) => filter === 'ALL' || q.status === filter);
 
   return (
     <FlashList

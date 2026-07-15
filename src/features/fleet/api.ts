@@ -30,11 +30,12 @@ export function useVehicle(id: string | number, preview?: Record<string, unknown
   });
 }
 
-export function useDriver(id: string | number, preview?: Record<string, unknown>) {
+export function useDriver(id: string | number, preview?: Record<string, unknown>, enabled = true) {
   return useQuery<Record<string, unknown>>({
     queryKey: ['driver', id],
     queryFn: () => fetchData(`drivers/${id}/`),
     initialData: preview,
+    enabled: enabled && !!id,
   });
 }
 
@@ -60,6 +61,12 @@ export const updateVehicle = (id: string | number, data: Record<string, unknown>
   patchData({ url: `vehicles/${id}/`, data });
 
 export const deleteVehicle = (id: string | number) => deleteData({ url: `vehicles/${id}/` });
+
+export const createUser = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'users/', data });
+
+export const updateUser = (id: string | number, data: Record<string, unknown>) =>
+  patchData({ url: `users/${id}/`, data });
 
 export const createDriver = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'drivers/', data });

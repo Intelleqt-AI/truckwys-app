@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { View, Share, Alert } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -17,13 +19,7 @@ import {
   Mono,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
-import {
-  useQuote,
-  sendQuote,
-  recordQuoteOutcome,
-  convertQuoteToLoad,
-  deleteQuote,
-} from './api';
+import { useQuote, sendQuote, convertQuoteToLoad, deleteQuote, downloadQuotePdf } from './api';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
@@ -84,9 +80,32 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   };
 
   const doSend = () => run(() => sendQuote(id), 'Quote sent to client');
-  const markOutcome = (won: boolean) =>
-    run(() => recordQuoteOutcome(id, { outcome: won ? 'accepted' : 'declined' }), won ? 'Marked won' : 'Marked lost');
   const convert = () => run(() => convertQuoteToLoad(id), 'Converted to booking', true);
+  const editQuote = () => navigation.navigate('CreateQuote', { quoteId: id });
+
+  const download = async () => {
+    setBusy(true);
+    try {
+      const blob = await downloadQuotePdf(id);
+      const base64: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+        reader.readAsDataURL(blob);
+      });
+      const path = `${FileSystem.cacheDirectory}Quote-${str(pick(q, ['quote_number']), String(id))}.pdf`;
+      await FileSystem.writeAsStringAsync(path, base64, { encoding: FileSystem.EncodingType.Base64 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(path, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+      } else {
+        toast.info('Sharing not available');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not download PDF');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const share = async () => {
     if (!shareUrl) return toast.info('No share link yet — send the quote first');
@@ -99,39 +118,29 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       { text: 'Delete', style: 'destructive', onPress: () => run(() => deleteQuote(id), 'Quote deleted', true) },
     ]);
 
-  const footer = (() => {
-    if (status === 'DRAFT')
-      return (
-        <View className="gap-2.5">
-          <Button label="Send to client" icon="send" loading={busy} onPress={doSend} fullWidth />
-          <Button label="Delete quote" variant="danger" icon="x" onPress={confirmDelete} fullWidth />
+  const footer = (
+    <View className="gap-2.5">
+      <View className="flex-row gap-2.5">
+        <View className="flex-1">
+          <Button label="Edit quote" icon="edit" variant="secondary" onPress={editQuote} fullWidth />
         </View>
-      );
-    if (['SENT', 'VIEWED', 'QUOTED'].includes(status))
-      return (
-        <View className="gap-2.5">
-          <View className="flex-row gap-2.5">
-            <View className="flex-1">
-              <Button label="Mark won" icon="check" loading={busy} onPress={() => markOutcome(true)} fullWidth />
-            </View>
-            <View className="flex-1">
-              <Button label="Mark lost" variant="secondary" onPress={() => markOutcome(false)} fullWidth />
-            </View>
-          </View>
-          <View className="flex-row gap-2.5">
-            <View className="flex-1">
-              <Button label="Remind" icon="bell" variant="secondary" onPress={doSend} fullWidth />
-            </View>
-            <View className="flex-1">
-              <Button label="Resend link" icon="link" variant="secondary" onPress={share} fullWidth />
-            </View>
-          </View>
+        <View className="flex-1">
+          <Button label="Send" icon="send" loading={busy} onPress={doSend} fullWidth />
         </View>
-      );
-    if (accepted)
-      return <Button label="Convert to booking" icon="arrowRight" loading={busy} onPress={convert} fullWidth />;
-    return <Button label="Delete quote" variant="danger" icon="x" onPress={confirmDelete} fullWidth />;
-  })();
+      </View>
+      {accepted && (
+        <Button label="Convert to booking" icon="arrowRight" loading={busy} onPress={convert} fullWidth />
+      )}
+      <View className="flex-row gap-2.5">
+        <View className="flex-1">
+          <Button label="Download PDF" icon="download" variant="secondary" loading={busy} onPress={download} fullWidth />
+        </View>
+        <View className="flex-1">
+          <Button label="Delete" variant="danger" icon="x" onPress={confirmDelete} fullWidth />
+        </View>
+      </View>
+    </View>
+  );
 
   return (
     <SheetScreen

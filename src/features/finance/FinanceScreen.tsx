@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, ScrollView } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQueryClient } from '@tanstack/react-query';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
   AmbientGlow,
@@ -14,13 +15,15 @@ import {
   ListRow,
   Badge,
   Icon,
+  IconButton,
   Mono,
   SectionLabel,
   EmptyState,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useInvoices, useExpenses, useFinanceReports } from './api';
+import { useInvoices, useExpenses, useFinanceReports, deleteExpense } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
+import { toast } from '@/lib/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
 import type { TabParamList, FinanceTab } from '@/navigation/types';
@@ -30,11 +33,21 @@ type Props = BottomTabScreenProps<TabParamList, 'Finance'>;
 export function FinanceScreen({ route }: Props) {
   const [tab, setTab] = useState<FinanceTab>(route.params?.tab ?? 'invoices');
   const insets = useSafeAreaInsets();
+  const { nav } = useAppNavigation();
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
       <AmbientGlow />
       <View className="px-screen">
-        <AppHeader title="Finance" />
+        <AppHeader
+          title="Finance"
+          right={
+            tab === 'invoices' ? (
+              <IconButton name="plus" accessibilityLabel="New invoice" onPress={() => nav.navigate('CreateInvoice')} />
+            ) : tab === 'expenses' ? (
+              <IconButton name="plus" accessibilityLabel="New expense" onPress={() => nav.navigate('AddExpense')} />
+            ) : undefined
+          }
+        />
         <UnderlineTabs
           tabs={[
             { label: 'Invoices', value: 'invoices' },
@@ -104,6 +117,16 @@ function InvoicesTab() {
 
 function ExpensesTab() {
   const { data, isLoading, isError, refetch } = useExpenses();
+  const qc = useQueryClient();
+  const removeExpense = async (id: string | number) => {
+    try {
+      await deleteExpense(id);
+      await qc.invalidateQueries({ queryKey: ['expenses'] });
+      toast.success('Expense deleted');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not delete');
+    }
+  };
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load expenses." />;
 
@@ -133,7 +156,12 @@ function ExpensesTab() {
             leading={<Icon name="dollar" size={22} color="#888888" />}
             title={item.description || item.category}
             subtitle={item.category}
-            trailing={<Mono className="text-callout font-semibold text-fg">{formatCurrency(item.amount)}</Mono>}
+            trailing={
+              <View className="flex-row items-center gap-1">
+                <Mono className="text-callout font-semibold text-fg">{formatCurrency(item.amount)}</Mono>
+                <IconButton name="x" size={16} accessibilityLabel="Delete expense" onPress={() => removeExpense(item.id)} />
+              </View>
+            }
             last
           />
         </View>

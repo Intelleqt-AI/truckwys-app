@@ -12,6 +12,7 @@ import {
   StatCard,
   StatusPill,
   ListRow,
+  IconButton,
   Icon,
   Mono,
   EmptyState,
@@ -43,11 +44,21 @@ const DRIVER_FILTERS = [
 export function FleetScreen({ route }: Props) {
   const [tab, setTab] = useState<FleetTab>(route.params?.tab ?? 'vehicles');
   const insets = useSafeAreaInsets();
+  const { nav } = useAppNavigation();
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
       <AmbientGlow />
       <View className="px-screen">
-        <AppHeader title="Fleet" />
+        <AppHeader
+          title="Fleet"
+          right={
+            <IconButton
+              name="plus"
+              accessibilityLabel={tab === 'vehicles' ? 'Add vehicle' : 'Add driver'}
+              onPress={() => nav.navigate(tab === 'vehicles' ? 'AddVehicle' : 'AddDriver')}
+            />
+          }
+        />
         <UnderlineTabs
           tabs={[
             { label: 'Vehicles', value: 'vehicles' },

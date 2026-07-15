@@ -2,8 +2,9 @@ import { useRef, useState } from 'react';
 import { View, ScrollView, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { AmbientGlow, IconButton, Txt, Label, EmptyState } from '@/components/ui';
-import { copilotChat } from './api';
+import { useQueryClient } from '@tanstack/react-query';
+import { AmbientGlow, IconButton, Card, Button, Txt, Mono, Label, EmptyState } from '@/components/ui';
+import { copilotChat, useProposals, executeProposal, dismissProposal } from './api';
 import { str, pick } from '@/lib/api/list';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
@@ -18,6 +19,18 @@ export function CopilotScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const qc = useQueryClient();
+  const { data: proposals } = useProposals();
+
+  const actProposal = async (id: string, execute: boolean) => {
+    try {
+      await (execute ? executeProposal(id) : dismissProposal(id));
+      await qc.invalidateQueries({ queryKey: ['agent-proposals'] });
+      toast.success(execute ? 'Proposal executed' : 'Dismissed');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Action failed');
+    }
+  };
   const [conversationId, setConversationId] = useState<string | undefined>();
   const scroll = useRef<ScrollView>(null);
 
@@ -60,6 +73,25 @@ export function CopilotScreen({ navigation }: Props) {
           contentContainerStyle={{ padding: 16, gap: 12 }}
           keyboardShouldPersistTaps="handled"
         >
+          {!!proposals?.length && (
+            <View className="gap-2.5">
+              <Label className="text-faint">Proposals</Label>
+              {proposals.map((p) => (
+                <Card key={p.id} className="p-4">
+                  <Mono className="text-body font-medium text-fg">{p.title}</Mono>
+                  {p.body ? <Txt className="mt-1 text-sub text-muted">{p.body}</Txt> : null}
+                  <View className="mt-3 flex-row gap-2.5">
+                    <View className="flex-1">
+                      <Button label="Execute" onPress={() => actProposal(p.id, true)} fullWidth />
+                    </View>
+                    <View className="flex-1">
+                      <Button label="Dismiss" variant="secondary" onPress={() => actProposal(p.id, false)} fullWidth />
+                    </View>
+                  </View>
+                </Card>
+              ))}
+            </View>
+          )}
           {messages.length === 0 ? (
             <View className="mt-16">
               <EmptyState

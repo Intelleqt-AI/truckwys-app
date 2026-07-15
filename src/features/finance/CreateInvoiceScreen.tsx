@@ -1,0 +1,81 @@
+import { useMemo, useState } from 'react';
+import { View } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { SheetScreen, SelectField, TextField, Button, DetailRow, Group } from '@/components/ui';
+import { createInvoice } from './api';
+import { useCustomers } from '@/features/customers/api';
+import { formatCurrency } from '@/lib/formatters';
+import { toast } from '@/lib/toast';
+import type { AppStackParamList } from '@/navigation/types';
+
+type Props = NativeStackScreenProps<AppStackParamList, 'CreateInvoice'>;
+
+function plusDays(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export function CreateInvoiceScreen({ navigation }: Props) {
+  const qc = useQueryClient();
+  const { data: customers } = useCustomers();
+  const [customerId, setCustomerId] = useState('');
+  const [subtotal, setSubtotal] = useState('');
+  const [description, setDescription] = useState('');
+  const [dueDate, setDueDate] = useState(plusDays(30));
+  const [busy, setBusy] = useState(false);
+
+  const options = useMemo(
+    () => (customers ?? []).map((c) => ({ label: c.name, value: String(c.id) })),
+    [customers],
+  );
+  const sub = Number(subtotal) || 0;
+  const vat = Math.round(sub * 0.15 * 100) / 100;
+  const total = sub + vat;
+
+  const submit = async () => {
+    if (!customerId) return toast.error('Select a customer');
+    if (sub <= 0) return toast.error('Enter an amount');
+    setBusy(true);
+    try {
+      await createInvoice({
+        customer: Number(customerId),
+        subtotal: sub,
+        total_amount: total,
+        description,
+        due_date: dueDate,
+        status: 'UNPAID',
+      });
+      await qc.invalidateQueries({ queryKey: ['invoices'] });
+      toast.success('Invoice created');
+      navigation.goBack();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not create invoice');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SheetScreen
+      eyebrow="New invoice"
+      title="Create invoice"
+      onBack={() => navigation.goBack()}
+      footer={<Button label="Create invoice" loading={busy} onPress={submit} fullWidth />}
+    >
+      <View className="gap-4">
+        <SelectField label="Customer" icon="building" placeholder="Select customer" options={options} value={customerId} onSelect={setCustomerId} />
+        <TextField label="Amount (excl. VAT)" icon="dollar" keyboardType="numeric" value={subtotal} onChangeText={setSubtotal} />
+        <TextField label="Description" placeholder="What is this invoice for?" value={description} onChangeText={setDescription} />
+        <TextField label="Due date" placeholder="YYYY-MM-DD" value={dueDate} onChangeText={setDueDate} />
+
+        <Group label="Summary">
+          <DetailRow label="Subtotal" value={formatCurrency(sub)} />
+          <DetailRow label="VAT (15%)" value={formatCurrency(vat)} />
+          <DetailRow label="Total" value={formatCurrency(total)} last />
+        </Group>
+      </View>
+    </SheetScreen>
+  );
+}

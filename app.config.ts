@@ -22,6 +22,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     infoPlist: {
       // Native apps make no cross-origin browser requests; ATS stays on.
       ITSAppUsesNonExemptEncryption: false,
+      NSMicrophoneUsageDescription:
+        'Truckwys uses the microphone only when you record a voice quote.',
     },
   },
   android: {
@@ -39,6 +41,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-secure-store',
     'expo-image',
     'expo-font',
+    'expo-audio',
+    'expo-web-browser',
     [
       'expo-splash-screen',
       {

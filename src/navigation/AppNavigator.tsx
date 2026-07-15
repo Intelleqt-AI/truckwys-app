@@ -4,9 +4,16 @@ import { AppTabs } from './AppTabs';
 import { LoadDetailScreen } from '@/features/bookings/LoadDetailScreen';
 import { QuoteDetailScreen } from '@/features/bookings/QuoteDetailScreen';
 import { CreateQuoteScreen } from '@/features/bookings/CreateQuoteScreen';
+import { AIQuoteChatScreen } from '@/features/bookings/AIQuoteChatScreen';
 import { VehicleDetailScreen } from '@/features/fleet/VehicleDetailScreen';
 import { DriverDetailScreen } from '@/features/fleet/DriverDetailScreen';
 import { InvoiceDetailScreen } from '@/features/finance/InvoiceDetailScreen';
+import { CreateInvoiceScreen } from '@/features/finance/CreateInvoiceScreen';
+import { AddExpenseScreen } from '@/features/finance/AddExpenseScreen';
+import { AddVehicleScreen } from '@/features/fleet/AddVehicleScreen';
+import { AddDriverScreen } from '@/features/fleet/AddDriverScreen';
+import { AdvanceDetailScreen } from '@/features/more/AdvanceDetailScreen';
+import { RiskScoresScreen } from '@/features/more/RiskScoresScreen';
 import { CustomersScreen } from '@/features/customers/CustomersScreen';
 import { CustomerDetailScreen } from '@/features/customers/CustomerDetailScreen';
 import { AddCustomerScreen } from '@/features/customers/AddCustomerScreen';
@@ -39,6 +46,9 @@ export function AppNavigator() {
         <Stack.Screen name="Activity" component={ActivityScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
         <Stack.Screen name="Copilot" component={CopilotScreen} />
+        <Stack.Screen name="AIQuoteChat" component={AIQuoteChatScreen} />
+        <Stack.Screen name="AdvanceDetail" component={AdvanceDetailScreen} />
+        <Stack.Screen name="RiskScores" component={RiskScoresScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Stub" component={StubScreen} />
       </Stack.Group>
@@ -47,6 +57,10 @@ export function AppNavigator() {
       <Stack.Group screenOptions={{ presentation: 'modal' }}>
         <Stack.Screen name="CreateQuote" component={CreateQuoteScreen} />
         <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
+        <Stack.Screen name="CreateInvoice" component={CreateInvoiceScreen} />
+        <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
+        <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />
+        <Stack.Screen name="AddDriver" component={AddDriverScreen} />
       </Stack.Group>
     </Stack.Navigator>
   );

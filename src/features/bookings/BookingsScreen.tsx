@@ -35,7 +35,7 @@ const DONE = ['DELIVERED', 'INVOICED', 'CANCELLED'];
 
 export function BookingsScreen({ route }: Props) {
   const [tab, setTab] = useState<BookingsTab>(route.params?.tab ?? 'quotes');
-  const { createQuote } = useAppNavigation();
+  const { createQuote, aiQuote } = useAppNavigation();
   const insets = useSafeAreaInsets();
 
   return (
@@ -47,7 +47,7 @@ export function BookingsScreen({ route }: Props) {
           title="Bookings"
           live
           right={
-            <Button label="AI quote" icon="sparkle" variant="ghost" onPress={() => createQuote(true)} />
+            <Button label="AI quote" icon="sparkle" variant="ghost" onPress={aiQuote} />
           }
         />
       </View>

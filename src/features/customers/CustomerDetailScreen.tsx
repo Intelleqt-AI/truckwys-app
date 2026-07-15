@@ -3,7 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, StatCard, Group, DetailRow, Avatar, SectionLabel, Button, Txt, Mono } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
-import { useCustomer, useCustomerRisk, deleteCustomer } from './api';
+import { useState } from 'react';
+import { useCustomer, useCustomerRisk, deleteCustomer, updateCustomer } from './api';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
@@ -16,9 +17,27 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
   const { data, isError, refetch } = useCustomer(id, preview);
   const { data: risk } = useCustomerRisk(id);
   const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this customer." />;
   const c = (data ?? {}) as Record<string, unknown>;
   const name = str(pick(c, ['name', 'company_name', 'customer_name']), 'Customer');
+  const active = str(pick(c, ['status']), 'ACTIVE').toUpperCase() !== 'INACTIVE';
+
+  const toggleActive = async () => {
+    setBusy(true);
+    try {
+      await updateCustomer(id, { status: active ? 'INACTIVE' : 'ACTIVE' });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['customer', id] }),
+        qc.invalidateQueries({ queryKey: ['customers'] }),
+      ]);
+      toast.success(active ? 'Marked inactive' : 'Marked active');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const confirmDelete = () =>
     Alert.alert('Delete customer', `Permanently delete ${name}?`, [
@@ -46,7 +65,18 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
       onAction={() => navigation.navigate('AddCustomer', { id, preview: c })}
-      footer={<Button label="Delete customer" variant="danger" icon="x" onPress={confirmDelete} fullWidth />}
+      footer={
+        <View className="gap-2.5">
+          <Button
+            label={active ? 'Mark inactive' : 'Mark active'}
+            variant="secondary"
+            loading={busy}
+            onPress={toggleActive}
+            fullWidth
+          />
+          <Button label="Delete customer" variant="danger" icon="x" onPress={confirmDelete} fullWidth />
+        </View>
+      }
     >
       <View className="mb-4 flex-row items-center gap-3">
         <Avatar name={name} size={44} />

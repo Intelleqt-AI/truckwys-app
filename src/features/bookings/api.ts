@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchData, postData, patchData } from '@/lib/api/client';
+import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
 import { normalizeQuote, normalizeLoad, type QuoteLite, type LoadLite } from '@/types/domain';
 
@@ -35,22 +35,104 @@ export function useLoad(id: string | number, preview?: Record<string, unknown>) 
   });
 }
 
-// ── Mutations / actions ─────────────────────────────────────────────────────
-export const updateLoadStatus = (id: string | number, status: string) =>
-  patchData({ url: `loads/${id}/`, data: { status } });
+// ── Reference data for the quote builder ────────────────────────────────────
+export interface VehicleType {
+  id: number | string;
+  name: string;
+  fuel_consumption_l_per_100km?: number;
+  base_rate?: number;
+  available_vehicle_count?: number;
+  capacity?: number;
+}
 
-export const sendQuote = (id: string | number) =>
-  postData({ url: `quotes/${id}/send/`, data: {} });
+export function useVehicleTypes() {
+  return useQuery<VehicleType[]>({
+    queryKey: ['vehicle-types'],
+    queryFn: async () => asArray<VehicleType>(await fetchData('vehicle-types/')),
+  });
+}
 
-export const createQuoteRequest = (data: Record<string, unknown>) =>
-  postData<Record<string, unknown>>({ url: 'quotes/', data });
+export function useCompanyProfileData() {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['company-profile'],
+    queryFn: () => fetchData('company/profile/'),
+    retry: false,
+  });
+}
 
-// AI estimate for the Create-Quote flow (same endpoint the web app calls).
-export const analyzeQuote = (data: Record<string, unknown>) =>
-  postData<Record<string, unknown>>({ url: 'quotes/analyze/', data });
+export function useFuelPrice() {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['fuel-prices'],
+    queryFn: () => fetchData('fuel-prices/current/'),
+    retry: false,
+    staleTime: 60 * 60 * 1000,
+  });
+}
 
+// ── Quote builder network calls ─────────────────────────────────────────────
 export const suggestLocations = (q: string) =>
   fetchData<unknown>(`location/suggest/?q=${encodeURIComponent(q)}`);
 
+export const calculateRoute = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'route/calculate/', data });
+
+export const analyzeQuote = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'quotes/analyze/', data });
+
+export const guardQuote = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'quotes/guard/', data });
+
+export const benchmarkQuote = (origin: string, destination: string, vehicleType: string) =>
+  fetchData<Record<string, unknown>>(
+    `quotes/benchmark/?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(
+      destination,
+    )}&vehicle_type=${encodeURIComponent(vehicleType.toLowerCase())}`,
+  );
+
+// ── AI quote (chat + voice) ─────────────────────────────────────────────────
+export const aiChatQuote = (message: string, history: unknown[], currentFields: unknown) =>
+  postData<Record<string, unknown>>({
+    url: 'ai/chat-quote/',
+    data: { message, history, current_fields: currentFields },
+  });
+
+export const aiVoiceQuote = (audio: { uri: string; name: string; type: string }) => {
+  const form = new FormData();
+  // React Native FormData file part.
+  form.append('audio', audio as unknown as Blob);
+  return postData<Record<string, unknown>>({
+    url: 'ai/voice-quote/',
+    data: form,
+    config: { headers: { 'Content-Type': 'multipart/form-data' } },
+  });
+};
+
+// ── Quote mutations / actions ───────────────────────────────────────────────
+export const createQuote = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'quotes/', data });
+
+export const patchQuote = (id: string | number, data: Record<string, unknown>) =>
+  patchData<Record<string, unknown>>({ url: `quotes/${id}/`, data });
+
+// Correct: DRF @action send_to_customer (returns email_sent, share_url).
+export const sendQuote = (id: string | number) =>
+  postData<Record<string, unknown>>({ url: `quotes/${id}/send_to_customer/`, data: {} });
+
+export const updateQuoteStatus = (id: string | number, status: string) =>
+  patchData({ url: `quotes/${id}/update_status/`, data: { status } });
+
+export const recordQuoteOutcome = (id: string | number, data: Record<string, unknown>) =>
+  postData({ url: `quotes/${id}/outcome/`, data });
+
+export const convertQuoteToLoad = (id: string | number) =>
+  postData({ url: `quotes/${id}/convert_to_load/`, data: {} });
+
+export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
+
+// ── Load mutations / actions ────────────────────────────────────────────────
+// Correct: dedicated action that validates the transition.
+export const updateLoadStatus = (id: string | number, status: string) =>
+  postData({ url: `loads/${id}/update_status/`, data: { status } });
+
 export const convertLoadToInvoice = (id: string | number) =>
-  postData({ url: `loads/${id}/convert-to-invoice/`, data: {} });
+  postData({ url: `loads/${id}/convert_to_invoice/`, data: {} });

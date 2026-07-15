@@ -24,5 +24,6 @@ export function useAppNavigation() {
     openCustomer: (id: string | number, preview?: Record<string, unknown>) =>
       nav.navigate('CustomerDetail', { id, preview }),
     createQuote: (ai?: boolean) => nav.navigate('CreateQuote', { ai }),
+    aiQuote: () => nav.navigate('AIQuoteChat'),
   };
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchData, postData, patchData } from '@/lib/api/client';
+import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 
 // ── Insights / signals ──────────────────────────────────────────────────────
@@ -66,6 +66,32 @@ export function useCapital() {
 export const requestAdvance = (invoiceId: string | number) =>
   postData({ url: 'advances/', data: { invoice: invoiceId } });
 
+export function useAdvance(id: string | number) {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['advance', id],
+    queryFn: () => fetchData(`advances/${id}/`),
+    retry: false,
+  });
+}
+
+export function useRiskScores() {
+  return useQuery({
+    queryKey: ['risk-scores'],
+    queryFn: async () =>
+      asArray(await fetchData('risk/score/')).map((r) => {
+        const o = r as Record<string, unknown>;
+        return {
+          id: str(pick(o, ['id']), ''),
+          customer: str(pick(o, ['customer_name', 'customer', 'entity']), '—'),
+          tier: str(pick(o, ['tier', 'band', 'grade']), '—').toUpperCase(),
+          score: num(pick(o, ['score', 'risk_score'])),
+          fee: num(pick(o, ['fast_pay_fee', 'fee_pct', 'fee'])),
+        };
+      }),
+    retry: false,
+  });
+}
+
 // ── Activity ────────────────────────────────────────────────────────────────
 export function useActivity() {
   return useQuery({
@@ -101,10 +127,24 @@ export function useNotifications() {
   });
 }
 
+// Correct: DRF @action mark_read (underscore) on the detail route.
 export const markNotificationRead = (id: string | number) =>
-  postData({ url: `notifications/${id}/mark-read/`, data: {} }).catch(() =>
-    patchData({ url: `notifications/${id}/`, data: { read: true } }),
-  );
+  patchData({ url: `notifications/${id}/mark_read/`, data: {} });
+
+export const markAllNotificationsRead = () =>
+  postData({ url: 'notifications/mark_all_read/', data: {} });
+
+export function useUnreadCount() {
+  return useQuery<number>({
+    queryKey: ['notifications-unread'],
+    queryFn: async () => {
+      const r = (await fetchData('notifications/unread_count/')) as Record<string, unknown>;
+      return Number((r?.count ?? r?.unread ?? 0) as number) || 0;
+    },
+    retry: false,
+    refetchInterval: 60_000,
+  });
+}
 
 // ── Company profile (settings) ───────────────────────────────────────────────
 export function useCompanyProfile() {
@@ -121,7 +161,88 @@ export const updateCompanyProfile = (data: Record<string, unknown>) =>
 export const changePassword = (current_password: string, new_password: string) =>
   postData({ url: 'auth/change-password/', data: { current_password, new_password } });
 
+export const updateCompanyLogo = (file: { uri: string; name: string; type: string }) => {
+  const form = new FormData();
+  form.append('logo', file as unknown as Blob);
+  return postData({
+    url: 'company/logo/',
+    data: form,
+    config: { headers: { 'Content-Type': 'multipart/form-data' } },
+  });
+};
+
+// ── Security: sessions + 2FA ─────────────────────────────────────────────────
+export function useSessions() {
+  return useQuery({
+    queryKey: ['sessions'],
+    queryFn: async () =>
+      asArray(await fetchData('auth/sessions/')).map((s) => {
+        const o = s as Record<string, unknown>;
+        return {
+          id: str(pick(o, ['id']), ''),
+          device: str(pick(o, ['device', 'user_agent', 'name']), 'Device'),
+          current: Boolean(pick(o, ['current', 'is_current'])),
+          lastSeen: str(pick(o, ['last_seen', 'last_active', 'created_at'])),
+        };
+      }),
+    retry: false,
+  });
+}
+
+export const revokeSession = (id: string | number) => deleteData({ url: `auth/sessions/${id}/` });
+
+export const setTwoFactor = (enabled: boolean) =>
+  patchData({ url: 'auth/me/', data: { two_factor_enabled: enabled } });
+
+// ── Users & permissions ──────────────────────────────────────────────────────
+export function useUsers() {
+  return useQuery({
+    queryKey: ['users'],
+    queryFn: async () =>
+      asArray(await fetchData('users/')).map((u) => {
+        const o = u as Record<string, unknown>;
+        return {
+          id: str(pick(o, ['id']), ''),
+          name: str(pick(o, ['name', 'email']), 'User'),
+          email: str(pick(o, ['email'])),
+          role: str(pick(o, ['role']), '—'),
+        };
+      }),
+    retry: false,
+  });
+}
+
+export const inviteUser = (email: string, role: string) =>
+  postData({ url: 'auth/invite/', data: { email, role } });
+
+export const updateUserRole = (id: string | number, role: string) =>
+  patchData({ url: `users/${id}/`, data: { role } });
+
+export const removeUser = (id: string | number) => deleteData({ url: `users/${id}/` });
+
 // ── Copilot ───────────────────────────────────────────────────────────────
+export function useProposals() {
+  return useQuery({
+    queryKey: ['agent-proposals'],
+    queryFn: async () =>
+      asArray(await fetchData('agent/proposals/')).map((p) => {
+        const o = p as Record<string, unknown>;
+        return {
+          id: str(pick(o, ['id']), ''),
+          title: str(pick(o, ['title', 'summary']), 'Proposal'),
+          body: str(pick(o, ['body', 'description', 'detail']), ''),
+        };
+      }),
+    retry: false,
+  });
+}
+
+export const executeProposal = (id: string | number) =>
+  postData({ url: `agent/proposals/${id}/execute/`, data: {} });
+
+export const dismissProposal = (id: string | number) =>
+  postData({ url: `agent/proposals/${id}/dismiss/`, data: {} });
+
 export const copilotChat = (message: string, conversationId?: string) =>
   postData<Record<string, unknown>>({
     url: conversationId ? `agent/conversations/${conversationId}/chat/` : 'agent/chat/',

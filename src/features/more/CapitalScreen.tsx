@@ -40,7 +40,13 @@ export function CapitalScreen({ navigation }: Props) {
   };
 
   return (
-    <SheetScreen eyebrow="Working capital" title="Fast Pay Capital" onBack={() => navigation.goBack()}>
+    <SheetScreen
+      eyebrow="Working capital"
+      title="Fast Pay Capital"
+      onBack={() => navigation.goBack()}
+      actionLabel="Risk scores"
+      onAction={() => navigation.navigate('RiskScores')}
+    >
       {isLoading ? (
         <ListSkeleton />
       ) : isError || !data ? (
@@ -88,6 +94,7 @@ export function CapitalScreen({ navigation }: Props) {
                   key={a.id}
                   title={formatCurrency(a.amount, { maximumFractionDigits: 0 })}
                   trailing={<StatusPill status={a.status} />}
+                  onPress={() => navigation.navigate('AdvanceDetail', { id: a.id })}
                   last={i === data.advances.length - 1}
                 />
               ))}

@@ -14,6 +14,7 @@ export {
   type Tone,
 } from './primitives';
 export { TextField, SearchField, SegmentedControl, Toggle } from './forms';
+export { SelectField, type Option } from './SelectField';
 export {
   Screen,
   AmbientGlow,

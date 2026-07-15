@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchData, patchData, deleteData } from '@/lib/api/client';
+import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
 import {
   normalizeVehicle,
@@ -38,6 +38,13 @@ export function useDriver(id: string | number, preview?: Record<string, unknown>
   });
 }
 
+export function useVehicleTypesList() {
+  return useQuery<{ id: number | string; name: string }[]>({
+    queryKey: ['vehicle-types'],
+    queryFn: async () => asArray<{ id: number | string; name: string }>(await fetchData('vehicle-types/')),
+  });
+}
+
 export const VEHICLE_STATUSES = [
   'AVAILABLE',
   'IN_USE',
@@ -46,7 +53,18 @@ export const VEHICLE_STATUSES = [
   'INACTIVE',
 ] as const;
 
+export const createVehicle = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'vehicles/', data });
+
 export const updateVehicle = (id: string | number, data: Record<string, unknown>) =>
   patchData({ url: `vehicles/${id}/`, data });
 
 export const deleteVehicle = (id: string | number) => deleteData({ url: `vehicles/${id}/` });
+
+export const createDriver = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'drivers/', data });
+
+export const updateDriver = (id: string | number, data: Record<string, unknown>) =>
+  patchData({ url: `drivers/${id}/`, data });
+
+export const deleteDriver = (id: string | number) => deleteData({ url: `drivers/${id}/` });

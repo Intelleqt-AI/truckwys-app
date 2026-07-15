@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchData } from '@/lib/api/client';
+import { fetchData, postData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
 import {
   normalizeInvoice,
@@ -37,6 +37,30 @@ export interface FinanceReports {
   marginByLane: { lane: string; margin: number }[];
   monthlyTrend: { label: string; revenue: number; expense: number }[];
 }
+
+// ── Mutations / actions ─────────────────────────────────────────────────────
+export const createInvoice = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'invoices/', data });
+
+export const generateInvoicePdf = (id: string | number) =>
+  postData<Record<string, unknown>>({ url: `invoices/${id}/generate_pdf/`, data: {} });
+
+export const sendInvoice = (id: string | number) =>
+  postData({ url: `invoices/${id}/send_invoice/`, data: {} });
+
+export const sendInvoiceReminder = (id: string | number) =>
+  postData({ url: `invoices/${id}/send_reminder/`, data: {} });
+
+export const markInvoicePaid = (id: string | number) =>
+  postData({ url: `invoices/${id}/mark_paid/`, data: {} });
+
+export const recordPayment = (data: Record<string, unknown>) =>
+  postData({ url: 'payments/', data });
+
+export const createExpense = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'expenses/', data });
+
+export const deleteExpense = (id: string | number) => deleteData({ url: `expenses/${id}/` });
 
 export function useFinanceReports() {
   return useQuery<FinanceReports>({

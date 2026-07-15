@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Share } from 'react-native';
+import { View, Share, Alert } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -17,7 +17,13 @@ import {
   Mono,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
-import { useQuote, sendQuote } from './api';
+import {
+  useQuote,
+  sendQuote,
+  recordQuoteOutcome,
+  convertQuoteToLoad,
+  deleteQuote,
+} from './api';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDateTime } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
@@ -57,43 +63,74 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     { label: 'Accepted', time: accepted ? 'Won' : undefined, done: accepted, color: '#22C55E' },
   ];
 
-  const doSend = async () => {
+  const refresh = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ['quote', id] }),
+      qc.invalidateQueries({ queryKey: ['quotes'] }),
+    ]);
+
+  const run = async (fn: () => Promise<unknown>, okMsg: string, back = false) => {
     setBusy(true);
     try {
-      await sendQuote(id);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['quote', id] }),
-        qc.invalidateQueries({ queryKey: ['quotes'] }),
-      ]);
-      toast.success('Quote sent to client');
+      await fn();
+      await refresh();
+      toast.success(okMsg);
+      if (back) navigation.goBack();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not send quote');
+      toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
       setBusy(false);
     }
   };
+
+  const doSend = () => run(() => sendQuote(id), 'Quote sent to client');
+  const markOutcome = (won: boolean) =>
+    run(() => recordQuoteOutcome(id, { outcome: won ? 'accepted' : 'declined' }), won ? 'Marked won' : 'Marked lost');
+  const convert = () => run(() => convertQuoteToLoad(id), 'Converted to booking', true);
 
   const share = async () => {
     if (!shareUrl) return toast.info('No share link yet — send the quote first');
     await Share.share({ message: `Truckwys quote ${str(pick(q, ['quote_number']), '')}: ${shareUrl}` });
   };
 
+  const confirmDelete = () =>
+    Alert.alert('Delete quote', 'Permanently delete this quote?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => run(() => deleteQuote(id), 'Quote deleted', true) },
+    ]);
+
   const footer = (() => {
     if (status === 'DRAFT')
-      return <Button label="Send to client" icon="send" loading={busy} onPress={doSend} fullWidth />;
+      return (
+        <View className="gap-2.5">
+          <Button label="Send to client" icon="send" loading={busy} onPress={doSend} fullWidth />
+          <Button label="Delete quote" variant="danger" icon="x" onPress={confirmDelete} fullWidth />
+        </View>
+      );
     if (['SENT', 'VIEWED', 'QUOTED'].includes(status))
       return (
-        <View className="flex-row gap-2.5">
-          <View className="flex-1">
-            <Button label="Remind" icon="bell" variant="secondary" onPress={doSend} fullWidth />
+        <View className="gap-2.5">
+          <View className="flex-row gap-2.5">
+            <View className="flex-1">
+              <Button label="Mark won" icon="check" loading={busy} onPress={() => markOutcome(true)} fullWidth />
+            </View>
+            <View className="flex-1">
+              <Button label="Mark lost" variant="secondary" onPress={() => markOutcome(false)} fullWidth />
+            </View>
           </View>
-          <View className="flex-1">
-            <Button label="Resend link" icon="link" onPress={share} fullWidth />
+          <View className="flex-row gap-2.5">
+            <View className="flex-1">
+              <Button label="Remind" icon="bell" variant="secondary" onPress={doSend} fullWidth />
+            </View>
+            <View className="flex-1">
+              <Button label="Resend link" icon="link" variant="secondary" onPress={share} fullWidth />
+            </View>
           </View>
         </View>
       );
-    if (accepted) return <Button label="Convert to booking" icon="arrowRight" fullWidth onPress={() => toast.info('Booking conversion coming soon')} />;
-    return <Button label="Duplicate quote" icon="copy" variant="secondary" fullWidth onPress={() => toast.info('Duplicated')} />;
+    if (accepted)
+      return <Button label="Convert to booking" icon="arrowRight" loading={busy} onPress={convert} fullWidth />;
+    return <Button label="Delete quote" variant="danger" icon="x" onPress={confirmDelete} fullWidth />;
   })();
 
   return (

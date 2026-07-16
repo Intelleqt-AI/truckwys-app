@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { View, useColorScheme as useRNColorScheme } from 'react-native';
 import { colorScheme as nwColorScheme, vars } from 'nativewind';
+import * as SystemUI from 'expo-system-ui';
 import { palette, type Palette, type Scheme } from './tokens';
 import { useThemeStore } from '@/stores/themeStore';
 
@@ -45,6 +46,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // Keeps the `dark:` variant in sync for any utility that uses it.
     nwColorScheme.set(mode);
   }, [mode]);
+
+  useEffect(() => {
+    // Native window background follows the theme so screen transitions never
+    // flash the opposite colour.
+    void SystemUI.setBackgroundColorAsync(palette[scheme].bgDeep);
+  }, [scheme]);
 
   const value = useMemo<ThemeValue>(() => ({ scheme, colors: palette[scheme] }), [scheme]);
   const rootVars = useMemo(() => toVars(palette[scheme]), [scheme]);

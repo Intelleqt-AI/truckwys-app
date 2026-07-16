@@ -8,8 +8,9 @@ import { Mono } from '@/components/ui/Text';
 import { Glass } from '@/components/ui/Glass';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Floating, rounded, frosted-glass bottom bar. A highlight pill slides smoothly
-// to the active tab; the active tab's icon+label scale up.
+// Floating, rounded, frosted-glass bottom bar — Material-3 style: a single
+// active-indicator pill slides behind the selected tab; only the active tab
+// shows its label; icons stay a fixed size.
 const TAB_ICON: Record<string, IconName> = {
   Home: 'home',
   Bookings: 'file',
@@ -18,21 +19,20 @@ const TAB_ICON: Record<string, IconName> = {
 };
 
 const H_MARGIN = 20;
-const BAR_HEIGHT = 66;
-const PILL_INSET = 7;
+const BAR_HEIGHT = 64;
+const PILL_W = 56;
+const PILL_H = 32;
+const PILL_TOP = 8;
 
-function TabItem({ focused, label, icon }: { focused: boolean; label: string; icon: IconName }) {
-  const { colors } = useTheme();
-  const s = useSharedValue(focused ? 1 : 0);
+function TabLabel({ focused, label, color }: { focused: boolean; label: string; color: string }) {
+  const o = useSharedValue(focused ? 1 : 0);
   useEffect(() => {
-    s.value = withTiming(focused ? 1 : 0, { duration: 220, easing: Easing.out(Easing.cubic) });
-  }, [focused, s]);
-  const style = useAnimatedStyle(() => ({ transform: [{ scale: 1 + s.value * 0.14 }, { translateY: -s.value * 1 }] }));
-  const color = focused ? colors.accent : colors.faint;
+    o.value = withTiming(focused ? 1 : 0, { duration: 200 });
+  }, [focused, o]);
+  const style = useAnimatedStyle(() => ({ opacity: o.value }));
   return (
-    <Animated.View style={[{ alignItems: 'center', justifyContent: 'center', gap: 3 }, style]}>
-      <Icon name={icon} size={22} color={color} strokeWidth={focused ? 2.3 : 1.7} />
-      <Mono style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', color, fontWeight: focused ? '700' : '400' }}>
+    <Animated.View style={style}>
+      <Mono style={{ fontSize: 9, letterSpacing: 0.5, textTransform: 'uppercase', color, fontWeight: '700' }}>
         {label}
       </Mono>
     </Animated.View>
@@ -45,22 +45,23 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const [barW, setBarW] = useState(0);
 
   const count = state.routes.length;
-  const tabW = barW ? barW / count : 0;
+  const cellW = barW ? barW / count : 0;
   const x = useSharedValue(0);
 
   useEffect(() => {
-    x.value = withTiming(state.index * tabW, { duration: 260, easing: Easing.out(Easing.cubic) });
-  }, [state.index, tabW, x]);
+    const target = cellW * state.index + (cellW - PILL_W) / 2;
+    x.value = withTiming(target, { duration: 260, easing: Easing.out(Easing.cubic) });
+  }, [state.index, cellW, x]);
 
   const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
   return (
     <View
       pointerEvents="box-none"
-      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom + 18 }}
+      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom + 16 }}
     >
       <Glass
-        radius={16}
+        radius={30}
         intensity={40}
         style={{
           height: BAR_HEIGHT,
@@ -72,19 +73,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         }}
       >
         <View style={{ flex: 1 }} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
-          {tabW > 0 && (
+          {cellW > 0 && (
             <Animated.View
               pointerEvents="none"
               style={[
-                {
-                  position: 'absolute',
-                  top: PILL_INSET,
-                  bottom: PILL_INSET,
-                  left: PILL_INSET,
-                  width: tabW - PILL_INSET * 2,
-                  borderRadius: 14,
-                  backgroundColor: colors.accentDim,
-                },
+                { position: 'absolute', top: PILL_TOP, width: PILL_W, height: PILL_H, borderRadius: PILL_H / 2, backgroundColor: colors.accentDim },
                 pill,
               ]}
             />
@@ -92,6 +85,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           <View style={{ flex: 1, flexDirection: 'row' }}>
             {state.routes.map((route, index) => {
               const focused = state.index === index;
+              const color = focused ? colors.accent : colors.faint;
               const onPress = () => {
                 const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
                 if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
@@ -103,9 +97,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                   accessibilityRole="button"
                   accessibilityState={{ selected: focused }}
                   accessibilityLabel={route.name}
-                  style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+                  style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 2, gap: 3 }}
                 >
-                  <TabItem focused={focused} label={route.name} icon={TAB_ICON[route.name] ?? 'grid'} />
+                  <View style={{ height: PILL_H, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name={TAB_ICON[route.name] ?? 'grid'} size={22} color={color} strokeWidth={focused ? 2.2 : 1.8} />
+                  </View>
+                  <View style={{ height: 12, justifyContent: 'center' }}>
+                    <TabLabel focused={focused} label={route.name} color={color} />
+                  </View>
                 </Pressable>
               );
             })}

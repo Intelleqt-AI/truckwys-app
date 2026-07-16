@@ -1,10 +1,9 @@
 import { type ReactNode } from 'react';
-import { View, ScrollView, Pressable, type ScrollViewProps } from 'react-native';
+import { View, ScrollView, Pressable, RefreshControl, type ScrollViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { LiveDot } from './primitives';
-import { RefreshScroll } from './PullRefresh';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // ── Ambient glow: one fixed, faint accent bloom behind the workspace ───────
@@ -47,31 +46,34 @@ export function Screen({
   refreshing?: boolean;
 } & ScrollViewProps) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const pad = padded ? 'px-screen' : '';
   const contentPad = { paddingBottom: insets.bottom + 100 };
 
-  let body: ReactNode;
-  if (scroll && onRefresh) {
-    body = (
-      <RefreshScroll refreshing={refreshing} onRefresh={onRefresh} contentContainerStyle={contentPad} {...props}>
-        <View className={`${pad} ${contentClassName}`}>{children}</View>
-      </RefreshScroll>
-    );
-  } else if (scroll) {
-    body = (
-      <ScrollView
-        className={`flex-1 ${className}`}
-        contentContainerStyle={contentPad}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        {...props}
-      >
-        <View className={`${pad} ${contentClassName}`}>{children}</View>
-      </ScrollView>
-    );
-  } else {
-    body = <View className={`flex-1 ${pad} ${className} ${contentClassName}`}>{children}</View>;
-  }
+  const body = scroll ? (
+    <ScrollView
+      className={`flex-1 ${className}`}
+      contentContainerStyle={contentPad}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+            progressBackgroundColor={colors.surface}
+          />
+        ) : undefined
+      }
+      {...props}
+    >
+      <View className={`${pad} ${contentClassName}`}>{children}</View>
+    </ScrollView>
+  ) : (
+    <View className={`flex-1 ${pad} ${className} ${contentClassName}`}>{children}</View>
+  );
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>

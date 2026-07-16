@@ -6,7 +6,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
   AmbientGlow,
   AppHeader,
-  UnderlineTabs,
+  SwipeTabs,
   SearchField,
   FilterChips,
   StatCard,
@@ -59,16 +59,18 @@ export function FleetScreen({ route }: Props) {
             />
           }
         />
-        <UnderlineTabs
-          tabs={[
-            { label: 'Vehicles', value: 'vehicles' },
-            { label: 'Drivers', value: 'drivers' },
-          ]}
-          value={tab}
-          onChange={setTab}
-        />
       </View>
-      <View className="flex-1">{tab === 'vehicles' ? <VehiclesTab /> : <DriversTab />}</View>
+      <SwipeTabs
+        tabs={[
+          { label: 'Vehicles', value: 'vehicles' },
+          { label: 'Drivers', value: 'drivers' },
+        ]}
+        value={tab}
+        onChange={setTab}
+      >
+        <VehiclesTab />
+        <DriversTab />
+      </SwipeTabs>
     </View>
   );
 }
@@ -100,7 +102,7 @@ function VehiclesTab() {
     <FlashList
       data={list}
       keyExtractor={(v) => String(v.id)}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3 flex-row gap-3">
@@ -163,7 +165,7 @@ function DriversTab() {
     <FlashList
       data={list}
       keyExtractor={(d) => String(d.id)}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3 flex-row gap-3">

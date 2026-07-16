@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { View, Pressable, RefreshControl } from 'react-native';
+import { View, Pressable } from 'react-native';
 import { format } from 'date-fns';
 import {
   Screen,
@@ -45,11 +45,7 @@ export function HomeScreen() {
 
   return (
     <View className="flex-1">
-      <Screen
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.accent} />
-        }
-      >
+      <Screen onRefresh={refetch} refreshing={isRefetching}>
         <AppHeader eyebrow={format(new Date(), 'EEE · d MMM · yyyy')} title="Overview" live />
 
         {/* Command strip */}

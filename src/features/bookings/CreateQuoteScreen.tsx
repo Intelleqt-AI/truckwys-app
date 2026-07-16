@@ -13,6 +13,7 @@ import {
   SelectField,
   TextField,
   DateField,
+  Toggle,
   Button,
   Icon,
   Txt,
@@ -30,6 +31,7 @@ import {
   analyzeQuote,
   guardQuote,
   benchmarkQuote,
+  aiChatQuote,
   createQuote,
   patchQuote,
   sendQuote,
@@ -108,7 +110,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [validUntil, setValidUntil] = useState(plusDays(7));
   const [cargo, setCargo] = useState(str(prefill?.cargo_description));
   const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ROUND_TRIP');
-  const [notes] = useState('');
+  const [crossBorder, setCrossBorder] = useState(true);
+  const [notes, setNotes] = useState('');
+  const [nlText, setNlText] = useState('');
+  const [nlBusy, setNlBusy] = useState(false);
+  const [benchmark, setBenchmark] = useState<Record<string, unknown> | null>(null);
   const [tollOverride, setTollOverride] = useState('');
   const [tollEdited, setTollEdited] = useState(false);
   const [driverAllowance, setDriverAllowance] = useState('0');
@@ -133,6 +139,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const t = setTimeout(() => setBaseRatePerKm(String(num(pick(company, ['default_base_rate_per_km']), 10))), 0);
     return () => clearTimeout(t);
   }, [company, baseRatePerKm, editing]);
+
+  // Company can force cross-border off (derived, no state churn).
+  const allowCrossBorder = pick(company ?? {}, ['allow_cross_border']) !== false;
+  const effectiveCrossBorder = crossBorder && allowCrossBorder;
 
   // Hydrate from an existing quote (edit mode).
   useEffect(() => {
@@ -208,7 +218,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           dest_lon: delivery.lon,
           dest_country: delivery.cc,
           vehicle_type: vehicleType || 'Flatbed',
-          cross_border_enabled: pickup.cc !== delivery.cc,
+          cross_border_enabled: effectiveCrossBorder,
           weight_kg: Number(weight) * 1000 || 20000,
         });
         if (id === routeReq.current && (res as { success?: boolean }).success !== false) {
@@ -222,7 +232,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, vehicleType, weight]);
+  }, [ready, pickup, delivery, vehicleType, weight, effectiveCrossBorder]);
 
   const routes = useMemo(
     () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
@@ -313,8 +323,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           driver_cost: costs.driver,
           fuel_usage_litres: costs.fuelUsage,
           fuel_price_used: costs.fuelPrice,
-          market_rate: 0,
+          market_rate: num(pick(benchmark ?? {}, ['market_avg_rate'])),
           client_tier: 'standard',
+          skip_narrative: true,
         }).catch(() => null),
         guardQuote({
           total_cost: costs.directCost,
@@ -329,9 +340,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         setGuard(g);
         setAiBusy(false);
       }
-      benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType).catch(() => null);
+      benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType)
+        .then((b) => id === aiReq.current && setBenchmark(b))
+        .catch(() => null);
     }, 700);
     return () => clearTimeout(t);
+    // benchmark intentionally excluded (it's set inside this effect).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeData, costs, pickup, delivery, vehicleType, weight, selectedRouteIndex]);
 
   const opt = useMemo(
@@ -354,10 +369,43 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   );
   const winModel = (pick(modelStats ?? {}, ['win_model']) ?? {}) as Record<string, unknown>;
   const aiLearning = str(pick(winModel, ['mode'])) === 'heuristic';
+  const estimateLoading = (routeBusy || aiBusy) && !analysis;
   const guardMsg =
     (asArray<string>(pick(guard ?? {}, ['explanations']))[0] as unknown as string) ||
     (asArray<string>(pick(guard ?? {}, ['warnings']))[0] as unknown as string) ||
+    (asArray<string>(pick(guard ?? {}, ['suggestions']))[0] as unknown as string) ||
     'Margin is below your guardrail — review before sending.';
+
+  const submitNL = async () => {
+    if (!nlText.trim() || nlBusy) return;
+    setNlBusy(true);
+    try {
+      const res = await aiChatQuote(nlText, [], {});
+      const ex = (pick(res, ['extracted_fields']) ?? {}) as Record<string, unknown>;
+      if (pick(ex, ['cargo_description'])) setCargo(str(pick(ex, ['cargo_description'])));
+      if (pick(ex, ['weight'])) setWeight(String(num(pick(ex, ['weight']))));
+      if (pick(ex, ['vehicle_type'])) setVehicleType(str(pick(ex, ['vehicle_type'])));
+      const geocode = async (q: string, set: (l: Loc) => void) => {
+        const raw = await suggestLocations(q);
+        const first = asArray(raw)[0] as Record<string, unknown> | undefined;
+        if (first)
+          set({
+            label: str(pick(first, ['label', 'name', 'description'])),
+            lat: num(pick(first, ['lat', 'latitude'])),
+            lon: num(pick(first, ['lon', 'lng', 'longitude'])),
+            cc: str(pick(first, ['country_code'])) || undefined,
+          });
+      };
+      if (pick(ex, ['pickup_location'])) await geocode(str(pick(ex, ['pickup_location'])), setPickup);
+      if (pick(ex, ['delivery_location'])) await geocode(str(pick(ex, ['delivery_location'])), setDelivery);
+      setNlText('');
+      toast.success('Filled from description');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not parse');
+    } finally {
+      setNlBusy(false);
+    }
+  };
 
   const applyRecommended = () => {
     const target = num(pick(opt, ['optimal_price'])) || num(pick(analysis ?? {}, ['suggested_price']));
@@ -442,6 +490,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     >
       <View className="gap-4">
+        {/* Natural-language quick fill */}
+        <View className="rounded-xs border border-line bg-surface p-3">
+          <View className="mb-2 flex-row items-center gap-1.5">
+            <Icon name="sparkle" size={14} color="#4D9EFF" />
+            <Label className="text-accent">Describe it</Label>
+          </View>
+          <TextField
+            placeholder="e.g. 20t steel, Johannesburg to Cape Town, flatbed"
+            value={nlText}
+            onChangeText={setNlText}
+            multiline
+          />
+          <Button label="Fill from description" icon="sparkle" variant="secondary" loading={nlBusy} onPress={submitNL} fullWidth className="mt-2" />
+        </View>
+
         <SelectField label="Client" icon="user" placeholder="Select customer" options={customerOptions} value={customerId} onSelect={setCustomerId} />
         <SelectField label="Vehicle type" icon="truck" placeholder="Select vehicle type" options={vtypeOptions} value={vehicleType} onSelect={setVehicleType} />
         <LocationField label="Collection" value={pickup} onChange={setPickup} placeholder="Search origin" />
@@ -458,6 +521,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             onChange={(v) => setTripType(v as 'ONE_WAY' | 'ROUND_TRIP')}
           />
         </View>
+
+        {allowCrossBorder && (
+          <View className="flex-row items-center justify-between rounded-xs border border-line bg-surface px-3.5 py-3">
+            <View className="flex-1 pr-3">
+              <Txt className="text-callout text-fg">Cross-border</Txt>
+              <Txt className="mt-0.5 text-caption text-faint">Include border fees, weighbridge & non-SA tolls</Txt>
+            </View>
+            <Toggle value={crossBorder} onValueChange={setCrossBorder} />
+          </View>
+        )}
 
         <View className="flex-row gap-3">
           <View className="flex-1">
@@ -477,6 +550,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           </View>
         </View>
         <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />
+        <TextField label="Notes" placeholder="Anything the client should see" value={notes} onChangeText={setNotes} multiline />
       </View>
 
       {/* Route + estimate */}
@@ -523,7 +597,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <View className="p-4">
                   {/* Recommended price — full width */}
                   <Label className="text-faint">Recommended price</Label>
-                  {aiBusy && !analysis ? (
+                  {estimateLoading ? (
                     <View className="mt-2 flex-row items-center gap-2">
                       <ActivityIndicator size="small" color="#4D9EFF" />
                       <Mono className="text-callout text-muted">Optimising price…</Mono>
@@ -539,16 +613,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     <View className="flex-1">
                       <Label className="text-faint">Margin</Label>
                       <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
-                        {aiBusy && !analysis ? '—' : `${Math.round(optMargin)}%`}
+                        {estimateLoading ? '—' : `${Math.round(optMargin)}%`}
                       </Mono>
-                      {!(aiBusy && !analysis) && (
+                      {!(estimateLoading) && (
                         <Mono className="text-micro text-success">{formatCurrencyCompact(expProfit)} profit</Mono>
                       )}
                     </View>
                     <View className="flex-1">
                       <Label className="text-faint">Win probability</Label>
                       <Mono className="mt-1 text-fg" style={{ fontSize: 15, fontWeight: '600' }}>
-                        {aiBusy && !analysis ? '—' : winProb > 0 ? `${Math.round(winProb * 100)}%` : '—'}
+                        {estimateLoading ? '—' : winProb > 0 ? `${Math.round(winProb * 100)}%` : '—'}
                       </Mono>
                       <View className="mt-1.5 h-1 overflow-hidden rounded-pill bg-surface-hover">
                         <View style={{ width: `${Math.min(100, Math.round(winProb * 100))}%`, height: '100%' }} className="bg-accent" />
@@ -559,7 +633,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   {/* Profit sweet-spot — full width, tap to inspect */}
                   <View className="mt-4">
                     <Label className="mb-1 text-faint">Profit sweet-spot · tap to inspect</Label>
-                    {aiBusy && !analysis ? (
+                    {estimateLoading ? (
                       <View style={{ height: 56 }} className="items-center justify-center">
                         <ActivityIndicator size="small" color="#4D9EFF" />
                       </View>

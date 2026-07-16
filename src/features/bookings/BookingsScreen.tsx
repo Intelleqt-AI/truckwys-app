@@ -6,7 +6,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
   AmbientGlow,
   AppHeader,
-  UnderlineTabs,
+  SwipeTabs,
   FilterChips,
   SearchField,
   StatCard,
@@ -51,23 +51,19 @@ export function BookingsScreen({ route }: Props) {
           }
         />
       </View>
-      <View className="px-screen">
-        <UnderlineTabs
-          tabs={[
-            { label: 'Quotes', value: 'quotes' },
-            { label: 'Orders', value: 'orders' },
-            { label: 'History', value: 'history' },
-          ]}
-          value={tab}
-          onChange={setTab}
-        />
-      </View>
-
-      <View className="flex-1">
-        {tab === 'quotes' && <QuotesTab />}
-        {tab === 'orders' && <OrdersTab />}
-        {tab === 'history' && <HistoryTab />}
-      </View>
+      <SwipeTabs
+        tabs={[
+          { label: 'Quotes', value: 'quotes' },
+          { label: 'Orders', value: 'orders' },
+          { label: 'History', value: 'history' },
+        ]}
+        value={tab}
+        onChange={setTab}
+      >
+        <QuotesTab />
+        <OrdersTab />
+        <HistoryTab />
+      </SwipeTabs>
       <Fab onPress={() => createQuote()} />
     </View>
   );
@@ -97,7 +93,7 @@ function QuotesTab() {
     <FlashList
       data={list}
       keyExtractor={(q) => String(q.id)}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ItemSeparatorComponent={() => <View className="h-2.5" />}
       ListHeaderComponent={
         <View className="mb-3">
@@ -235,7 +231,7 @@ function LoadList({
     <FlashList
       data={list}
       keyExtractor={(l) => String(l.id)}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 120 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3 flex-row flex-wrap gap-2.5">

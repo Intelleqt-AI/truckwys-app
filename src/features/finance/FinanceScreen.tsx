@@ -7,7 +7,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
   AmbientGlow,
   AppHeader,
-  UnderlineTabs,
+  SwipeTabs,
   StatCard,
   StatusPill,
   Group,
@@ -48,21 +48,20 @@ export function FinanceScreen({ route }: Props) {
             ) : undefined
           }
         />
-        <UnderlineTabs
-          tabs={[
-            { label: 'Invoices', value: 'invoices' },
-            { label: 'Expenses', value: 'expenses' },
-            { label: 'Reports', value: 'reports' },
-          ]}
-          value={tab}
-          onChange={setTab}
-        />
       </View>
-      <View className="flex-1">
-        {tab === 'invoices' && <InvoicesTab />}
-        {tab === 'expenses' && <ExpensesTab />}
-        {tab === 'reports' && <ReportsTab />}
-      </View>
+      <SwipeTabs
+        tabs={[
+          { label: 'Invoices', value: 'invoices' },
+          { label: 'Expenses', value: 'expenses' },
+          { label: 'Reports', value: 'reports' },
+        ]}
+        value={tab}
+        onChange={setTab}
+      >
+        <InvoicesTab />
+        <ExpensesTab />
+        <ReportsTab />
+      </SwipeTabs>
     </View>
   );
 }
@@ -81,7 +80,7 @@ function InvoicesTab() {
     <FlashList
       data={data}
       keyExtractor={(i) => String(i.id)}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3 flex-row gap-3">
           <StatCard label="Outstanding" value={formatCurrencyCompact(outstanding)} />
@@ -140,7 +139,7 @@ function ExpensesTab() {
     <FlashList
       data={data}
       keyExtractor={(e) => String(e.id)}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3 flex-row gap-3">
@@ -179,7 +178,7 @@ function ReportsTab() {
   const maxTrend = Math.max(1, ...monthlyTrend.flatMap((m) => [m.revenue, m.expense]));
 
   return (
-    <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32 }}>
+    <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}>
       <View className="mb-5 flex-row flex-wrap gap-3">
         <View style={{ width: '47.5%' }}>
           <StatCard label="Total revenue" value={formatCurrencyCompact(f.totalRevenue)} />

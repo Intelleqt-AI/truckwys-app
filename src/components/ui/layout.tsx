@@ -1,9 +1,10 @@
 import { type ReactNode } from 'react';
-import { View, ScrollView, Pressable, type ScrollViewProps } from 'react-native';
+import { View, ScrollView, Pressable, RefreshControl, type ScrollViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { LiveDot } from './primitives';
+import { RefreshSpinner } from './PullRefresh';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // ── Ambient glow: one fixed, faint accent bloom behind the workspace ───────
@@ -33,6 +34,8 @@ export function Screen({
   padded = true,
   className = '',
   contentClassName = '',
+  onRefresh,
+  refreshing = false,
   ...props
 }: {
   children: ReactNode;
@@ -40,15 +43,30 @@ export function Screen({
   padded?: boolean;
   className?: string;
   contentClassName?: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 } & ScrollViewProps) {
   const insets = useSafeAreaInsets();
   const pad = padded ? 'px-screen' : '';
+  // Branded pull-to-refresh: suppress the OS spinner (transparent) and show our
+  // own RefreshSpinner while refreshing.
+  const refreshControl = onRefresh ? (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      tintColor="transparent"
+      colors={['transparent']}
+      progressBackgroundColor="transparent"
+    />
+  ) : undefined;
+
   const body = scroll ? (
     <ScrollView
       className={`flex-1 ${className}`}
-      contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      refreshControl={refreshControl}
       {...props}
     >
       <View className={`${pad} ${contentClassName}`}>{children}</View>
@@ -61,6 +79,7 @@ export function Screen({
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
       <AmbientGlow />
       {body}
+      {onRefresh && <RefreshSpinner visible={refreshing} />}
     </View>
   );
 }
@@ -204,7 +223,7 @@ export function Fab({ onPress, icon = 'plus' }: { onPress: () => void; icon?: Ic
       accessibilityLabel="Create"
       className="absolute right-4 h-14 w-14 items-center justify-center rounded-sm bg-accent active:opacity-90"
       style={{
-        bottom: insets.bottom + 16,
+        bottom: insets.bottom + 96,
         shadowColor: colors.accent,
         shadowOpacity: 0.4,
         shadowRadius: 12,

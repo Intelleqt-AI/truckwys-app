@@ -24,6 +24,7 @@ import { NotificationsScreen } from '@/features/more/NotificationsScreen';
 import { CopilotScreen } from '@/features/more/CopilotScreen';
 import { SettingsScreen } from '@/features/more/SettingsScreen';
 import { StubScreen } from '@/features/more/StubScreen';
+import { MoreScreen } from '@/features/more/MoreScreen';
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
@@ -34,6 +35,7 @@ export function AppNavigator() {
 
       {/* Detail overlays (slide-over) */}
       <Stack.Group screenOptions={{ animation: 'slide_from_right' }}>
+        <Stack.Screen name="More" component={MoreScreen} />
         <Stack.Screen name="LoadDetail" component={LoadDetailScreen} />
         <Stack.Screen name="QuoteDetail" component={QuoteDetailScreen} />
         <Stack.Screen name="VehicleDetail" component={VehicleDetailScreen} />

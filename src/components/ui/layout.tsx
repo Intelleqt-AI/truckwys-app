@@ -1,10 +1,10 @@
 import { type ReactNode } from 'react';
-import { View, ScrollView, Pressable, RefreshControl, type ScrollViewProps } from 'react-native';
+import { View, ScrollView, Pressable, type ScrollViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { LiveDot } from './primitives';
-import { RefreshSpinner } from './PullRefresh';
+import { RefreshScroll } from './PullRefresh';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // ── Ambient glow: one fixed, faint accent bloom behind the workspace ───────
@@ -48,38 +48,35 @@ export function Screen({
 } & ScrollViewProps) {
   const insets = useSafeAreaInsets();
   const pad = padded ? 'px-screen' : '';
-  // Branded pull-to-refresh: suppress the OS spinner (transparent) and show our
-  // own RefreshSpinner while refreshing.
-  const refreshControl = onRefresh ? (
-    <RefreshControl
-      refreshing={refreshing}
-      onRefresh={onRefresh}
-      tintColor="transparent"
-      colors={['transparent']}
-      progressBackgroundColor="transparent"
-    />
-  ) : undefined;
+  const contentPad = { paddingBottom: insets.bottom + 100 };
 
-  const body = scroll ? (
-    <ScrollView
-      className={`flex-1 ${className}`}
-      contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-      refreshControl={refreshControl}
-      {...props}
-    >
-      <View className={`${pad} ${contentClassName}`}>{children}</View>
-    </ScrollView>
-  ) : (
-    <View className={`flex-1 ${pad} ${className} ${contentClassName}`}>{children}</View>
-  );
+  let body: ReactNode;
+  if (scroll && onRefresh) {
+    body = (
+      <RefreshScroll refreshing={refreshing} onRefresh={onRefresh} contentContainerStyle={contentPad} {...props}>
+        <View className={`${pad} ${contentClassName}`}>{children}</View>
+      </RefreshScroll>
+    );
+  } else if (scroll) {
+    body = (
+      <ScrollView
+        className={`flex-1 ${className}`}
+        contentContainerStyle={contentPad}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        {...props}
+      >
+        <View className={`${pad} ${contentClassName}`}>{children}</View>
+      </ScrollView>
+    );
+  } else {
+    body = <View className={`flex-1 ${pad} ${className} ${contentClassName}`}>{children}</View>;
+  }
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
       <AmbientGlow />
       {body}
-      {onRefresh && <RefreshSpinner visible={refreshing} />}
     </View>
   );
 }

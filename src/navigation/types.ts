@@ -14,7 +14,6 @@ export type TabParamList = {
   Bookings: { tab?: BookingsTab } | undefined;
   Fleet: { tab?: FleetTab } | undefined;
   Finance: { tab?: FinanceTab } | undefined;
-  More: undefined;
 };
 
 export type AppStackParamList = {
@@ -36,6 +35,7 @@ export type AppStackParamList = {
   AddDriver: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AdvanceDetail: { id: Id };
   RiskScores: undefined;
+  More: undefined;
   Activity: undefined;
   Copilot: undefined;
   Insights: undefined;

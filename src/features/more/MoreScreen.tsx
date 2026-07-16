@@ -4,6 +4,7 @@ import {
   AppHeader,
   Group,
   Avatar,
+  IconButton,
   Txt,
   Mono,
   Label,
@@ -53,6 +54,11 @@ export function MoreScreen() {
 
   return (
     <Screen>
+      {nav.canGoBack() && (
+        <View className="-ml-2 mb-1">
+          <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => nav.goBack()} />
+        </View>
+      )}
       <AppHeader eyebrow="Account" title="More" />
 
       {/* Profile header */}

@@ -11,6 +11,7 @@ import {
   Button,
   Avatar,
   Icon,
+  IconButton,
   Txt,
   Mono,
   Label,
@@ -19,13 +20,15 @@ import {
 } from '@/components/ui';
 import { HomeSkeleton, ErrorState } from '@/components/feedback';
 import { useOverview } from './api';
+import { useUnreadCount } from '@/features/more/api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
 
 export function HomeScreen() {
   const { data, isLoading, isError, refetch, isRefetching } = useOverview();
-  const { goTab, openQuote, openLoad, createQuote } = useAppNavigation();
+  const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } = useAppNavigation();
+  const { data: unread } = useUnreadCount();
   const { colors } = useTheme();
 
   const heatColor = useCallback(
@@ -46,14 +49,34 @@ export function HomeScreen() {
   return (
     <View className="flex-1">
       <Screen onRefresh={refetch} refreshing={isRefetching}>
-        <AppHeader eyebrow={format(new Date(), 'EEE · d MMM · yyyy')} title="Overview" live />
+        <AppHeader
+          eyebrow={format(new Date(), 'EEE · d MMM · yyyy')}
+          title="Overview"
+          live
+          right={
+            <View className="flex-row items-center">
+              <View>
+                <IconButton name="bell" accessibilityLabel="Notifications" onPress={openNotifications} />
+                {!!unread && unread > 0 && (
+                  <View
+                    className="absolute right-1 top-0.5 min-w-[15px] items-center justify-center rounded-pill px-1"
+                    style={{ height: 15, backgroundColor: '#FF4949' }}
+                  >
+                    <Mono style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>{unread > 9 ? '9+' : unread}</Mono>
+                  </View>
+                )}
+              </View>
+              <IconButton name="settings" accessibilityLabel="Settings & more" onPress={openMore} />
+            </View>
+          }
+        />
 
         {/* Command strip */}
         <View className="mb-5 flex-row rounded-xs border border-line bg-surface py-3">
           {[
             { label: 'Active loads', value: String(data.activeLoads), onPress: () => goTab('Bookings', { tab: 'orders' }), warn: false },
             { label: 'Fleet ready', value: `${data.activeVehicles}/${data.totalVehicles}`, onPress: () => goTab('Fleet'), warn: false },
-            { label: 'Advances', value: String(data.advancesPending), onPress: () => goTab('More'), warn: data.advancesPending > 0 },
+            { label: 'Advances', value: String(data.advancesPending), onPress: openMore, warn: data.advancesPending > 0 },
           ].map((s, i) => (
             <Pressable
               key={s.label}

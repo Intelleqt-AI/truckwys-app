@@ -25,5 +25,7 @@ export function useAppNavigation() {
       nav.navigate('CustomerDetail', { id, preview }),
     createQuote: (ai?: boolean) => nav.navigate('CreateQuote', { ai }),
     aiQuote: () => nav.navigate('AIQuoteChat'),
+    openMore: () => nav.navigate('More'),
+    openNotifications: () => nav.navigate('Notifications'),
   };
 }

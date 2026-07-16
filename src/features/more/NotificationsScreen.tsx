@@ -3,8 +3,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, Txt, Mono, EmptyState } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useNotifications, markNotificationRead } from './api';
+import { useNotifications, markNotificationRead, markAllNotificationsRead } from './api';
 import { formatRelativeTime } from '@/lib/formatters';
+import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Notifications'>;
@@ -12,14 +13,36 @@ type Props = NativeStackScreenProps<AppStackParamList, 'Notifications'>;
 export function NotificationsScreen({ navigation }: Props) {
   const { data, isLoading, isError, refetch } = useNotifications();
   const qc = useQueryClient();
+  const hasUnread = !!data?.some((n) => !n.read);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['notifications'] });
+    qc.invalidateQueries({ queryKey: ['notifications-unread'] });
+  };
 
   const onRead = async (id: string) => {
     await markNotificationRead(id);
-    qc.invalidateQueries({ queryKey: ['notifications'] });
+    invalidate();
+  };
+
+  const readAll = async () => {
+    try {
+      await markAllNotificationsRead();
+      invalidate();
+      toast.success('All marked read');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not mark read');
+    }
   };
 
   return (
-    <SheetScreen eyebrow="Inbox" title="Notifications" onBack={() => navigation.goBack()}>
+    <SheetScreen
+      eyebrow="Inbox"
+      title="Notifications"
+      onBack={() => navigation.goBack()}
+      actionLabel={hasUnread ? 'Mark all read' : undefined}
+      onAction={hasUnread ? readAll : undefined}
+    >
       {isLoading ? (
         <ListSkeleton />
       ) : isError ? (

@@ -17,12 +17,23 @@ export function Glass({
   style?: StyleProp<ViewStyle>;
 }) {
   const { scheme, colors } = useTheme();
-  const overlay = scheme === 'dark' ? 'rgba(10,10,10,0.55)' : 'rgba(255,255,255,0.6)';
+
+  // Android blur is unreliable/transparent on many devices — render a near-solid
+  // frosted surface there instead so the bar is always clearly visible.
+  if (Platform.OS === 'android') {
+    const solid = scheme === 'dark' ? 'rgba(16,16,16,0.96)' : 'rgba(255,255,255,0.96)';
+    return (
+      <View style={[{ overflow: 'hidden', borderRadius: radius, backgroundColor: solid, borderColor: colors.line, borderWidth: 1 }, style]}>
+        {children}
+      </View>
+    );
+  }
+
+  const overlay = scheme === 'dark' ? 'rgba(10,10,10,0.6)' : 'rgba(255,255,255,0.65)';
   return (
     <BlurView
       tint={scheme === 'dark' ? 'dark' : 'light'}
       intensity={intensity}
-      experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
       style={[{ overflow: 'hidden', borderRadius: radius, backgroundColor: overlay, borderColor: colors.line, borderWidth: 1 }, style]}
     >
       {children}

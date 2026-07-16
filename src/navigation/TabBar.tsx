@@ -60,7 +60,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
       style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom + 18 }}
     >
       <Glass
-        radius={20}
+        radius={16}
         intensity={40}
         style={{
           height: BAR_HEIGHT,

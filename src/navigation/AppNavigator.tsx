@@ -1,5 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { AppStackParamList } from './types';
+import { useTheme } from '@/theme/ThemeProvider';
 import { AppTabs } from './AppTabs';
 import { LoadDetailScreen } from '@/features/bookings/LoadDetailScreen';
 import { QuoteDetailScreen } from '@/features/bookings/QuoteDetailScreen';
@@ -29,8 +30,11 @@ import { MoreScreen } from '@/features/more/MoreScreen';
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
 export function AppNavigator() {
+  const { colors } = useTheme();
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bgDeep } }}
+    >
       <Stack.Screen name="Tabs" component={AppTabs} />
 
       {/* Detail overlays (slide-over) */}

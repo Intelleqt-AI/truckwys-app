@@ -54,19 +54,19 @@ export function HomeScreen() {
           title="Overview"
           live
           right={
-            <View className="flex-row items-center">
+            <View className="flex-row items-center gap-1">
               <View>
-                <IconButton name="bell" accessibilityLabel="Notifications" onPress={openNotifications} />
+                <IconButton name="bell" size={23} color={colors.fg} accessibilityLabel="Notifications" onPress={openNotifications} />
                 {!!unread && unread > 0 && (
                   <View
-                    className="absolute right-1 top-0.5 min-w-[15px] items-center justify-center rounded-pill px-1"
-                    style={{ height: 15, backgroundColor: '#FF4949' }}
+                    className="absolute right-0.5 top-0 min-w-[16px] items-center justify-center rounded-pill px-1"
+                    style={{ height: 16, backgroundColor: '#FF4949' }}
                   >
                     <Mono style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>{unread > 9 ? '9+' : unread}</Mono>
                   </View>
                 )}
               </View>
-              <IconButton name="settings" accessibilityLabel="Settings & more" onPress={openMore} />
+              <IconButton name="settings" size={23} color={colors.fg} accessibilityLabel="Settings & more" onPress={openMore} />
             </View>
           }
         />

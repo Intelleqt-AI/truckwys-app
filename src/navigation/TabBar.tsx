@@ -56,9 +56,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const { scheme } = useTheme();
   const [barW, setBarW] = useState(0);
-  // Frosted-glass pill: translucent fill + brighter hairline edge (reference look).
-  const pillBg = scheme === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.75)';
-  const pillEdge = scheme === 'dark' ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.95)';
+  // Frosted-glass pill: accent-tinted translucent fill + bright hairline edge
+  // (reference look) — strong enough to read on the near-solid Android bar.
+  const pillBg = scheme === 'dark' ? 'rgba(120,170,255,0.22)' : 'rgba(37,99,235,0.12)';
+  const pillEdge = scheme === 'dark' ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.95)';
 
   const count = state.routes.length;
   const cellW = barW ? barW / count : 0;

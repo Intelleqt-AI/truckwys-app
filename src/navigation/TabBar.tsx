@@ -32,8 +32,16 @@ const IND_H = 30;
 // M3 "emphasized decelerate" easing.
 const EASE = Easing.bezier(0.05, 0.7, 0.1, 1);
 
-function Destination({ focused, label, icon }: { focused: boolean; label: string; icon: IconName }) {
-  const { colors } = useTheme();
+function Destination({
+  focused,
+  label,
+  icon,
+}: {
+  focused: boolean;
+  label: string;
+  icon: IconName;
+}) {
+  const { scheme, colors } = useTheme();
   const t = useSharedValue(focused ? 1 : 0);
 
   useEffect(() => {
@@ -46,11 +54,13 @@ function Destination({ focused, label, icon }: { focused: boolean; label: string
     transform: [{ scaleX: 0.4 + t.value * 0.6 }],
   }));
 
+  // Accent-alpha fill reads clearly on both themes (accentDim is ~white in light).
+  const indicatorBg = scheme === 'dark' ? 'rgba(77,158,255,0.22)' : 'rgba(37,99,235,0.14)';
   const iconColor = focused ? colors.accent : colors.muted;
   const labelColor = focused ? colors.fg : colors.faint;
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 5 }}>
       <View style={{ width: IND_W, height: IND_H, alignItems: 'center', justifyContent: 'center' }}>
         <Animated.View
           pointerEvents="none"
@@ -60,16 +70,16 @@ function Destination({ focused, label, icon }: { focused: boolean; label: string
               width: IND_W,
               height: IND_H,
               borderRadius: IND_H / 2,
-              backgroundColor: colors.accentDim,
+              backgroundColor: indicatorBg,
             },
             indicator,
           ]}
         />
-        <Icon name={icon} size={21} color={iconColor} strokeWidth={focused ? 2.2 : 1.8} />
+        <Icon name={icon} size={22} color={iconColor} strokeWidth={focused ? 2.2 : 1.8} />
       </View>
       <Mono
         style={{
-          fontSize: 9.5,
+          fontSize: 10,
           letterSpacing: 0.8,
           textTransform: 'uppercase',
           color: labelColor,
@@ -94,14 +104,20 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           borderLeftWidth: 0,
           borderRightWidth: 0,
           borderBottomWidth: 0,
-          paddingBottom: insets.bottom,
+          // Breathing room even on devices with no gesture inset.
+          paddingBottom: Math.max(insets.bottom, 10),
+          paddingTop: 6,
         }}
       >
         <View style={{ height: CONTENT_H, flexDirection: 'row' }}>
           {state.routes.map((route, index) => {
             const focused = state.index === index;
             const onPress = () => {
-              const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+              const event = navigation.emit({
+                type: 'tabPress',
+                target: route.key,
+                canPreventDefault: true,
+              });
               if (!focused && !event.defaultPrevented) {
                 if (Platform.OS !== 'web') void Haptics.selectionAsync();
                 navigation.navigate(route.name);
@@ -116,7 +132,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                 accessibilityLabel={route.name}
                 style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.75 : 1 })}
               >
-                <Destination focused={focused} label={route.name} icon={TAB_ICON[route.name] ?? 'grid'} />
+                <Destination
+                  focused={focused}
+                  label={route.name}
+                  icon={TAB_ICON[route.name] ?? 'grid'}
+                />
               </Pressable>
             );
           })}

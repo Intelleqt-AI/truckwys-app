@@ -4,19 +4,21 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  withTiming,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '@/components/ui/icons';
-import { Mono } from '@/components/ui/Text';
+import { Txt } from '@/components/ui/Text';
 import { Glass } from '@/components/ui/Glass';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Floating pill bottom bar. Layout is FIXED (equal-width cells that never
-// reflow); a single indicator pill springs to the active cell. The active
-// tab's label fades in beneath its icon — nothing shifts horizontally.
+// Floating pill bottom bar. Equal-width cells (the bar itself never reflows);
+// a frosted-glass indicator pill springs to the active cell, and the active
+// tab shows icon + label INLINE inside it (reference layout).
 const TAB_ICON: Record<string, IconName> = {
   Home: 'home',
   Bookings: 'file',
@@ -30,26 +32,21 @@ const PILL_H = 46;
 
 function TabCell({ focused, label, icon }: { focused: boolean; label: string; icon: IconName }) {
   const { colors } = useTheme();
-  const t = useSharedValue(focused ? 1 : 0);
-  useEffect(() => {
-    t.value = withTiming(focused ? 1 : 0, { duration: 200 });
-  }, [focused, t]);
-  // Icon rides up slightly to make room for the label; label fades in below.
-  const iconStyle = useAnimatedStyle(() => ({ transform: [{ translateY: -t.value * 7 }] }));
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: t.value,
-    transform: [{ translateY: (1 - t.value) * 4 }],
-  }));
-  const color = focused ? colors.accent : colors.faint;
+  const color = focused ? colors.fg : colors.faint;
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <Animated.View style={iconStyle}>
-        <Icon name={icon} size={22} color={color} strokeWidth={focused ? 2.3 : 1.8} />
-      </Animated.View>
-      <Animated.View style={[{ position: 'absolute', bottom: 8 }, labelStyle]}>
-        <Mono style={{ fontSize: 8.5, letterSpacing: 0.5, textTransform: 'uppercase', color, fontWeight: '700' }}>
-          {label}
-        </Mono>
+      <Animated.View
+        layout={LinearTransition.duration(220)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}
+      >
+        <Icon name={icon} size={22} color={color} strokeWidth={focused ? 2.2 : 1.8} />
+        {focused && (
+          <Animated.View entering={FadeIn.duration(180).delay(60)} exiting={FadeOut.duration(100)}>
+            <Txt style={{ fontSize: 14, fontWeight: '600', color }} numberOfLines={1}>
+              {label}
+            </Txt>
+          </Animated.View>
+        )}
       </Animated.View>
     </View>
   );
@@ -57,8 +54,11 @@ function TabCell({ focused, label, icon }: { focused: boolean; label: string; ic
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { scheme } = useTheme();
   const [barW, setBarW] = useState(0);
+  // Frosted-glass pill: translucent fill + brighter hairline edge (reference look).
+  const pillBg = scheme === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.75)';
+  const pillEdge = scheme === 'dark' ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.95)';
 
   const count = state.routes.length;
   const cellW = barW ? barW / count : 0;
@@ -104,7 +104,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                   width: pillW,
                   height: PILL_H,
                   borderRadius: PILL_H / 2,
-                  backgroundColor: colors.accentDim,
+                  backgroundColor: pillBg,
+                  borderWidth: 1,
+                  borderColor: pillEdge,
                 },
                 pill,
               ]}
@@ -114,7 +116,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             {state.routes.map((route, index) => {
               const focused = state.index === index;
               const onPress = () => {
-                const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+                const event = navigation.emit({
+                  type: 'tabPress',
+                  target: route.key,
+                  canPreventDefault: true,
+                });
                 if (!focused && !event.defaultPrevented) {
                   if (Platform.OS !== 'web') void Haptics.selectionAsync();
                   navigation.navigate(route.name);
@@ -129,7 +135,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                   accessibilityLabel={route.name}
                   style={{ flex: 1 }}
                 >
-                  <TabCell focused={focused} label={route.name} icon={TAB_ICON[route.name] ?? 'grid'} />
+                  <TabCell
+                    focused={focused}
+                    label={route.name}
+                    icon={TAB_ICON[route.name] ?? 'grid'}
+                  />
                 </Pressable>
               );
             })}

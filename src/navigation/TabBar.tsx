@@ -14,10 +14,9 @@ import { Mono } from '@/components/ui/Text';
 import { Glass } from '@/components/ui/Glass';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Material 3 navigation bar, in Truckwys tokens.
-// Docked full-width surface with a hairline top edge; every destination keeps
-// its label; the active icon gets a pill indicator that expands in place
-// (M3 motion — no sliding element, so nothing can misalign or reflow).
+// Floating frosted-glass tab bar with M3 destination treatment: every tab
+// keeps its label; the active icon gets a pill indicator that expands in
+// place (no sliding element — nothing can reflow or misalign).
 const TAB_ICON: Record<string, IconName> = {
   Home: 'home',
   Bookings: 'file',
@@ -25,7 +24,8 @@ const TAB_ICON: Record<string, IconName> = {
   Finance: 'receipt',
 };
 
-const CONTENT_H = 62;
+const H_MARGIN = 16;
+const BAR_HEIGHT = 68;
 const IND_W = 56;
 const IND_H = 30;
 
@@ -60,7 +60,7 @@ function Destination({
   const labelColor = focused ? colors.fg : colors.faint;
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 }}>
       <View style={{ width: IND_W, height: IND_H, alignItems: 'center', justifyContent: 'center' }}>
         <Animated.View
           pointerEvents="none"
@@ -79,7 +79,7 @@ function Destination({
       </View>
       <Mono
         style={{
-          fontSize: 10,
+          fontSize: 9.5,
           letterSpacing: 0.8,
           textTransform: 'uppercase',
           color: labelColor,
@@ -96,20 +96,23 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
 
   return (
-    <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+    <View
+      pointerEvents="box-none"
+      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom + 14 }}
+    >
       <Glass
-        intensity={50}
-        radius={0}
+        radius={BAR_HEIGHT / 2}
+        intensity={45}
         style={{
-          borderLeftWidth: 0,
-          borderRightWidth: 0,
-          borderBottomWidth: 0,
-          // Breathing room even on devices with no gesture inset.
-          paddingBottom: Math.max(insets.bottom, 10),
-          paddingTop: 6,
+          height: BAR_HEIGHT,
+          shadowColor: '#000',
+          shadowOpacity: 0.3,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: 10 },
+          elevation: 14,
         }}
       >
-        <View style={{ height: CONTENT_H, flexDirection: 'row' }}>
+        <View style={{ flex: 1, flexDirection: 'row', paddingHorizontal: 6 }}>
           {state.routes.map((route, index) => {
             const focused = state.index === index;
             const onPress = () => {
@@ -130,7 +133,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                 accessibilityRole="button"
                 accessibilityState={{ selected: focused }}
                 accessibilityLabel={route.name}
-                style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.75 : 1 })}
+                style={{ flex: 1 }}
               >
                 <Destination
                   focused={focused}

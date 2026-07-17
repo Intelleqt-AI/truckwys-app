@@ -24,7 +24,9 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
   const { data, isError, refetch } = useInvoice(id, preview);
   const qc = useQueryClient();
-  const [busy, setBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [payBusy, setPayBusy] = useState(false);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this invoice." />;
   const inv = (data ?? {}) as Record<string, unknown>;
@@ -42,8 +44,9 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       qc.invalidateQueries({ queryKey: ['invoices'] }),
     ]);
 
-  const run = async (fn: () => Promise<unknown>, okMsg: string) => {
-    setBusy(true);
+  // Per-action flags so each button spins independently.
+  const run = async (setFlag: (v: boolean) => void, fn: () => Promise<unknown>, okMsg: string) => {
+    setFlag(true);
     try {
       await fn();
       await refresh();
@@ -51,12 +54,12 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
-      setBusy(false);
+      setFlag(false);
     }
   };
 
   const openPdf = async () => {
-    setBusy(true);
+    setPdfBusy(true);
     try {
       const res = await generateInvoicePdf(id);
       const url = str(pick(res, ['pdf_url', 'url', 'file']));
@@ -65,7 +68,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not generate PDF');
     } finally {
-      setBusy(false);
+      setPdfBusy(false);
     }
   };
 
@@ -81,7 +84,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Record',
-        onPress: () => run(() => recordPayment({ invoice: Number(id), amount: balance }), 'Payment recorded'),
+        onPress: () => run(setPayBusy, () => recordPayment({ invoice: Number(id), amount: balance }), 'Payment recorded'),
       },
     ]);
 
@@ -96,24 +99,24 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
         <View className="gap-2.5">
           <View className="flex-row gap-2.5">
             <View className="flex-1">
-              <Button label="PDF" icon="download" variant="secondary" loading={busy} onPress={openPdf} fullWidth />
+              <Button label="PDF" icon="download" variant="secondary" loading={pdfBusy} onPress={openPdf} fullWidth />
             </View>
             <View className="flex-1">
-              <Button label="Send" icon="send" loading={busy} onPress={() => run(() => sendInvoice(id), 'Invoice sent')} fullWidth />
+              <Button label="Send" icon="send" loading={sendBusy} onPress={() => run(setSendBusy, () => sendInvoice(id), 'Invoice sent')} fullWidth />
             </View>
           </View>
           {status !== 'PAID' && (
             <View className="flex-row gap-2.5">
               <View className="flex-1">
-                <Button label="Reminder" icon="bell" variant="secondary" onPress={() => run(() => sendInvoiceReminder(id), 'Reminder sent')} fullWidth />
+                <Button label="Reminder" icon="bell" variant="secondary" onPress={() => run(setSendBusy, () => sendInvoiceReminder(id), 'Reminder sent')} fullWidth />
               </View>
               <View className="flex-1">
-                <Button label="Record payment" icon="dollar" onPress={confirmPayment} fullWidth />
+                <Button label="Record payment" icon="dollar" loading={payBusy} onPress={confirmPayment} fullWidth />
               </View>
             </View>
           )}
           {status !== 'PAID' && (
-            <Button label="Mark as paid" variant="secondary" onPress={() => run(() => markInvoicePaid(id), 'Marked paid')} fullWidth />
+            <Button label="Mark as paid" variant="secondary" onPress={() => run(setPayBusy, () => markInvoicePaid(id), 'Marked paid')} fullWidth />
           )}
           {eligible && status !== 'PAID' && (
             <Button label="Request Fast Pay advance" icon="dollar" onPress={() => navigation.navigate('Capital')} fullWidth />

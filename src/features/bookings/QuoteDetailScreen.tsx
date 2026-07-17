@@ -31,7 +31,9 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
   const { data, isError, refetch } = useQuote(id, preview);
   const qc = useQueryClient();
-  const [busy, setBusy] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [convertBusy, setConvertBusy] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this quote." />;
   const q = (data ?? {}) as Record<string, unknown>;
@@ -65,8 +67,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       qc.invalidateQueries({ queryKey: ['quotes'] }),
     ]);
 
-  const run = async (fn: () => Promise<unknown>, okMsg: string, back = false) => {
-    setBusy(true);
+  // Each action drives its own spinner so buttons never co-load.
+  const run = async (
+    setFlag: (v: boolean) => void,
+    fn: () => Promise<unknown>,
+    okMsg: string,
+    back = false,
+  ) => {
+    setFlag(true);
     try {
       await fn();
       await refresh();
@@ -75,16 +83,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');
     } finally {
-      setBusy(false);
+      setFlag(false);
     }
   };
 
-  const doSend = () => run(() => sendQuote(id), 'Quote sent to client');
-  const convert = () => run(() => convertQuoteToLoad(id), 'Converted to booking', true);
+  const doSend = () => run(setSendBusy, () => sendQuote(id), 'Quote sent to client');
+  const convert = () => run(setConvertBusy, () => convertQuoteToLoad(id), 'Converted to booking', true);
   const editQuote = () => navigation.navigate('CreateQuote', { quoteId: id });
 
   const download = async () => {
-    setBusy(true);
+    setDownloadBusy(true);
     try {
       const blob = await downloadQuotePdf(id);
       const base64: string = await new Promise((resolve, reject) => {
@@ -103,7 +111,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not download PDF');
     } finally {
-      setBusy(false);
+      setDownloadBusy(false);
     }
   };
 
@@ -115,7 +123,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const confirmDelete = () =>
     Alert.alert('Delete quote', 'Permanently delete this quote?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => run(() => deleteQuote(id), 'Quote deleted', true) },
+      { text: 'Delete', style: 'destructive', onPress: () => run(setConvertBusy, () => deleteQuote(id), 'Quote deleted', true) },
     ]);
 
   const footer = (
@@ -125,15 +133,15 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           <Button label="Edit quote" icon="edit" variant="secondary" onPress={editQuote} fullWidth />
         </View>
         <View className="flex-1">
-          <Button label="Send" icon="send" loading={busy} onPress={doSend} fullWidth />
+          <Button label="Send" icon="send" loading={sendBusy} onPress={doSend} fullWidth />
         </View>
       </View>
       {accepted && (
-        <Button label="Convert to booking" icon="arrowRight" loading={busy} onPress={convert} fullWidth />
+        <Button label="Convert to booking" icon="arrowRight" loading={convertBusy} onPress={convert} fullWidth />
       )}
       <View className="flex-row gap-2.5">
         <View className="flex-1">
-          <Button label="Download PDF" icon="download" variant="secondary" loading={busy} onPress={download} fullWidth />
+          <Button label="Download PDF" icon="download" variant="secondary" loading={downloadBusy} onPress={download} fullWidth />
         </View>
         <View className="flex-1">
           <Button label="Delete" variant="danger" icon="x" onPress={confirmDelete} fullWidth />

@@ -33,6 +33,7 @@ import {
   useSessions,
   revokeSession,
   setTwoFactor,
+  deleteAccount,
   useUsers,
   inviteUser,
   updateUserRole,
@@ -251,6 +252,7 @@ function SecuritySection() {
     }
   };
   const user = useAuthStore((s) => s.user);
+  const signOutStore = useAuthStore((s) => s.signOut);
   const [twoFa, setTwoFa] = useState(Boolean(user?.two_factor_enabled));
   const { data: sessions } = useSessions();
   const qc = useQueryClient();
@@ -292,6 +294,36 @@ function SecuritySection() {
           </View>
           <Toggle value={twoFa} onValueChange={toggle2fa} />
         </View>
+      </Group>
+
+      <Group label="Danger zone">
+        <Pressable
+          onPress={() =>
+            Alert.alert(
+              'Delete account',
+              'This permanently deletes your account and data. This cannot be undone.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await deleteAccount();
+                      await signOutStore();
+                    } catch {
+                      toast.info('Contact support@truckwys.co.za to complete account deletion.');
+                    }
+                  },
+                },
+              ],
+            )
+          }
+          className="min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover"
+        >
+          <Icon name="x" size={18} color="#FF4949" />
+          <Txt className="flex-1 text-body text-danger">Delete account</Txt>
+        </Pressable>
       </Group>
 
       {!!sessions?.length && (

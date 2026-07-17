@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from './types';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -12,7 +13,13 @@ export function AuthStack() {
   const { colors } = useTheme();
   return (
     <Stack.Navigator
-      screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: colors.bgDeep } }}
+      screenOptions={{
+        headerShown: false,
+        animation: Platform.OS === 'ios' ? 'default' : 'ios_from_right',
+        gestureEnabled: true,
+        fullScreenGestureEnabled: true,
+        contentStyle: { backgroundColor: colors.bgDeep },
+      }}
     >
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="VerifyOtp" component={VerifyOtpScreen} />

@@ -41,11 +41,15 @@ export function FinanceScreen({ route }: Props) {
         <AppHeader
           title="Finance"
           right={
-            tab === 'invoices' ? (
-              <IconButton name="plus" accessibilityLabel="New invoice" onPress={() => nav.navigate('CreateInvoice')} />
-            ) : tab === 'expenses' ? (
-              <IconButton name="plus" accessibilityLabel="New expense" onPress={() => nav.navigate('AddExpense')} />
-            ) : undefined
+            // Ghost slot on Reports keeps the header height identical across
+            // tabs, so the pager never jumps vertically.
+            <View style={tab === 'reports' ? { opacity: 0 } : undefined} pointerEvents={tab === 'reports' ? 'none' : 'auto'}>
+              <IconButton
+                name="plus"
+                accessibilityLabel={tab === 'expenses' ? 'New expense' : 'New invoice'}
+                onPress={() => nav.navigate(tab === 'expenses' ? 'AddExpense' : 'CreateInvoice')}
+              />
+            </View>
           }
         />
       </View>

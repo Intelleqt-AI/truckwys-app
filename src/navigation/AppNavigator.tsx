@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { AppStackParamList } from './types';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -33,12 +34,20 @@ export function AppNavigator() {
   const { colors } = useTheme();
   return (
     <Stack.Navigator
-      screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bgDeep } }}
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.bgDeep },
+        // Native iOS push with parallax on both platforms; swipe-back from
+        // anywhere on iOS (Facebook/Twitter feel).
+        animation: Platform.OS === 'ios' ? 'default' : 'ios_from_right',
+        gestureEnabled: true,
+        fullScreenGestureEnabled: true,
+      }}
     >
       <Stack.Screen name="Tabs" component={AppTabs} />
 
-      {/* Detail overlays (slide-over) */}
-      <Stack.Group screenOptions={{ animation: 'slide_from_right' }}>
+      {/* Detail overlays (native push) */}
+      <Stack.Group>
         <Stack.Screen name="More" component={MoreScreen} />
         <Stack.Screen name="LoadDetail" component={LoadDetailScreen} />
         <Stack.Screen name="QuoteDetail" component={QuoteDetailScreen} />

@@ -12,7 +12,6 @@ import {
   StatCard,
   StatusPill,
   Avatar,
-  ConfidenceTag,
   Card,
   Txt,
   Mono,
@@ -122,12 +121,9 @@ function QuoteCard({ quote, onPress }: { quote: QuoteLite; onPress: () => void }
         </Txt>
         <View className="mt-3 flex-row items-center justify-between">
           <Mono className="text-body font-semibold text-fg">{formatCurrency(quote.amount)}</Mono>
-          <View className="flex-row items-center gap-2.5">
-            {quote.marginPct != null && (
-              <Mono className="text-micro text-faint">Margin {quote.marginPct}%</Mono>
-            )}
-            {quote.confidence != null && <ConfidenceTag value={quote.confidence} />}
-          </View>
+          {quote.marginPct != null && (
+            <Mono className="text-micro text-faint">Margin {quote.marginPct}%</Mono>
+          )}
         </View>
       </Pressable>
     </Card>

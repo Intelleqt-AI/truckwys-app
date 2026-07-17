@@ -1,5 +1,12 @@
-import { View, Pressable } from 'react-native';
-import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+import { useEffect, useState } from 'react';
+import { View, Pressable, Platform } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '@/components/ui/icons';
@@ -7,9 +14,9 @@ import { Mono } from '@/components/ui/Text';
 import { Glass } from '@/components/ui/Glass';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Floating pill bottom bar (Material-3 / "expressive"): the active tab is a
-// filled rounded pill with icon + label inline; inactive tabs are icon-only.
-// Widths morph smoothly via Reanimated layout animations.
+// Floating pill bottom bar. Layout is FIXED (equal-width cells that never
+// reflow); a single indicator pill springs to the active cell. The active
+// tab's label fades in beneath its icon — nothing shifts horizontally.
 const TAB_ICON: Record<string, IconName> = {
   Home: 'home',
   Bookings: 'file',
@@ -18,11 +25,56 @@ const TAB_ICON: Record<string, IconName> = {
 };
 
 const H_MARGIN = 20;
-const BAR_HEIGHT = 58;
+const BAR_HEIGHT = 62;
+const PILL_H = 46;
+
+function TabCell({ focused, label, icon }: { focused: boolean; label: string; icon: IconName }) {
+  const { colors } = useTheme();
+  const t = useSharedValue(focused ? 1 : 0);
+  useEffect(() => {
+    t.value = withTiming(focused ? 1 : 0, { duration: 200 });
+  }, [focused, t]);
+  // Icon rides up slightly to make room for the label; label fades in below.
+  const iconStyle = useAnimatedStyle(() => ({ transform: [{ translateY: -t.value * 7 }] }));
+  const labelStyle = useAnimatedStyle(() => ({
+    opacity: t.value,
+    transform: [{ translateY: (1 - t.value) * 4 }],
+  }));
+  const color = focused ? colors.accent : colors.faint;
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View style={iconStyle}>
+        <Icon name={icon} size={22} color={color} strokeWidth={focused ? 2.3 : 1.8} />
+      </Animated.View>
+      <Animated.View style={[{ position: 'absolute', bottom: 8 }, labelStyle]}>
+        <Mono style={{ fontSize: 8.5, letterSpacing: 0.5, textTransform: 'uppercase', color, fontWeight: '700' }}>
+          {label}
+        </Mono>
+      </Animated.View>
+    </View>
+  );
+}
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const [barW, setBarW] = useState(0);
+
+  const count = state.routes.length;
+  const cellW = barW ? barW / count : 0;
+  const pillW = cellW ? cellW - 14 : 0;
+  const x = useSharedValue(0);
+
+  useEffect(() => {
+    if (!cellW) return;
+    x.value = withSpring(cellW * state.index + (cellW - pillW) / 2, {
+      damping: 20,
+      stiffness: 180,
+      mass: 0.7,
+    });
+  }, [state.index, cellW, pillW, x]);
+
+  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
   return (
     <View
@@ -41,47 +93,47 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           elevation: 14,
         }}
       >
-        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', paddingHorizontal: 8 }}>
-          {state.routes.map((route, index) => {
-            const focused = state.index === index;
-            const color = focused ? colors.accent : colors.faint;
-            const onPress = () => {
-              const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-              if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
-            };
-            return (
-              <Pressable
-                key={route.key}
-                onPress={onPress}
-                accessibilityRole="button"
-                accessibilityState={{ selected: focused }}
-                accessibilityLabel={route.name}
-                hitSlop={6}
-              >
-                <Animated.View
-                  layout={LinearTransition.duration(240)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 7,
-                    height: 40,
-                    paddingHorizontal: focused ? 16 : 12,
-                    borderRadius: 20,
-                    backgroundColor: focused ? colors.accentDim : 'transparent',
-                  }}
+        <View style={{ flex: 1 }} onLayout={(e) => setBarW(e.nativeEvent.layout.width)}>
+          {pillW > 0 && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                {
+                  position: 'absolute',
+                  top: (BAR_HEIGHT - 2 - PILL_H) / 2,
+                  width: pillW,
+                  height: PILL_H,
+                  borderRadius: PILL_H / 2,
+                  backgroundColor: colors.accentDim,
+                },
+                pill,
+              ]}
+            />
+          )}
+          <View style={{ flex: 1, flexDirection: 'row' }}>
+            {state.routes.map((route, index) => {
+              const focused = state.index === index;
+              const onPress = () => {
+                const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+                if (!focused && !event.defaultPrevented) {
+                  if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                  navigation.navigate(route.name);
+                }
+              };
+              return (
+                <Pressable
+                  key={route.key}
+                  onPress={onPress}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: focused }}
+                  accessibilityLabel={route.name}
+                  style={{ flex: 1 }}
                 >
-                  <Icon name={TAB_ICON[route.name] ?? 'grid'} size={21} color={color} strokeWidth={focused ? 2.3 : 1.9} />
-                  {focused && (
-                    <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
-                      <Mono style={{ fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', color, fontWeight: '700' }}>
-                        {route.name}
-                      </Mono>
-                    </Animated.View>
-                  )}
-                </Animated.View>
-              </Pressable>
-            );
-          })}
+                  <TabCell focused={focused} label={route.name} icon={TAB_ICON[route.name] ?? 'grid'} />
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
       </Glass>
     </View>

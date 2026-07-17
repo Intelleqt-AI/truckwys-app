@@ -194,6 +194,9 @@ export const revokeSession = (id: string | number) => deleteData({ url: `auth/se
 export const setTwoFactor = (enabled: boolean) =>
   patchData({ url: 'auth/me/', data: { two_factor_enabled: enabled } });
 
+// Apple 5.1.1(v): in-app account deletion entry point.
+export const deleteAccount = () => deleteData({ url: 'auth/me/' });
+
 // ── Users & permissions ──────────────────────────────────────────────────────
 export function useUsers() {
   return useQuery({

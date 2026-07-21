@@ -7,6 +7,10 @@ import { Icon, type IconName } from './icons';
 import { AmbientGlow } from './layout';
 import { useTheme } from '@/theme/ThemeProvider';
 
+// Square, centred hit target so the icon sits dead-centre inside the native
+// header's rounded glass button (default content is left-biased otherwise).
+const ICON_BTN = { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' } as const;
+
 // Full-screen detail screen. Drives the NATIVE iOS header: the system back
 // button (chevron + previous screen name), a large collapsing title, and a
 // Liquid Glass blur bar are all rendered by the navigator. Here we just feed
@@ -39,7 +43,7 @@ export function SheetScreen({
 
   const renderAction = useCallback(
     () => (
-      <Pressable onPress={onAction} hitSlop={8} accessibilityRole="button" accessibilityLabel={actionLabel}>
+      <Pressable onPress={onAction} hitSlop={8} accessibilityRole="button" accessibilityLabel={actionLabel} style={ICON_BTN}>
         {actionIcon ? (
           <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
         ) : (
@@ -55,7 +59,7 @@ export function SheetScreen({
   // Modals close with an X (clear "dismiss" affordance) rather than a Cancel word.
   const renderClose = useCallback(
     () => (
-      <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close">
+      <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close" style={ICON_BTN}>
         <Icon name="x" size={24} color={colors.accent} strokeWidth={2} />
       </Pressable>
     ),

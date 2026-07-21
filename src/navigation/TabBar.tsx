@@ -1,10 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Pressable, Platform } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,7 +22,7 @@ const TAB_ICON: Record<string, IconName> = {
 const H_MARGIN = 32; // narrower bar (larger side margins)
 const BAR_HEIGHT = 58;
 const HPAD = 6; // inner horizontal padding
-const V_INSET = 9; // highlight vertical inset from the bar edge (smaller pill)
+const V_INSET = 5; // highlight sits 5px inside the bar edge (bigger pill)
 const HL_H = BAR_HEIGHT - V_INSET * 2; // highlight height
 const HL_RADIUS = BAR_HEIGHT / 2 - V_INSET; // matches the bar's inner curve
 
@@ -103,7 +99,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
   const count = state.routes.length;
   const cellW = innerW ? innerW / count : 0;
-  const hlW = cellW ? cellW - 16 : 0; // smaller active highlight
+  const hlW = cellW ? cellW - 8 : 0; // bigger active highlight
   const x = useSharedValue(0);
 
   useEffect(() => {

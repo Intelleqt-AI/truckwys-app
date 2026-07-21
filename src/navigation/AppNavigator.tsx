@@ -1,5 +1,8 @@
 import { Platform } from 'react-native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import {
+  createNativeStackNavigator,
+  type NativeStackNavigationOptions,
+} from '@react-navigation/native-stack';
 import type { AppStackParamList } from './types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { AppTabs } from './AppTabs';
@@ -31,7 +34,26 @@ import { MoreScreen } from '@/features/more/MoreScreen';
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
 export function AppNavigator() {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+
+  // Native iOS large-title header with a Liquid Glass blur bar and the system
+  // back button (chevron + previous screen name + interactive swipe-back).
+  // Each screen's SheetScreen sets its headerTitle / headerRight at runtime.
+  const detailHeader: NativeStackNavigationOptions = {
+    headerShown: true,
+    headerLargeTitle: true,
+    headerTransparent: true,
+    headerBlurEffect: scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterial',
+    headerLargeTitleShadowVisible: false,
+    headerShadowVisible: false,
+    headerTintColor: colors.accent,
+    headerTitleStyle: { color: colors.fg },
+    headerLargeTitleStyle: { color: colors.fg },
+    headerStyle: { backgroundColor: 'transparent' },
+    headerBackButtonDisplayMode: 'default',
+    headerTitle: '',
+  };
+
   return (
     <Stack.Navigator
       screenOptions={{
@@ -46,8 +68,8 @@ export function AppNavigator() {
     >
       <Stack.Screen name="Tabs" component={AppTabs} />
 
-      {/* Detail overlays (native push) */}
-      <Stack.Group>
+      {/* Detail overlays — native push with native large-title header + back */}
+      <Stack.Group screenOptions={detailHeader}>
         <Stack.Screen name="More" component={MoreScreen} />
         <Stack.Screen name="LoadDetail" component={LoadDetailScreen} />
         <Stack.Screen name="QuoteDetail" component={QuoteDetailScreen} />
@@ -68,8 +90,10 @@ export function AppNavigator() {
         <Stack.Screen name="Stub" component={StubScreen} />
       </Stack.Group>
 
-      {/* Modal (slide up) */}
-      <Stack.Group screenOptions={{ presentation: 'modal' }}>
+      {/* Modal (slide up) — native header, no large title; SheetScreen adds Cancel */}
+      <Stack.Group
+        screenOptions={{ ...detailHeader, presentation: 'modal', headerLargeTitle: false }}
+      >
         <Stack.Screen name="CreateQuote" component={CreateQuoteScreen} />
         <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
         <Stack.Screen name="CreateInvoice" component={CreateInvoiceScreen} />

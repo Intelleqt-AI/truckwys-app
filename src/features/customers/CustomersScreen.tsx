@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useLayoutEffect, useCallback } from 'react';
 import { View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,7 +9,6 @@ import {
   Avatar,
   ListRow,
   IconButton,
-  Txt,
   Mono,
   EmptyState,
   Button,
@@ -17,27 +16,36 @@ import {
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useCustomers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
+import { useTheme } from '@/theme/ThemeProvider';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Customers'>;
 
 export function CustomersScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const { data, isLoading, isError, refetch } = useCustomers();
   const { openCustomer } = useAppNavigation();
   const [q, setQ] = useState('');
 
+  const renderAdd = useCallback(
+    () => <IconButton name="plus" accessibilityLabel="Add customer" onPress={() => navigation.navigate('AddCustomer')} />,
+    [navigation],
+  );
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: 'Customers',
+      headerLargeTitle: false,
+      headerTransparent: false,
+      headerStyle: { backgroundColor: colors.bgDeep },
+      headerRight: renderAdd,
+    });
+  }, [navigation, colors.bgDeep, renderAdd]);
+
   return (
-    <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
-      <View className="flex-row items-center justify-between px-2 pt-1">
-        <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
-        <IconButton name="plus" accessibilityLabel="Add customer" onPress={() => navigation.navigate('AddCustomer')} />
-      </View>
-      <View className="px-screen pb-3">
-        <Txt className="mb-3 text-title font-semibold text-fg" style={{ fontSize: 24 }}>
-          Customers
-        </Txt>
+      <View className="px-screen pb-3 pt-3">
         <SearchField value={q} onChangeText={setQ} placeholder="Search customers…" />
       </View>
 

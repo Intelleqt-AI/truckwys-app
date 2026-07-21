@@ -56,6 +56,7 @@ export function AddExpenseScreen({ navigation }: Props) {
     <SheetScreen
       eyebrow="New expense"
       title="Add expense"
+      variant="modal"
       onBack={() => navigation.goBack()}
       footer={<Button label="Add expense" loading={busy} onPress={submit} fullWidth />}
     >

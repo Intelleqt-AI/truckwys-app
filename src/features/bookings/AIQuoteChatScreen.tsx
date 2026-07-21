@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useLayoutEffect } from 'react';
 import { View, ScrollView, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHeaderHeight } from '@react-navigation/elements';
 import {
   useAudioRecorder,
   RecordingPresets,
@@ -21,8 +22,18 @@ type Fields = Record<string, unknown>;
 
 export function AIQuoteChatScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const { colors } = useTheme();
   const [messages, setMessages] = useState<Msg[]>([]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: 'AI quote',
+      headerLargeTitle: false,
+      headerTransparent: false,
+      headerStyle: { backgroundColor: colors.bgDeep },
+    });
+  }, [navigation, colors.bgDeep]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<Fields>({});
@@ -92,17 +103,12 @@ export function AIQuoteChatScreen({ navigation }: Props) {
     });
 
   return (
-    <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
-      <View className="flex-row items-center gap-1 px-2 pt-1">
-        <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
-        <Txt className="text-heading font-semibold text-fg">AI quote</Txt>
-      </View>
-
       <KeyboardAvoidingView
         className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + 8}
+        keyboardVerticalOffset={headerHeight}
       >
         <ScrollView ref={scroll} className="flex-1" contentContainerStyle={{ padding: 16, gap: 12 }} keyboardShouldPersistTaps="handled">
           {messages.length === 0 ? (

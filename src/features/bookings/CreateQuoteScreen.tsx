@@ -478,6 +478,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     <SheetScreen
       eyebrow={editing ? 'Edit' : ai ? 'AI quote' : 'New quote'}
       title={editing ? 'Edit quote' : 'Build quote'}
+      variant="modal"
       onBack={() => navigation.goBack()}
       footer={
         <View className="flex-row gap-2.5">

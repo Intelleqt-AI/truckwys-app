@@ -111,6 +111,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
     <SheetScreen
       eyebrow={editing ? 'Edit' : 'New customer'}
       title={editing ? 'Edit customer' : 'Add customer'}
+      variant="modal"
       onBack={() => navigation.goBack()}
       footer={
         <Button

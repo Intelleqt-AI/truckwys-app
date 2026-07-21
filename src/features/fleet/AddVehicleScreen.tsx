@@ -105,6 +105,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
     <SheetScreen
       eyebrow={editing ? 'Edit' : 'New vehicle'}
       title={editing ? 'Edit vehicle' : 'Add vehicle'}
+      variant="modal"
       onBack={() => navigation.goBack()}
       footer={<Button label={editing ? 'Save changes' : 'Add vehicle'} loading={busy} onPress={submit} fullWidth />}
     >

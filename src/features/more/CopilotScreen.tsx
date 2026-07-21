@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useLayoutEffect } from 'react';
 import { View, ScrollView, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useHeaderHeight } from '@react-navigation/elements';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import { AmbientGlow, IconButton, Card, Button, Txt, Mono, Label, EmptyState } from '@/components/ui';
@@ -15,8 +16,18 @@ type Msg = { role: 'user' | 'assistant'; text: string };
 
 export function CopilotScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const { colors } = useTheme();
   const [messages, setMessages] = useState<Msg[]>([]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: 'AI Copilot',
+      headerLargeTitle: false,
+      headerTransparent: false,
+      headerStyle: { backgroundColor: colors.bgDeep },
+    });
+  }, [navigation, colors.bgDeep]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
@@ -55,17 +66,12 @@ export function CopilotScreen({ navigation }: Props) {
   };
 
   return (
-    <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
-      <View className="flex-row items-center gap-1 px-2 pt-1">
-        <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
-        <Txt className="text-heading font-semibold text-fg">AI Copilot</Txt>
-      </View>
-
       <KeyboardAvoidingView
         className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={insets.top + 8}
+        keyboardVerticalOffset={headerHeight}
       >
         <ScrollView
           ref={scroll}

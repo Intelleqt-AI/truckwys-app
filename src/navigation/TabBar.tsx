@@ -13,8 +13,9 @@ import { Mono } from '@/components/ui/Text';
 import { Glass } from '@/components/ui/Glass';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Floating frosted-glass tab bar. One shared indicator pill SLIDES between
-// fixed-width cells (spring); every tab keeps its label.
+// Slack-style bottom bar: one Liquid Glass pill docked near the bottom edge.
+// The active destination sits in a rounded highlight whose radius matches the
+// bar's inner curve and springs between cells; each item scales on tap.
 const TAB_ICON: Record<string, IconName> = {
   Home: 'home',
   Bookings: 'file',
@@ -22,41 +23,73 @@ const TAB_ICON: Record<string, IconName> = {
   Finance: 'receipt',
 };
 
-const H_MARGIN = 16;
-const BAR_HEIGHT = 68;
-const IND_W = 86;
-const IND_H = 60;
+const H_MARGIN = 12;
+const BAR_HEIGHT = 58;
+const HPAD = 6; // inner horizontal padding
+const V_INSET = 6; // highlight vertical inset from the bar edge
+const HL_H = BAR_HEIGHT - V_INSET * 2; // highlight height
+const HL_RADIUS = BAR_HEIGHT / 2 - V_INSET; // matches the bar's inner curve
 
 function Destination({
   focused,
   label,
   icon,
+  onPress,
 }: {
   focused: boolean;
   label: string;
   icon: IconName;
+  onPress: () => void;
 }) {
   const { colors } = useTheme();
+  // Two decoupled shared values: focusScale is only touched in the effect,
+  // press only in handlers — never both (keeps the reanimated rule happy).
+  const focusScale = useSharedValue(focused ? 1 : 0.96);
+  const press = useSharedValue(1);
+
+  // Active item springs up a touch; inactive rests slightly smaller.
+  useEffect(() => {
+    focusScale.value = withSpring(focused ? 1 : 0.96, { damping: 15, stiffness: 200, mass: 0.6 });
+  }, [focused, focusScale]);
+
+  const content = useAnimatedStyle(() => ({
+    transform: [{ scale: focusScale.value * press.value }],
+  }));
+
   const iconColor = focused ? colors.accent : colors.muted;
   const labelColor = focused ? colors.fg : colors.faint;
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 1 }}>
-      <View style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name={icon} size={22} color={iconColor} strokeWidth={focused ? 2.2 : 1.8} />
-      </View>
-      <Mono
-        style={{
-          fontSize: 9.5,
-          letterSpacing: 0.8,
-          textTransform: 'uppercase',
-          color: labelColor,
-          fontWeight: focused ? '700' : '500',
-        }}
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => {
+        press.value = withSpring(0.9, { damping: 18, stiffness: 320, mass: 0.5 });
+      }}
+      onPressOut={() => {
+        press.value = withSpring(1, { damping: 15, stiffness: 200, mass: 0.6 });
+      }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: focused }}
+      accessibilityLabel={label}
+      style={{ flex: 1 }}
+    >
+      <Animated.View
+        style={[{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 }, content]}
       >
-        {label}
-      </Mono>
-    </View>
+        <Icon name={icon} size={22} color={iconColor} strokeWidth={focused ? 2.2 : 1.8} />
+        <Mono
+          style={{
+            fontSize: 9.5,
+            letterSpacing: 0.6,
+            textTransform: 'uppercase',
+            color: labelColor,
+            fontWeight: focused ? '700' : '500',
+          }}
+        >
+          {label}
+        </Mono>
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -65,59 +98,61 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const { scheme } = useTheme();
   const [innerW, setInnerW] = useState(0);
 
-  // Accent-alpha fill reads clearly on both themes (accentDim is ~white in light).
-  const indicatorBg = scheme === 'dark' ? 'rgba(77,158,255,0.22)' : 'rgba(37,99,235,0.14)';
+  // Accent-tinted highlight reads on both themes over the glass bar.
+  const highlightBg = scheme === 'dark' ? 'rgba(77,158,255,0.20)' : 'rgba(37,99,235,0.12)';
 
   const count = state.routes.length;
   const cellW = innerW ? innerW / count : 0;
+  const hlW = cellW ? cellW - 8 : 0;
   const x = useSharedValue(0);
 
   useEffect(() => {
     if (!cellW) return;
-    x.value = withSpring(cellW * state.index + (cellW - IND_W) / 2, {
+    x.value = withSpring(cellW * state.index + (cellW - hlW) / 2, {
       damping: 20,
-      stiffness: 190,
+      stiffness: 200,
       mass: 0.7,
     });
-  }, [state.index, cellW, x]);
+  }, [state.index, cellW, hlW, x]);
 
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+  const highlight = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
   return (
     <View
       pointerEvents="box-none"
-      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom + 14 }}
+      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom + 6 }}
     >
       <Glass
-        radius={BAR_HEIGHT / 3}
-        intensity={45}
+        interactive
+        radius={BAR_HEIGHT / 2}
+        intensity={50}
         style={{
           height: BAR_HEIGHT,
           shadowColor: '#000',
-          shadowOpacity: 0.3,
-          shadowRadius: 18,
-          shadowOffset: { width: 0, height: 10 },
+          shadowOpacity: 0.28,
+          shadowRadius: 16,
+          shadowOffset: { width: 0, height: 8 },
           elevation: 14,
         }}
       >
         <View
-          style={{ flex: 1, paddingHorizontal: 2 }}
-          onLayout={(e) => setInnerW(e.nativeEvent.layout.width - 4)}
+          style={{ flex: 1, paddingHorizontal: HPAD }}
+          onLayout={(e) => setInnerW(e.nativeEvent.layout.width - HPAD * 2)}
         >
-          {cellW > 0 && (
+          {hlW > 0 && (
             <Animated.View
               pointerEvents="none"
               style={[
                 {
                   position: 'absolute',
-                  left: 2,
-                  top: (BAR_HEIGHT - 2 - IND_H) / 2,
-                  width: IND_W,
-                  height: IND_H,
-                  borderRadius: IND_H / 3,
-                  backgroundColor: indicatorBg,
+                  left: HPAD,
+                  top: V_INSET,
+                  width: hlW,
+                  height: HL_H,
+                  borderRadius: HL_RADIUS,
+                  backgroundColor: highlightBg,
                 },
-                slide,
+                highlight,
               ]}
             />
           )}
@@ -136,20 +171,13 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                 }
               };
               return (
-                <Pressable
+                <Destination
                   key={route.key}
+                  focused={focused}
+                  label={route.name}
+                  icon={TAB_ICON[route.name] ?? 'grid'}
                   onPress={onPress}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: focused }}
-                  accessibilityLabel={route.name}
-                  style={{ flex: 1 }}
-                >
-                  <Destination
-                    focused={focused}
-                    label={route.name}
-                    icon={TAB_ICON[route.name] ?? 'grid'}
-                  />
-                </Pressable>
+                />
               );
             })}
           </View>

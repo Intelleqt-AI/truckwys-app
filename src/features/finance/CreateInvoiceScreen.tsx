@@ -61,6 +61,7 @@ export function CreateInvoiceScreen({ navigation }: Props) {
     <SheetScreen
       eyebrow="New invoice"
       title="Create invoice"
+      variant="modal"
       onBack={() => navigation.goBack()}
       footer={<Button label="Create invoice" loading={busy} onPress={submit} fullWidth />}
     >

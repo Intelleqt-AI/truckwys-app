@@ -1,10 +1,10 @@
+import { useLayoutEffect } from 'react';
 import { View, Alert, Pressable } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import {
   Screen,
-  AppHeader,
   Group,
   Avatar,
-  IconButton,
   Txt,
   Mono,
   Label,
@@ -36,7 +36,17 @@ export function MoreScreen() {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const { nav } = useAppNavigation();
+  const navigation = useNavigation();
   const { colors } = useTheme();
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: 'More',
+      headerLargeTitle: false,
+      headerTransparent: false,
+      headerStyle: { backgroundColor: colors.bgDeep },
+    });
+  }, [navigation, colors.bgDeep]);
 
   const go = (route: string) => {
     if (route === 'Support') {
@@ -53,14 +63,7 @@ export function MoreScreen() {
     ]);
 
   return (
-    <Screen>
-      {nav.canGoBack() && (
-        <View className="-ml-2 mb-1">
-          <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => nav.goBack()} />
-        </View>
-      )}
-      <AppHeader eyebrow="Account" title="More" />
-
+    <Screen topInset={false} contentClassName="pt-3">
       {/* Profile header */}
       <View className="mb-5 flex-row items-center gap-3 rounded-xs border border-line bg-surface p-4">
         <Avatar name={user?.name ?? user?.email} size={48} />

@@ -35,6 +35,7 @@ export function Screen({
   contentClassName = '',
   onRefresh,
   refreshing = false,
+  topInset = true,
   ...props
 }: {
   children: ReactNode;
@@ -44,6 +45,8 @@ export function Screen({
   contentClassName?: string;
   onRefresh?: () => void;
   refreshing?: boolean;
+  // Set false when a native navigation header already owns the top inset.
+  topInset?: boolean;
 } & ScrollViewProps) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -76,7 +79,7 @@ export function Screen({
   );
 
   return (
-    <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-bg-deep" style={{ paddingTop: topInset ? insets.top : 0 }}>
       <AmbientGlow />
       {body}
     </View>

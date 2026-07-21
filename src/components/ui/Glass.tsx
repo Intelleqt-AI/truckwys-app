@@ -1,22 +1,53 @@
 import { type ReactNode } from 'react';
 import { View, Platform, type ViewStyle, type StyleProp } from 'react-native';
 import { BlurView } from 'expo-blur';
+import {
+  GlassView,
+  isLiquidGlassAvailable,
+  isGlassEffectAPIAvailable,
+} from 'expo-glass-effect';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Frosted-glass surface. BlurView + a translucent theme overlay for contrast +
-// hairline border. Degrades gracefully on Android (dimezis blur / overlay).
+// True iOS 26 Liquid Glass when the device supports it; graceful fallback to an
+// expo-blur frosted surface on iOS < 26, and a near-solid surface on Android
+// (where system blur is unreliable). Detected once — cheap, stable per launch.
+const LIQUID =
+  Platform.OS === 'ios' && isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
+
 export function Glass({
   children,
   intensity = 30,
   radius = 0,
+  interactive = false,
+  tint,
   style,
 }: {
   children?: ReactNode;
   intensity?: number;
   radius?: number;
+  // iOS 26 only: enables the native interactive "iris" press highlight.
+  interactive?: boolean;
+  // iOS 26 only: tints the glass (used for the active-tab highlight).
+  tint?: string;
   style?: StyleProp<ViewStyle>;
 }) {
   const { scheme, colors } = useTheme();
+
+  // iOS 26 Liquid Glass. NOTE: never animate a GlassView's opacity to 0 — it
+  // disables rendering; animate scale/translate instead.
+  if (LIQUID) {
+    return (
+      <GlassView
+        glassEffectStyle="regular"
+        isInteractive={interactive}
+        tintColor={tint}
+        colorScheme={scheme}
+        style={[{ overflow: 'hidden', borderRadius: radius }, style]}
+      >
+        {children}
+      </GlassView>
+    );
+  }
 
   // Android blur is unreliable/transparent on many devices — render a near-solid
   // frosted surface there instead so the bar is always clearly visible.
@@ -29,6 +60,7 @@ export function Glass({
     );
   }
 
+  // iOS < 26 — expo-blur frosted surface + translucent theme overlay.
   const overlay = scheme === 'dark' ? 'rgba(10,10,10,0.6)' : 'rgba(255,255,255,0.65)';
   return (
     <BlurView

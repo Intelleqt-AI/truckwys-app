@@ -135,6 +135,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
     <SheetScreen
       eyebrow={editing ? 'Edit' : 'New driver'}
       title={editing ? 'Edit driver' : 'Add driver'}
+      variant="modal"
       onBack={() => navigation.goBack()}
       footer={<Button label={editing ? 'Save changes' : 'Add driver'} loading={busy} onPress={submit} fullWidth />}
     >

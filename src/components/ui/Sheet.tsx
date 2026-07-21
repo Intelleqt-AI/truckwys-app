@@ -1,14 +1,14 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useLayoutEffect, useCallback } from 'react';
 import { View, ScrollView, Pressable } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
-import { Icon } from './icons';
 import { AmbientGlow } from './layout';
-import { useTheme } from '@/theme/ThemeProvider';
 
-// Full-screen slide-over detail sheet (matches the design's overlay pattern).
-// Presented as a modal/pushed screen; provides Back + optional trailing action,
-// a big title header, a scrollable body and an optional pinned footer.
+// Full-screen detail screen. Drives the NATIVE iOS header: the system back
+// button (chevron + previous screen name), a large collapsing title, and a
+// Liquid Glass blur bar are all rendered by the navigator. Here we just feed
+// it the title + trailing action, and (for modals) a leading Cancel.
 export function SheetScreen({
   eyebrow,
   title,
@@ -17,6 +17,7 @@ export function SheetScreen({
   onAction,
   children,
   footer,
+  variant = 'push',
 }: {
   eyebrow?: string;
   title?: string;
@@ -25,54 +26,50 @@ export function SheetScreen({
   onAction?: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  variant?: 'push' | 'modal';
 }) {
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const navigation = useNavigation();
+
+  const renderAction = useCallback(
+    () => (
+      <Pressable onPress={onAction} hitSlop={8} accessibilityRole="button">
+        <Mono className="text-micro tracking-wide uppercase text-accent" style={{ fontWeight: '600' }}>
+          {actionLabel}
+        </Mono>
+      </Pressable>
+    ),
+    [onAction, actionLabel],
+  );
+
+  const renderCancel = useCallback(
+    () => (
+      <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
+        <Txt className="text-body text-accent">Cancel</Txt>
+      </Pressable>
+    ),
+    [onBack],
+  );
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerTitle: title ?? '',
+      headerRight: actionLabel && onAction ? renderAction : undefined,
+      ...(variant === 'modal' ? { headerLeft: renderCancel } : {}),
+    });
+  }, [navigation, title, actionLabel, onAction, variant, renderAction, renderCancel]);
+
   return (
-    <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
-      <View className="flex-row items-center justify-between px-3 pb-3 pt-1">
-        <Pressable
-          onPress={onBack}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          className="min-h-[44px] flex-row items-center gap-0.5 px-2"
-        >
-          <Icon name="chevronLeft" size={22} color={colors.accent} strokeWidth={2} />
-          <Txt className="text-body text-accent">Back</Txt>
-        </Pressable>
-        {actionLabel && onAction && (
-          <Pressable
-            onPress={onAction}
-            hitSlop={8}
-            accessibilityRole="button"
-            className="min-h-[44px] justify-center px-2"
-          >
-            <Mono className="text-micro tracking-wide uppercase text-accent" style={{ fontWeight: '600' }}>
-              {actionLabel}
-            </Mono>
-          </Pressable>
-        )}
-      </View>
-
-      {(eyebrow || title) && (
-        <View className="px-screen pb-3">
-          {eyebrow && <Label className="mb-1">{eyebrow}</Label>}
-          {title && (
-            <Txt className="font-semibold tracking-[-0.02em] text-fg" style={{ fontSize: 24 }}>
-              {title}
-            </Txt>
-          )}
-        </View>
-      )}
-
       <ScrollView
         className="flex-1"
+        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24 }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {eyebrow && <Label className="mb-3 mt-1">{eyebrow}</Label>}
         {children}
       </ScrollView>
 

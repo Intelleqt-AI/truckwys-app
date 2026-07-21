@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { View, Pressable, Modal, Platform } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon } from './icons';
@@ -71,7 +73,7 @@ export function DateField({
                 mode="date"
                 display="spinner"
                 textColor={colors.fg}
-                onValueChange={(_e, d) => d && onChange(toISODate(d))}
+                onChange={(_e: DateTimePickerEvent, d?: Date) => d && onChange(toISODate(d))}
               />
             </Pressable>
           </Pressable>
@@ -83,11 +85,10 @@ export function DateField({
           value={current}
           mode="date"
           display="default"
-          onValueChange={(_e, d) => {
+          onChange={(_e: DateTimePickerEvent, d?: Date) => {
             setOpen(false);
             if (d) onChange(toISODate(d));
           }}
-          onDismiss={() => setOpen(false)}
         />
       )}
     </View>

@@ -37,9 +37,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     predictiveBackGestureEnabled: false,
   },
   plugins: [
-    'expo-status-bar',
     'expo-secure-store',
-    'expo-image',
     'expo-font',
     'expo-audio',
     'expo-web-browser',

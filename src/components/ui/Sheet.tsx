@@ -7,15 +7,10 @@ import { Icon, type IconName } from './icons';
 import { AmbientGlow } from './layout';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Round, centred hit target so each icon sits dead-centre inside a button
-// whose background is always present (iOS only flickers its own capsule in).
-const ICON_BTN = {
-  width: 34,
-  height: 34,
-  borderRadius: 17,
-  alignItems: 'center',
-  justifyContent: 'center',
-} as const;
+// Square, centred box so the icon sits dead-centre. The inner View owns the
+// layout; the Pressable just wraps it for touch + a press dim (no background).
+const ICON_BTN = { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' } as const;
+const pressDim = ({ pressed }: { pressed: boolean }) => ({ opacity: pressed ? 0.4 : 1 });
 
 // Full-screen detail screen. Drives the NATIVE iOS header: the system back
 // button (chevron + previous screen name), a large collapsing title, and a
@@ -45,9 +40,7 @@ export function SheetScreen({
 }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { colors, scheme } = useTheme();
-  // Persistent translucent circle so the round button is always visible.
-  const btnBg = scheme === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
+  const { colors } = useTheme();
 
   const renderAction = useCallback(
     () => (
@@ -56,18 +49,20 @@ export function SheetScreen({
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel={actionLabel}
-        style={[ICON_BTN, { backgroundColor: btnBg }]}
+        style={pressDim}
       >
-        {actionIcon ? (
-          <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
-        ) : (
-          <Mono className="text-micro tracking-wide uppercase text-accent" style={{ fontWeight: '600' }}>
-            {actionLabel}
-          </Mono>
-        )}
+        <View style={ICON_BTN}>
+          {actionIcon ? (
+            <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
+          ) : (
+            <Mono className="text-micro tracking-wide uppercase text-accent" style={{ fontWeight: '600' }}>
+              {actionLabel}
+            </Mono>
+          )}
+        </View>
       </Pressable>
     ),
-    [onAction, actionLabel, actionIcon, colors.accent, btnBg],
+    [onAction, actionLabel, actionIcon, colors.accent],
   );
 
   // Modals close with an X (clear "dismiss" affordance) rather than a Cancel word.
@@ -78,12 +73,14 @@ export function SheetScreen({
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel="Close"
-        style={[ICON_BTN, { backgroundColor: btnBg }]}
+        style={pressDim}
       >
-        <Icon name="x" size={22} color={colors.accent} strokeWidth={2} />
+        <View style={ICON_BTN}>
+          <Icon name="x" size={22} color={colors.accent} strokeWidth={2} />
+        </View>
       </Pressable>
     ),
-    [onBack, colors.accent, btnBg],
+    [onBack, colors.accent],
   );
 
   useLayoutEffect(() => {
@@ -102,8 +99,8 @@ export function SheetScreen({
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{
           paddingHorizontal: 16,
-          // Modal header is opaque + inline; add breathing room below it.
-          paddingTop: variant === 'modal' ? 16 : 0,
+          // Breathing room below the header so content never butts against it.
+          paddingTop: variant === 'modal' ? 16 : 12,
           paddingBottom: insets.bottom + 24,
         }}
         keyboardShouldPersistTaps="handled"

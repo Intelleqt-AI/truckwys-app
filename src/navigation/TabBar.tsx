@@ -23,10 +23,10 @@ const TAB_ICON: Record<string, IconName> = {
   Finance: 'receipt',
 };
 
-const H_MARGIN = 12;
+const H_MARGIN = 32; // narrower bar (larger side margins)
 const BAR_HEIGHT = 58;
 const HPAD = 6; // inner horizontal padding
-const V_INSET = 6; // highlight vertical inset from the bar edge
+const V_INSET = 9; // highlight vertical inset from the bar edge (smaller pill)
 const HL_H = BAR_HEIGHT - V_INSET * 2; // highlight height
 const HL_RADIUS = BAR_HEIGHT / 2 - V_INSET; // matches the bar's inner curve
 
@@ -103,7 +103,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
   const count = state.routes.length;
   const cellW = innerW ? innerW / count : 0;
-  const hlW = cellW ? cellW - 8 : 0;
+  const hlW = cellW ? cellW - 16 : 0; // smaller active highlight
   const x = useSharedValue(0);
 
   useEffect(() => {
@@ -120,7 +120,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   return (
     <View
       pointerEvents="box-none"
-      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom + 6 }}
+      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom }}
     >
       <Glass
         interactive

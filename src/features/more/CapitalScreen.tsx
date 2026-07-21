@@ -45,6 +45,7 @@ export function CapitalScreen({ navigation }: Props) {
       title="Fast Pay Capital"
       onBack={() => navigation.goBack()}
       actionLabel="Risk scores"
+      actionIcon="alert"
       onAction={() => navigation.navigate('RiskScores')}
     >
       {isLoading ? (

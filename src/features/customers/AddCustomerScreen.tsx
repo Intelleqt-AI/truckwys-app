@@ -38,16 +38,16 @@ const schema = z.object({
 type Values = z.infer<typeof schema>;
 
 // Text fields in web order.
-const FIELDS: { name: keyof Values; label: string; icon?: IconName; keyboardType?: 'email-address' | 'phone-pad' | 'numeric'; autoCapitalize?: 'none' | 'words' }[] = [
-  { name: 'name', label: 'Full name', icon: 'user', autoCapitalize: 'words' },
-  { name: 'company_name', label: 'Company name', icon: 'building', autoCapitalize: 'words' },
-  { name: 'email', label: 'Email', icon: 'send', keyboardType: 'email-address', autoCapitalize: 'none' },
-  { name: 'phone', label: 'Phone', icon: 'phone', keyboardType: 'phone-pad' },
-  { name: 'city', label: 'City' },
-  { name: 'state', label: 'Province / State' },
-  { name: 'zip_code', label: 'Zip code', keyboardType: 'numeric' },
-  { name: 'address', label: 'Address' },
-  { name: 'billing_address', label: 'Billing address' },
+const FIELDS: { name: keyof Values; label: string; placeholder?: string; icon?: IconName; keyboardType?: 'email-address' | 'phone-pad' | 'numeric'; autoCapitalize?: 'none' | 'words' }[] = [
+  { name: 'name', label: 'Full name', placeholder: 'Contact person', icon: 'user', autoCapitalize: 'words' },
+  { name: 'company_name', label: 'Company name', placeholder: 'Acme Logistics', icon: 'building', autoCapitalize: 'words' },
+  { name: 'email', label: 'Email', placeholder: 'billing@company.co.za', icon: 'send', keyboardType: 'email-address', autoCapitalize: 'none' },
+  { name: 'phone', label: 'Phone', placeholder: '+27 82 123 4567', icon: 'phone', keyboardType: 'phone-pad' },
+  { name: 'city', label: 'City', placeholder: 'Cape Town' },
+  { name: 'state', label: 'Province / State', placeholder: 'Western Cape' },
+  { name: 'zip_code', label: 'Zip code', placeholder: '8001', keyboardType: 'numeric' },
+  { name: 'address', label: 'Address', placeholder: 'Street address' },
+  { name: 'billing_address', label: 'Billing address', placeholder: 'If different from address' },
 ];
 
 export function AddCustomerScreen({ route, navigation }: Props) {
@@ -131,7 +131,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
           control={control}
           name="credit_limit"
           render={({ field: { onChange, onBlur, value }, fieldState }) => (
-            <TextField label="Credit limit (R)" icon="dollar" keyboardType="numeric" value={value ?? ''} onChangeText={onChange} onBlur={onBlur} error={fieldState.error?.message} />
+            <TextField label="Credit limit (R)" placeholder="e.g. 50000" icon="dollar" keyboardType="numeric" value={value ?? ''} onChangeText={onChange} onBlur={onBlur} error={fieldState.error?.message} />
           )}
         />
         <SelectField label="Status" icon="user" options={STATUS} value={status} onSelect={setStatus} />
@@ -148,6 +148,7 @@ function Field({ control, field: f }: { control: Control<Values>; field: (typeof
       render={({ field: { onChange, onBlur, value }, fieldState }) => (
         <TextField
           label={f.label}
+          placeholder={f.placeholder}
           icon={f.icon}
           keyboardType={f.keyboardType}
           autoCapitalize={f.autoCapitalize}

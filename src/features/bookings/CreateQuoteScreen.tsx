@@ -536,10 +536,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Weight (tons)" keyboardType="numeric" value={weight} onChangeText={setWeight} />
+            <TextField label="Weight (tons)" placeholder="e.g. 20" keyboardType="numeric" value={weight} onChangeText={setWeight} />
           </View>
           <View className="flex-1">
-            <TextField label="R / km" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
+            <TextField label="R / km" placeholder="e.g. 25" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
           </View>
         </View>
         <TextField label="Cargo" placeholder="e.g. Steel coils" value={cargo} onChangeText={setCargo} />
@@ -709,6 +709,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <View className="flex-1">
                   <TextField
                     label="Tolls (R)"
+                    placeholder="0"
                     keyboardType="numeric"
                     value={tollEdited ? tollOverride : String(costs.tollCost)}
                     onChangeText={(v) => {
@@ -718,10 +719,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   />
                 </View>
                 <View className="flex-1">
-                  <TextField label="Driver (R)" keyboardType="numeric" value={driverAllowance} onChangeText={setDriverAllowance} />
+                  <TextField label="Driver (R)" placeholder="0" keyboardType="numeric" value={driverAllowance} onChangeText={setDriverAllowance} />
                 </View>
                 <View className="flex-1">
-                  <TextField label="R / km" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
+                  <TextField label="R / km" placeholder="e.g. 25" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
                 </View>
               </View>
             </>

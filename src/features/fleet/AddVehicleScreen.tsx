@@ -110,21 +110,21 @@ export function AddVehicleScreen({ route, navigation }: Props) {
       footer={<Button label={editing ? 'Save changes' : 'Add vehicle'} loading={busy} onPress={submit} fullWidth />}
     >
       <View className="gap-4">
-        <TextField label="Registration plate" icon="truck" autoCapitalize="characters" value={plate} onChangeText={setPlate} />
+        <TextField label="Registration plate" placeholder="e.g. CA 123-456" icon="truck" autoCapitalize="characters" value={plate} onChangeText={setPlate} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Make" value={make} onChangeText={setMake} />
+            <TextField label="Make" placeholder="e.g. Volvo" value={make} onChangeText={setMake} />
           </View>
           <View className="flex-1">
-            <TextField label="Model" value={model} onChangeText={setModel} />
+            <TextField label="Model" placeholder="e.g. FH16" value={model} onChangeText={setModel} />
           </View>
         </View>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Year" keyboardType="numeric" value={year} onChangeText={setYear} />
+            <TextField label="Year" placeholder="e.g. 2022" keyboardType="numeric" value={year} onChangeText={setYear} />
           </View>
           <View className="flex-1">
-            <TextField label="VIN" autoCapitalize="characters" value={vin} onChangeText={setVin} />
+            <TextField label="VIN" placeholder="17-character VIN" autoCapitalize="characters" value={vin} onChangeText={setVin} />
           </View>
         </View>
         <SelectField label="Vehicle type" icon="box" options={typeOptions} value={type} onSelect={setType} />
@@ -138,10 +138,10 @@ export function AddVehicleScreen({ route, navigation }: Props) {
         </View>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Capacity (tons)" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
+            <TextField label="Capacity (tons)" placeholder="e.g. 30" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
           </View>
           <View className="flex-1">
-            <TextField label="Mileage (km)" keyboardType="numeric" value={mileage} onChangeText={setMileage} />
+            <TextField label="Mileage (km)" placeholder="e.g. 120000" keyboardType="numeric" value={mileage} onChangeText={setMileage} />
           </View>
         </View>
         <SelectField label="Assigned driver" icon="user" options={driverOptions} value={driver} onSelect={setDriver} />
@@ -151,10 +151,10 @@ export function AddVehicleScreen({ route, navigation }: Props) {
         <DateField label="Last maintenance date" value={lastMaint} onChange={setLastMaint} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Service interval (km)" keyboardType="numeric" value={serviceInterval} onChangeText={setServiceInterval} />
+            <TextField label="Service interval (km)" placeholder="e.g. 15000" keyboardType="numeric" value={serviceInterval} onChangeText={setServiceInterval} />
           </View>
           <View className="flex-1">
-            <TextField label="Last service (km)" keyboardType="numeric" value={lastServiceMileage} onChangeText={setLastServiceMileage} />
+            <TextField label="Last service (km)" placeholder="e.g. 110000" keyboardType="numeric" value={lastServiceMileage} onChangeText={setLastServiceMileage} />
           </View>
         </View>
       </View>

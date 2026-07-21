@@ -67,7 +67,7 @@ export function CreateInvoiceScreen({ navigation }: Props) {
     >
       <View className="gap-4">
         <SelectField label="Customer" icon="building" placeholder="Select customer" options={options} value={customerId} onSelect={setCustomerId} />
-        <TextField label="Amount (excl. VAT)" icon="dollar" keyboardType="numeric" value={subtotal} onChangeText={setSubtotal} />
+        <TextField label="Amount (excl. VAT)" placeholder="0.00" icon="dollar" keyboardType="numeric" value={subtotal} onChangeText={setSubtotal} />
         <TextField label="Description" placeholder="What is this invoice for?" value={description} onChangeText={setDescription} />
         <DateField label="Due date" value={dueDate} onChange={setDueDate} />
 

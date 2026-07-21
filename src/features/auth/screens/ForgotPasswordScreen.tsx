@@ -60,6 +60,7 @@ export function ForgotPasswordScreen({ navigation }: Props) {
               render={({ field: { onChange, onBlur, value }, fieldState }) => (
                 <TextField
                   label="Email"
+                  placeholder="you@company.co.za"
                   icon="send"
                   autoCapitalize="none"
                   keyboardType="email-address"

@@ -62,7 +62,7 @@ export function AddExpenseScreen({ navigation }: Props) {
     >
       <View className="gap-4">
         <SelectField label="Category" icon="dollar" options={CATEGORIES} value={category} onSelect={setCategory} />
-        <TextField label="Amount (ZAR)" icon="dollar" keyboardType="numeric" value={amount} onChangeText={setAmount} />
+        <TextField label="Amount (ZAR)" placeholder="0.00" icon="dollar" keyboardType="numeric" value={amount} onChangeText={setAmount} />
         <TextField label="Description" placeholder="Optional note" value={description} onChangeText={setDescription} />
         <DateField label="Date" value={date} onChange={setDate} />
       </View>

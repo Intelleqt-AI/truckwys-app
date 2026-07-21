@@ -57,6 +57,7 @@ export function LoginScreen({ navigation }: Props) {
           render={({ field: { onChange, onBlur, value }, fieldState }) => (
             <TextField
               label="Email or username"
+              placeholder="you@company.co.za"
               icon="user"
               autoCapitalize="none"
               autoComplete="username"
@@ -75,6 +76,7 @@ export function LoginScreen({ navigation }: Props) {
           render={({ field: { onChange, onBlur, value }, fieldState }) => (
             <TextField
               label="Password"
+              placeholder="Enter your password"
               icon="lock"
               secureTextEntry
               autoComplete="password"

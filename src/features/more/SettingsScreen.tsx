@@ -193,7 +193,7 @@ function VehicleTypesSection() {
       )}
       <Label className="text-muted">Add a type</Label>
       <TextField label="Name" icon="truck" placeholder="e.g. Superlink 30t" value={name} onChangeText={setName} />
-      <TextField label="Capacity (tons)" icon="box" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
+      <TextField label="Capacity (tons)" placeholder="e.g. 30" icon="box" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
       <Button label="Add vehicle type" loading={busy} onPress={add} fullWidth />
     </View>
   );
@@ -281,8 +281,8 @@ function SecuritySection() {
   return (
     <View className="gap-5">
       <View className="gap-4">
-        <TextField label="Current password" secureTextEntry icon="lock" value={current} onChangeText={setCurrent} />
-        <TextField label="New password" secureTextEntry icon="lock" value={next} onChangeText={setNext} />
+        <TextField label="Current password" placeholder="Current password" secureTextEntry icon="lock" value={current} onChangeText={setCurrent} />
+        <TextField label="New password" placeholder="At least 8 characters" secureTextEntry icon="lock" value={next} onChangeText={setNext} />
         <Button label="Update password" loading={busy} onPress={submit} fullWidth />
       </View>
 
@@ -399,8 +399,8 @@ function CompanySection() {
 
   return (
     <View className="gap-4">
-      <TextField label="Company name" icon="building" value={name} onChangeText={setName} />
-      <TextField label="Base rate / km (ZAR)" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
+      <TextField label="Company name" placeholder="Your company" icon="building" value={name} onChangeText={setName} />
+      <TextField label="Base rate / km (ZAR)" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
       <Button label="Upload logo" variant="secondary" icon="download" onPress={uploadLogo} fullWidth />
       <Button label="Save changes" loading={busy} onPress={save} fullWidth />
     </View>
@@ -464,7 +464,7 @@ function UsersSection() {
     <View className="gap-5">
       <View className="gap-3">
         <Label className="text-muted">Invite a teammate</Label>
-        <TextField label="Email" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+        <TextField label="Email" placeholder="colleague@company.co.za" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
         <SelectField label="Role" icon="shield" options={ROLES} value={role} onSelect={setRole} />
         <Button label="Send invite" loading={busy} onPress={invite} fullWidth />
       </View>

@@ -68,6 +68,7 @@ export function VerifyOtpScreen({ route, navigation }: Props) {
             render={({ field: { onChange, onBlur, value }, fieldState }) => (
               <TextField
                 label="Verification code"
+                placeholder="6-digit code"
                 icon="shield"
                 keyboardType="number-pad"
                 textContentType="oneTimeCode"

@@ -14,15 +14,16 @@ import type { AuthStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<AuthStackParamList, 'Signup'>;
 
 const FIELDS = [
-  { name: 'name', label: 'Full name', icon: 'user', props: { autoCapitalize: 'words' } },
-  { name: 'company_name', label: 'Company', icon: 'building', props: { autoCapitalize: 'words' } },
+  { name: 'name', label: 'Full name', placeholder: 'Jane Dlamini', icon: 'user', props: { autoCapitalize: 'words' } },
+  { name: 'company_name', label: 'Company', placeholder: 'Acme Logistics', icon: 'building', props: { autoCapitalize: 'words' } },
   {
     name: 'email',
     label: 'Email',
+    placeholder: 'you@company.co.za',
     icon: 'send',
     props: { autoCapitalize: 'none', keyboardType: 'email-address' },
   },
-  { name: 'phone', label: 'Phone (optional)', icon: 'phone', props: { keyboardType: 'phone-pad' } },
+  { name: 'phone', label: 'Phone (optional)', placeholder: '+27 82 123 4567', icon: 'phone', props: { keyboardType: 'phone-pad' } },
 ] as const;
 
 export function SignupScreen({ navigation }: Props) {
@@ -72,6 +73,7 @@ export function SignupScreen({ navigation }: Props) {
             render={({ field: { onChange, onBlur, value }, fieldState }) => (
               <TextField
                 label={f.label}
+                placeholder={f.placeholder}
                 icon={f.icon}
                 value={value ?? ''}
                 onChangeText={onChange}
@@ -89,6 +91,7 @@ export function SignupScreen({ navigation }: Props) {
           render={({ field: { onChange, onBlur, value }, fieldState }) => (
             <TextField
               label="Password"
+              placeholder="At least 8 characters"
               icon="lock"
               secureTextEntry
               value={value}
@@ -105,6 +108,7 @@ export function SignupScreen({ navigation }: Props) {
           render={({ field: { onChange, onBlur, value }, fieldState }) => (
             <TextField
               label="Confirm password"
+              placeholder="Re-enter password"
               icon="lock"
               secureTextEntry
               value={value}

@@ -142,27 +142,27 @@ export function AddDriverScreen({ route, navigation }: Props) {
       <View className="gap-4">
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="First name" icon="user" autoCapitalize="words" value={firstName} onChangeText={setFirstName} />
+            <TextField label="First name" placeholder="Jane" icon="user" autoCapitalize="words" value={firstName} onChangeText={setFirstName} />
           </View>
           <View className="flex-1">
-            <TextField label="Last name" autoCapitalize="words" value={lastName} onChangeText={setLastName} />
+            <TextField label="Last name" placeholder="Dlamini" autoCapitalize="words" value={lastName} onChangeText={setLastName} />
           </View>
         </View>
-        <TextField label="Email" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+        <TextField label="Email" placeholder="jane@company.co.za" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Phone" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+            <TextField label="Phone" placeholder="+27 82 123 4567" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
           </View>
           <View className="flex-1">
-            <TextField label="Emergency contact" value={emergency} onChangeText={setEmergency} />
+            <TextField label="Emergency contact" placeholder="Name · phone" value={emergency} onChangeText={setEmergency} />
           </View>
         </View>
-        <TextField label="Address" value={address} onChangeText={setAddress} />
+        <TextField label="Address" placeholder="Street, city" value={address} onChangeText={setAddress} />
 
         <Label className="mt-1 text-muted">Licence</Label>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Licence number" icon="shield" autoCapitalize="characters" value={license} onChangeText={setLicense} />
+            <TextField label="Licence number" placeholder="e.g. 1234567890" icon="shield" autoCapitalize="characters" value={license} onChangeText={setLicense} />
           </View>
           <View className="flex-1">
             <SelectField label="Province" options={PROVINCES} value={province} onSelect={setProvince} />

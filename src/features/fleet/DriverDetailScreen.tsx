@@ -44,6 +44,7 @@ export function DriverDetailScreen({ route, navigation }: Props) {
       title={name}
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
+      actionIcon="edit"
       onAction={() => navigation.navigate('AddDriver', { id, preview: d })}
       footer={<Button label="Delete driver" variant="danger" icon="x" onPress={confirmDelete} fullWidth />}
     >

@@ -94,6 +94,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       title={str(pick(inv, ['invoice_number', 'number']), 'Invoice')}
       onBack={() => navigation.goBack()}
       actionLabel="Share"
+      actionIcon="share"
       onAction={share}
       footer={
         <View className="gap-2.5">

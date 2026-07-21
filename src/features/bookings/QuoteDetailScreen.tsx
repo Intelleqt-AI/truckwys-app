@@ -156,6 +156,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       title={str(pick(q, ['quote_number', 'reference']), 'Quote')}
       onBack={() => navigation.goBack()}
       actionLabel="Share"
+      actionIcon="share"
       onAction={share}
       footer={footer}
     >

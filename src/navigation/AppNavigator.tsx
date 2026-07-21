@@ -90,9 +90,16 @@ export function AppNavigator() {
         <Stack.Screen name="Stub" component={StubScreen} />
       </Stack.Group>
 
-      {/* Modal (slide up) — native header, no large title; SheetScreen adds Cancel */}
+      {/* Modal (slide up) — opaque native header, inline title; SheetScreen adds an X close */}
       <Stack.Group
-        screenOptions={{ ...detailHeader, presentation: 'modal', headerLargeTitle: false }}
+        screenOptions={{
+          ...detailHeader,
+          presentation: 'modal',
+          headerLargeTitle: false,
+          headerTransparent: false,
+          headerBlurEffect: undefined,
+          headerStyle: { backgroundColor: colors.bgDeep },
+        }}
       >
         <Stack.Screen name="CreateQuote" component={CreateQuoteScreen} />
         <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />

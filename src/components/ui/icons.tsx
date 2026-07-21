@@ -45,6 +45,7 @@ import {
   Download,
   Sparkles,
   TrendingUp,
+  Share,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -68,6 +69,7 @@ export const icons = {
   check: Check,
   checkCircle: CheckCircle2,
   x: X,
+  share: Share,
   calendar: Calendar,
   send: Send,
   eye: Eye,

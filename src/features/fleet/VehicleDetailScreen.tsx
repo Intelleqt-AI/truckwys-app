@@ -64,6 +64,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
       title={str(pick(v, ['name', 'make_model', 'model', 'registration']), 'Vehicle')}
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
+      actionIcon="edit"
       onAction={() => navigation.navigate('AddVehicle', { id, preview: v })}
       footer={<Button label="Delete vehicle" variant="danger" icon="x" onPress={confirmDelete} fullWidth />}
     >

@@ -64,6 +64,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
       title={name}
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
+      actionIcon="edit"
       onAction={() => navigation.navigate('AddCustomer', { id, preview: c })}
       footer={
         <View className="gap-2.5">

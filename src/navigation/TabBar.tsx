@@ -92,7 +92,7 @@ function Destination({
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { scheme, colors } = useTheme();
+  const { scheme } = useTheme();
   const [innerW, setInnerW] = useState(0);
 
   // Accent-tinted highlight reads on both themes over the glass bar.
@@ -102,7 +102,16 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   // indicator. A theme-aware shade (dark in dark mode / white in light) fades
   // scrolling content out at the very bottom, behind the bar.
   const barBottom = Math.max(insets.bottom - 12, 8);
-  const shadeH = barBottom + BAR_HEIGHT + 34;
+  // Tall, multi-stop ramp so the fade is smooth with no visible top edge; the
+  // solid part sits at the very bottom, easing to transparent well above the bar.
+  const shadeH = barBottom + BAR_HEIGHT + 90;
+  const shadeRGB = scheme === 'dark' ? '3,3,3' : '243,244,246';
+  const shadeColors = [
+    `rgba(${shadeRGB},0)`,
+    `rgba(${shadeRGB},0.45)`,
+    `rgba(${shadeRGB},0.8)`,
+    `rgba(${shadeRGB},1)`,
+  ] as const;
 
   const count = state.routes.length;
   const cellW = innerW ? innerW / count : 0;
@@ -124,10 +133,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
-      {/* Theme-aware bottom shade: content fades to the canvas colour behind the bar. */}
+      {/* Theme-aware bottom shade: content fades smoothly to the canvas colour
+          behind the bar (solid at the very bottom, easing up to transparent). */}
       <LinearGradient
         pointerEvents="none"
-        colors={['transparent', colors.bgDeep]}
+        colors={shadeColors}
+        locations={[0, 0.5, 0.78, 1]}
         style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: shadeH }}
       />
       <View

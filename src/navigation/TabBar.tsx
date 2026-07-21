@@ -135,7 +135,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         style={{ marginHorizontal: H_MARGIN, marginBottom: barBottom }}
       >
         <Glass
-          interactive
           radius={BAR_HEIGHT / 2}
           intensity={50}
           style={{

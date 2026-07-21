@@ -50,7 +50,8 @@ export function AppNavigator() {
     headerTitleStyle: { color: colors.fg },
     headerLargeTitleStyle: { color: colors.fg },
     headerStyle: { backgroundColor: 'transparent' },
-    headerBackButtonDisplayMode: 'default',
+    // Round chevron button only — no "Tabs"/previous-screen label.
+    headerBackButtonDisplayMode: 'minimal',
     headerTitle: '',
   };
 

@@ -7,9 +7,15 @@ import { Icon, type IconName } from './icons';
 import { AmbientGlow } from './layout';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Square, centred hit target so the icon sits dead-centre inside the native
-// header's rounded glass button (default content is left-biased otherwise).
-const ICON_BTN = { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' } as const;
+// Round, centred hit target so each icon sits dead-centre inside a button
+// whose background is always present (iOS only flickers its own capsule in).
+const ICON_BTN = {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  alignItems: 'center',
+  justifyContent: 'center',
+} as const;
 
 // Full-screen detail screen. Drives the NATIVE iOS header: the system back
 // button (chevron + previous screen name), a large collapsing title, and a
@@ -39,11 +45,19 @@ export function SheetScreen({
 }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  // Persistent translucent circle so the round button is always visible.
+  const btnBg = scheme === 'dark' ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
 
   const renderAction = useCallback(
     () => (
-      <Pressable onPress={onAction} hitSlop={8} accessibilityRole="button" accessibilityLabel={actionLabel} style={ICON_BTN}>
+      <Pressable
+        onPress={onAction}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={actionLabel}
+        style={[ICON_BTN, { backgroundColor: btnBg }]}
+      >
         {actionIcon ? (
           <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
         ) : (
@@ -53,17 +67,23 @@ export function SheetScreen({
         )}
       </Pressable>
     ),
-    [onAction, actionLabel, actionIcon, colors.accent],
+    [onAction, actionLabel, actionIcon, colors.accent, btnBg],
   );
 
   // Modals close with an X (clear "dismiss" affordance) rather than a Cancel word.
   const renderClose = useCallback(
     () => (
-      <Pressable onPress={onBack} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close" style={ICON_BTN}>
-        <Icon name="x" size={24} color={colors.accent} strokeWidth={2} />
+      <Pressable
+        onPress={onBack}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+        style={[ICON_BTN, { backgroundColor: btnBg }]}
+      >
+        <Icon name="x" size={22} color={colors.accent} strokeWidth={2} />
       </Pressable>
     ),
-    [onBack, colors.accent],
+    [onBack, colors.accent, btnBg],
   );
 
   useLayoutEffect(() => {

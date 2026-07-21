@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Pressable, Platform } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '@/components/ui/icons';
@@ -21,8 +22,8 @@ const TAB_ICON: Record<string, IconName> = {
 
 const H_MARGIN = 32; // narrower bar (larger side margins)
 const BAR_HEIGHT = 58;
-const HPAD = 6; // inner horizontal padding
-const V_INSET = 5; // highlight sits 5px inside the bar edge (bigger pill)
+const HPAD = 3; // inner horizontal padding
+const V_INSET = 3; // highlight sits 3px inside the bar edge (near edge-to-edge)
 const HL_H = BAR_HEIGHT - V_INSET * 2; // highlight height
 const HL_RADIUS = BAR_HEIGHT / 2 - V_INSET; // matches the bar's inner curve
 
@@ -91,15 +92,23 @@ function Destination({
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { scheme } = useTheme();
+  const { scheme, colors } = useTheme();
   const [innerW, setInnerW] = useState(0);
 
   // Accent-tinted highlight reads on both themes over the glass bar.
   const highlightBg = scheme === 'dark' ? 'rgba(77,158,255,0.20)' : 'rgba(37,99,235,0.12)';
 
+  // Standard iOS floating-bar position: docked low, just above the home
+  // indicator. A theme-aware shade (dark in dark mode / white in light) fades
+  // scrolling content out at the very bottom, behind the bar.
+  const barBottom = Math.max(insets.bottom - 12, 8);
+  const shadeH = barBottom + BAR_HEIGHT + 34;
+
   const count = state.routes.length;
   const cellW = innerW ? innerW / count : 0;
-  const hlW = cellW ? cellW - 8 : 0; // bigger active highlight
+  // Full cell width: with HPAD=3 the pill sits 3px from the bar's left/right
+  // edges at the end tabs, matching the 3px vertical inset (edge-to-edge look).
+  const hlW = cellW;
   const x = useSharedValue(0);
 
   useEffect(() => {
@@ -114,23 +123,30 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   const highlight = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={{ position: 'absolute', left: H_MARGIN, right: H_MARGIN, bottom: insets.bottom }}
-    >
-      <Glass
-        interactive
-        radius={BAR_HEIGHT / 2}
-        intensity={50}
-        style={{
-          height: BAR_HEIGHT,
-          shadowColor: '#000',
-          shadowOpacity: 0.28,
-          shadowRadius: 16,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 14,
-        }}
+    <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+      {/* Theme-aware bottom shade: content fades to the canvas colour behind the bar. */}
+      <LinearGradient
+        pointerEvents="none"
+        colors={['transparent', colors.bgDeep]}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: shadeH }}
+      />
+      <View
+        pointerEvents="box-none"
+        style={{ marginHorizontal: H_MARGIN, marginBottom: barBottom }}
       >
+        <Glass
+          interactive
+          radius={BAR_HEIGHT / 2}
+          intensity={50}
+          style={{
+            height: BAR_HEIGHT,
+            shadowColor: '#000',
+            shadowOpacity: 0.28,
+            shadowRadius: 16,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 14,
+          }}
+        >
         <View
           style={{ flex: 1, paddingHorizontal: HPAD }}
           onLayout={(e) => setInnerW(e.nativeEvent.layout.width - HPAD * 2)}
@@ -178,7 +194,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             })}
           </View>
         </View>
-      </Glass>
+        </Glass>
+      </View>
     </View>
   );
 }

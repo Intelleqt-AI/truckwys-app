@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   AmbientGlow,
   SearchField,
+  StatCard,
   Avatar,
   ListRow,
   IconButton,
@@ -14,6 +15,7 @@ import {
   Button,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
+import { num, str, pick } from '@/lib/api/list';
 import { useCustomers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -42,11 +44,31 @@ export function CustomersScreen({ navigation }: Props) {
     });
   }, [navigation, colors.bgDeep, renderAdd]);
 
+  const cards = data
+    ? [
+        { label: 'Total customers', value: String(data.length) },
+        { label: 'With credit limit', value: String(data.filter((c) => num(pick(c.raw, ['credit_limit'])) > 0).length) },
+        { label: 'Cities covered', value: String(new Set(data.map((c) => str(pick(c.raw, ['city']))).filter(Boolean)).size) },
+        { label: 'NET30 clients', value: String(data.filter((c) => (str(pick(c.raw, ['payment_terms_default'])) || 'NET30') === 'NET30').length) },
+      ]
+    : [];
+
   return (
     <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
-      <View className="px-screen pb-3 pt-3">
-        <SearchField value={q} onChangeText={setQ} placeholder="Search customers…" />
+      <View className="px-screen pt-3">
+        {cards.length > 0 && (
+          <View className="mb-3 flex-row flex-wrap gap-3">
+            {cards.map((c) => (
+              <View key={c.label} style={{ width: '47.5%' }}>
+                <StatCard label={c.label} value={c.value} />
+              </View>
+            ))}
+          </View>
+        )}
+        <View className="pb-3">
+          <SearchField value={q} onChangeText={setQ} placeholder="Search customers…" />
+        </View>
       </View>
 
       {isLoading ? (

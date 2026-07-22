@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { View, Pressable, Alert } from 'react-native';
+import { View, Pressable, Alert, Modal, ScrollView } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -250,6 +251,9 @@ function VehicleTypesSection() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const insets = useSafeAreaInsets();
+
   const resetForm = () => {
     setEditingId(null);
     setName('');
@@ -259,13 +263,19 @@ function VehicleTypesSection() {
     setActiveStr('true');
   };
 
-  const loadForEdit = (t: Record<string, unknown>) => {
+  const openAdd = () => {
+    resetForm();
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (t: Record<string, unknown>) => {
     setEditingId(pick(t, ['id']) as string | number);
     setName(str(pick(t, ['name'])));
     setDescription(str(pick(t, ['description'])));
     setCapacity(pick(t, ['capacity']) != null ? String(num(pick(t, ['capacity']))) : '');
     setBaseRate(pick(t, ['base_rate']) != null ? String(num(pick(t, ['base_rate']))) : '');
     setActiveStr(pick(t, ['active']) === false ? 'false' : 'true');
+    setDrawerOpen(true);
   };
 
   const save = async () => {
@@ -284,6 +294,7 @@ function VehicleTypesSection() {
       else await createVehicleType(payload);
       await qc.invalidateQueries({ queryKey: ['vehicle-types'] });
       resetForm();
+      setDrawerOpen(false);
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save type');
@@ -348,19 +359,23 @@ function VehicleTypesSection() {
     <View className="gap-4">
       <View className="flex-row items-center justify-between">
         <Label className="text-muted">Vehicle types</Label>
-        {list.length > 0 && (
-          <Pressable
-            hitSlop={8}
-            onPress={() => {
-              setSelectMode((v) => !v);
-              setSelected(new Set());
-            }}
-          >
-            <Mono className="text-micro uppercase tracking-wide text-accent">
-              {selectMode ? 'Done' : 'Select'}
-            </Mono>
-          </Pressable>
-        )}
+        <View className="flex-row items-center gap-1">
+          {list.length > 0 && (
+            <Pressable
+              hitSlop={8}
+              className="px-2"
+              onPress={() => {
+                setSelectMode((v) => !v);
+                setSelected(new Set());
+              }}
+            >
+              <Mono className="text-micro uppercase tracking-wide text-accent">
+                {selectMode ? 'Done' : 'Select'}
+              </Mono>
+            </Pressable>
+          )}
+          {!selectMode && <IconButton name="plus" accessibilityLabel="Add vehicle type" onPress={openAdd} />}
+        </View>
       </View>
 
       {list.length > 0 ? (
@@ -374,7 +389,7 @@ function VehicleTypesSection() {
             return (
               <Pressable
                 key={tid}
-                onPress={() => (selectMode ? toggleSel(tid) : loadForEdit(r))}
+                onPress={() => (selectMode ? toggleSel(tid) : openEdit(r))}
                 className={`min-h-[52px] flex-row items-center gap-3 px-3.5 py-3 active:bg-surface-hover ${
                   i === list.length - 1 ? '' : 'border-b border-line-row'
                 }`}
@@ -394,7 +409,10 @@ function VehicleTypesSection() {
                   </Mono>
                 </View>
                 {!selectMode && (
-                  <IconButton name="x" size={16} accessibilityLabel="Delete type" onPress={() => removeOne(r)} />
+                  <View className="flex-row items-center">
+                    <IconButton name="edit" size={16} accessibilityLabel="Edit type" onPress={() => openEdit(r)} />
+                    <IconButton name="x" size={16} accessibilityLabel="Delete type" onPress={() => removeOne(r)} />
+                  </View>
                 )}
               </Pressable>
             );
@@ -404,7 +422,7 @@ function VehicleTypesSection() {
         <EmptyState icon="truck" title="No vehicle types" body="Add the classes you operate." />
       )}
 
-      {selectMode ? (
+      {selectMode && (
         <Button
           label={selected.size ? `Delete ${selected.size} selected` : 'Select types to delete'}
           variant="danger"
@@ -413,28 +431,43 @@ function VehicleTypesSection() {
           onPress={batchDelete}
           fullWidth
         />
-      ) : (
-        <>
-          <Label className="text-muted">{editingId != null ? 'Edit type' : 'Add a type'}</Label>
-          <TextField label="Name" icon="truck" placeholder="e.g. Superlink 30t" value={name} onChangeText={setName} />
-          <TextField label="Description" placeholder="Optional" value={description} onChangeText={setDescription} />
-          <View className="flex-row gap-3">
-            <View className="flex-1">
-              <TextField label="Capacity (tons)" placeholder="e.g. 30" icon="box" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
-            </View>
-            <View className="flex-1">
-              <TextField label="Base rate / km" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
-            </View>
-          </View>
-          {editingId != null && (
-            <SelectField label="Status" options={ACTIVE_OPTIONS} value={activeStr} onSelect={setActiveStr} />
-          )}
-          <Button label={editingId != null ? 'Save changes' : 'Add vehicle type'} loading={busy} onPress={save} fullWidth />
-          {editingId != null && (
-            <Button label="Cancel edit" variant="secondary" onPress={resetForm} fullWidth />
-          )}
-        </>
       )}
+
+      {/* Add / edit drawer */}
+      <Modal visible={drawerOpen} transparent animationType="slide" onRequestClose={() => setDrawerOpen(false)}>
+        <Pressable className="flex-1 justify-end bg-black/60" onPress={() => setDrawerOpen(false)}>
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            className="border-t border-line bg-bg-deep px-4 pt-3"
+            style={{ borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: insets.bottom + 16 }}
+          >
+            <View className="mb-3 flex-row items-center justify-between">
+              <Txt className="text-heading font-semibold text-fg">
+                {editingId != null ? 'Edit vehicle type' : 'Add vehicle type'}
+              </Txt>
+              <IconButton name="x" accessibilityLabel="Close" onPress={() => setDrawerOpen(false)} />
+            </View>
+            <ScrollView style={{ maxHeight: 460 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View className="gap-4 pb-2">
+                <TextField label="Name" icon="truck" placeholder="e.g. Superlink 30t" value={name} onChangeText={setName} />
+                <TextField label="Description" placeholder="Optional" value={description} onChangeText={setDescription} />
+                <View className="flex-row gap-3">
+                  <View className="flex-1">
+                    <TextField label="Capacity (tons)" placeholder="e.g. 30" icon="box" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
+                  </View>
+                  <View className="flex-1">
+                    <TextField label="Base rate / km" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
+                  </View>
+                </View>
+                {editingId != null && (
+                  <SelectField label="Status" options={ACTIVE_OPTIONS} value={activeStr} onSelect={setActiveStr} />
+                )}
+                <Button label={editingId != null ? 'Save changes' : 'Add vehicle type'} loading={busy} onPress={save} fullWidth />
+              </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

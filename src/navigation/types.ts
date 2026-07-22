@@ -30,7 +30,7 @@ export type AppStackParamList = {
   AddCustomer: { id?: Id; preview?: Record<string, unknown> } | undefined;
   Settings: { section?: string } | undefined;
   CreateInvoice: undefined;
-  AddExpense: undefined;
+  AddExpense: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AddVehicle: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AddDriver: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AdvanceDetail: { id: Id };

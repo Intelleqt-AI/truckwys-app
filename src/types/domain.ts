@@ -170,14 +170,20 @@ export interface ExpenseLite {
   description: string;
   amount: number;
   date?: string;
+  status: string;
+  vendor: string;
+  expenseNumber: string;
   raw: Raw;
 }
 
 export const normalizeExpense = (e: Raw): ExpenseLite => ({
   id: (pick(e, ['id', 'pk']) as string | number) ?? '',
-  category: str(pick(e, ['category', 'type']), 'Other'),
+  category: str(pick(e, ['category', 'type']), 'OTHER').toUpperCase(),
   description: str(pick(e, ['description', 'note', 'memo']), ''),
   amount: num(pick(e, ['amount', 'total'])),
-  date: pick(e, ['date', 'created_at', 'expense_date']) as string | undefined,
+  date: pick(e, ['expense_date', 'date', 'created_at']) as string | undefined,
+  status: str(pick(e, ['status']), 'PENDING').toUpperCase(),
+  vendor: str(pick(e, ['vendor'])),
+  expenseNumber: str(pick(e, ['expense_number'])),
   raw: e,
 });

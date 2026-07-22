@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, ScrollView, RefreshControl } from 'react-native';
+import { View, ScrollView, RefreshControl, Pressable, Alert } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -8,24 +8,39 @@ import {
   AmbientGlow,
   AppHeader,
   SwipeTabs,
+  SearchField,
+  FilterChips,
   StatCard,
   StatusPill,
   Group,
   DetailRow,
   ListRow,
+  Card,
   Badge,
   Icon,
   IconButton,
+  Txt,
   Mono,
   SectionLabel,
   EmptyState,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useInvoices, useExpenses, useFinanceReports, deleteExpense } from './api';
+import {
+  useInvoices,
+  useExpenses,
+  useFinanceReports,
+  approveExpense,
+  rejectExpense,
+  deleteExpense,
+  EXPENSE_CATEGORIES,
+  EXPENSE_STATUSES,
+  expenseCategoryLabel,
+} from './api';
+import type { ExpenseLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
 import { useTheme } from '@/theme/ThemeProvider';
-import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
+import { formatCurrency, formatCurrencyCompact, formatDate } from '@/lib/formatters';
 import type { TabParamList, FinanceTab } from '@/navigation/types';
 
 type Props = BottomTabScreenProps<TabParamList, 'Finance'>;
@@ -120,58 +135,138 @@ function InvoicesTab() {
   );
 }
 
+const EXPENSE_CAT_FILTERS = [{ label: 'All', value: 'ALL' }, ...EXPENSE_CATEGORIES];
+const EXPENSE_STATUS_FILTERS = [
+  { label: 'All', value: 'ALL' },
+  ...EXPENSE_STATUSES.map((s) => ({ label: s.charAt(0) + s.slice(1).toLowerCase(), value: s })),
+];
+
 function ExpensesTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useExpenses();
+  const { nav } = useAppNavigation();
   const qc = useQueryClient();
-  const removeExpense = async (id: string | number) => {
+  const [q, setQ] = useState('');
+  const [cat, setCat] = useState('ALL');
+  const [statusF, setStatusF] = useState('ALL');
+
+  const refresh = () => qc.invalidateQueries({ queryKey: ['expenses'] });
+  const act = async (fn: () => Promise<unknown>, errMsg: string) => {
     try {
-      await deleteExpense(id);
-      await qc.invalidateQueries({ queryKey: ['expenses'] });
-      toast.success('Expense deleted');
+      await fn();
+      await refresh();
+      toast.success();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not delete');
+      toast.error(e instanceof Error ? e.message : errMsg);
     }
   };
+
+  // Contextual action sheet — Edit always; Approve/Reject only while pending; Delete.
+  const openActions = (e: ExpenseLite) => {
+    const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [
+      { text: 'Edit', onPress: () => nav.navigate('AddExpense', { id: e.id, preview: e.raw }) },
+    ];
+    if (e.status === 'PENDING') {
+      buttons.push({ text: 'Approve', onPress: () => act(() => approveExpense(e.id), 'Could not approve') });
+      buttons.push({ text: 'Reject', onPress: () => act(() => rejectExpense(e.id), 'Could not reject') });
+    }
+    buttons.push({
+      text: 'Delete',
+      style: 'destructive',
+      onPress: () =>
+        Alert.alert('Delete expense', 'Permanently delete this expense?', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: () => act(() => deleteExpense(e.id), 'Could not delete') },
+        ]),
+    });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(e.description || expenseCategoryLabel(e.category), formatCurrency(e.amount), buttons);
+  };
+
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load expenses." />;
 
-  const total = data.reduce((s, e) => s + e.amount, 0);
-  const byCategory = data.reduce<Record<string, number>>((acc, e) => {
+  // ── KPI cards (this calendar month, matching web) ──
+  const now = new Date();
+  const thisMonth = data.filter((e) => {
+    if (!e.date) return false;
+    const d = new Date(e.date);
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const totalMtd = thisMonth.filter((e) => e.status === 'APPROVED').reduce((s, e) => s + e.amount, 0);
+  const pending = data.filter((e) => e.status === 'PENDING');
+  const pendingAmount = pending.reduce((s, e) => s + e.amount, 0);
+  const fuelMtd = thisMonth.filter((e) => e.category === 'FUEL').reduce((s, e) => s + e.amount, 0);
+  const catTotals = thisMonth.reduce<Record<string, number>>((acc, e) => {
     acc[e.category] = (acc[e.category] ?? 0) + e.amount;
     return acc;
   }, {});
+  const topEntry = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0];
+
+  const list = data.filter(
+    (e) =>
+      (cat === 'ALL' || e.category === cat) &&
+      (statusF === 'ALL' || e.status === statusF) &&
+      (!q ||
+        `${e.description} ${e.vendor} ${e.expenseNumber}`.toLowerCase().includes(q.toLowerCase())),
+  );
 
   return (
     <FlashList
-      data={data}
+      data={list}
       keyExtractor={(e) => String(e.id)}
       onRefresh={refetch}
       refreshing={isRefetching}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
-          <View className="mb-3 flex-row gap-3">
-            <StatCard label="Total expenses" value={formatCurrencyCompact(total)} />
-            <StatCard label="Categories" value={String(Object.keys(byCategory).length)} />
+          <View className="mb-3 flex-row flex-wrap gap-3">
+            <View style={{ width: '47.5%' }}>
+              <StatCard label="Total (MTD)" value={formatCurrencyCompact(totalMtd)} />
+            </View>
+            <View style={{ width: '47.5%' }}>
+              <StatCard label="Pending approval" value={`${pending.length} · ${formatCurrencyCompact(pendingAmount)}`} />
+            </View>
+            <View style={{ width: '47.5%' }}>
+              <StatCard label="Fuel (MTD)" value={formatCurrencyCompact(fuelMtd)} />
+            </View>
+            <View style={{ width: '47.5%' }}>
+              <StatCard
+                label="Top category"
+                value={topEntry ? `${expenseCategoryLabel(topEntry[0])}` : 'N/A'}
+              />
+            </View>
           </View>
+          <View className="mb-3">
+            <SearchField value={q} onChangeText={setQ} placeholder="Search expenses…" />
+          </View>
+          <View className="mb-2">
+            <FilterChips options={EXPENSE_CAT_FILTERS} value={cat} onChange={setCat} />
+          </View>
+          <FilterChips options={EXPENSE_STATUS_FILTERS} value={statusF} onChange={setStatusF} />
         </View>
       }
-      ListEmptyComponent={<EmptyState icon="dollar" title="No expenses" body="Logged expenses appear here." />}
+      ItemSeparatorComponent={() => <View className="h-2.5" />}
+      ListEmptyComponent={<EmptyState icon="dollar" title="No expenses" body="No expenses match this filter." />}
       renderItem={({ item }) => (
-        <View className="mb-2.5 overflow-hidden rounded-xs border border-line bg-surface">
-          <ListRow
-            leading={<Icon name="dollar" size={22} color="#888888" />}
-            title={item.description || item.category}
-            subtitle={item.category}
-            trailing={
-              <View className="flex-row items-center gap-1">
-                <Mono className="text-callout font-semibold text-fg">{formatCurrency(item.amount)}</Mono>
-                <IconButton name="x" size={16} accessibilityLabel="Delete expense" onPress={() => removeExpense(item.id)} />
-              </View>
-            }
-            last
-          />
-        </View>
+        <Card>
+          <Pressable className="p-3.5 active:bg-surface-hover" onPress={() => openActions(item)}>
+            <View className="mb-1.5 flex-row items-center justify-between gap-2">
+              <Mono className="text-micro uppercase tracking-wide text-accent">
+                {expenseCategoryLabel(item.category)}
+              </Mono>
+              <StatusPill status={item.status} />
+            </View>
+            <Txt className="text-body font-medium text-fg" numberOfLines={1}>
+              {item.description || expenseCategoryLabel(item.category)}
+            </Txt>
+            <View className="mt-2 flex-row items-center justify-between">
+              <Txt className="text-caption text-muted" numberOfLines={1}>
+                {[item.vendor, item.date ? formatDate(item.date) : ''].filter(Boolean).join(' · ') || '—'}
+              </Txt>
+              <Mono className="text-body font-semibold text-fg">{formatCurrency(item.amount)}</Mono>
+            </View>
+          </Pressable>
+        </Card>
       )}
     />
   );

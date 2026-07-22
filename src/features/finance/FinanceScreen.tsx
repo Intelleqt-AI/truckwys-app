@@ -32,7 +32,6 @@ import {
   approveExpense,
   rejectExpense,
   deleteExpense,
-  EXPENSE_CATEGORIES,
   EXPENSE_STATUSES,
   expenseCategoryLabel,
 } from './api';
@@ -135,7 +134,6 @@ function InvoicesTab() {
   );
 }
 
-const EXPENSE_CAT_FILTERS = [{ label: 'All', value: 'ALL' }, ...EXPENSE_CATEGORIES];
 const EXPENSE_STATUS_FILTERS = [
   { label: 'All', value: 'ALL' },
   ...EXPENSE_STATUSES.map((s) => ({ label: s.charAt(0) + s.slice(1).toLowerCase(), value: s })),
@@ -146,7 +144,6 @@ function ExpensesTab() {
   const { nav } = useAppNavigation();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
-  const [cat, setCat] = useState('ALL');
   const [statusF, setStatusF] = useState('ALL');
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['expenses'] });
@@ -204,7 +201,6 @@ function ExpensesTab() {
 
   const list = data.filter(
     (e) =>
-      (cat === 'ALL' || e.category === cat) &&
       (statusF === 'ALL' || e.status === statusF) &&
       (!q ||
         `${e.description} ${e.vendor} ${e.expenseNumber}`.toLowerCase().includes(q.toLowerCase())),
@@ -238,9 +234,6 @@ function ExpensesTab() {
           </View>
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search expenses…" />
-          </View>
-          <View className="mb-2">
-            <FilterChips options={EXPENSE_CAT_FILTERS} value={cat} onChange={setCat} />
           </View>
           <FilterChips options={EXPENSE_STATUS_FILTERS} value={statusF} onChange={setStatusF} />
         </View>

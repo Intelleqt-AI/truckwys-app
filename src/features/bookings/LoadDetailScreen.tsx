@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { View, Pressable, Alert } from 'react-native';
+import { View, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   SheetScreen,
   SectionLabel,
+  SelectField,
   StatCard,
   StatusPill,
   Group,
@@ -68,6 +69,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   };
 
   const changeStatus = (next: string) => {
+    if (next === status || busy) return;
     // Cancelling a load that's already moving is destructive — confirm first.
     if (next === 'CANCELLED' && !['PENDING', 'LOADING'].includes(status)) {
       Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it.', [
@@ -194,31 +196,18 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         </View>
       </View>
 
-      {/* Transitions */}
+      {/* Update status — single dropdown (current + valid next states) */}
       {transitions.length > 0 && (
         <View className="mb-5">
-          <SectionLabel>Update status</SectionLabel>
-          <View className="flex-row flex-wrap gap-2">
-            {transitions.map((ns) => {
-              const danger = ns === 'CANCELLED';
-              return (
-                <Pressable
-                  key={ns}
-                  disabled={busy}
-                  onPress={() => changeStatus(ns)}
-                  className={`min-h-[40px] justify-center rounded-xs border px-3.5 ${
-                    danger ? 'border-danger' : 'border-line-active bg-surface'
-                  }`}
-                >
-                  <Mono
-                    className={`text-micro tracking-wide uppercase ${danger ? 'text-danger' : 'text-fg'}`}
-                  >
-                    {STATUS_LABEL(ns)}
-                  </Mono>
-                </Pressable>
-              );
-            })}
-          </View>
+          <SelectField
+            label="Update status"
+            options={[
+              { label: STATUS_LABEL(status), value: status },
+              ...transitions.map((ns) => ({ label: STATUS_LABEL(ns), value: ns })),
+            ]}
+            value={status}
+            onSelect={changeStatus}
+          />
         </View>
       )}
 

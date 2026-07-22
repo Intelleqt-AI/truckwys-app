@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Pressable, Alert } from 'react-native';
+import { View, Alert } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -7,6 +7,7 @@ import {
   StatCard,
   StatusPill,
   SegmentedControl,
+  SelectField,
   Group,
   DetailRow,
   SectionLabel,
@@ -27,6 +28,7 @@ import type { AppStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<AppStackParamList, 'VehicleDetail'>;
 
 const showDate = (v: string) => (v ? formatDate(v) : '—');
+const statusLabel = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase().replace(/_/g, ' ');
 
 function ScoreBar({ label, value }: { label: string; value: number }) {
   const { colors } = useTheme();
@@ -51,7 +53,6 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
   const { openLoad } = useAppNavigation();
   const { colors } = useTheme();
   const qc = useQueryClient();
-  const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<'overview' | 'financial'>('overview');
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this vehicle." />;
@@ -77,7 +78,6 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
 
   const setStatus = async (next: string) => {
     if (next === status) return;
-    setBusy(true);
     try {
       await updateVehicle(id, { status: next });
       await Promise.all([
@@ -87,8 +87,6 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -125,26 +123,14 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
         <StatusPill status={status} />
       </View>
 
-      {/* Status change */}
-      <SectionLabel>Update status</SectionLabel>
-      <View className="mb-5 flex-row flex-wrap gap-2">
-        {VEHICLE_STATUSES.map((s) => {
-          const active = s === status;
-          return (
-            <Pressable
-              key={s}
-              disabled={busy}
-              onPress={() => setStatus(s)}
-              className={`min-h-[40px] justify-center rounded-xs border px-3.5 ${
-                active ? 'border-accent bg-accent' : 'border-line-active bg-surface'
-              }`}
-            >
-              <Mono className={`text-micro tracking-wide uppercase ${active ? 'text-on-accent' : 'text-fg'}`}>
-                {s.replace(/_/g, ' ')}
-              </Mono>
-            </Pressable>
-          );
-        })}
+      {/* Update status — single dropdown */}
+      <View className="mb-5">
+        <SelectField
+          label="Update status"
+          options={VEHICLE_STATUSES.map((s) => ({ label: statusLabel(s), value: s }))}
+          value={status}
+          onSelect={setStatus}
+        />
       </View>
 
       <View className="mb-5">

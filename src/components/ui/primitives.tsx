@@ -6,6 +6,7 @@ import {
   type ViewProps,
   type PressableProps,
 } from 'react-native';
+import { Image } from 'expo-image';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -182,7 +183,7 @@ export function Badge({
 }
 
 // ── Avatar: circle initials or accent-dim fill ─────────────────────────────
-export function Avatar({ name, size = 36 }: { name?: string; size?: number }) {
+export function Avatar({ name, size = 36, uri }: { name?: string; size?: number; uri?: string }) {
   const initials = (name ?? '')
     .split(' ')
     .map((p) => p[0])
@@ -190,6 +191,15 @@ export function Avatar({ name, size = 36 }: { name?: string; size?: number }) {
     .slice(0, 2)
     .join('')
     .toUpperCase();
+  if (uri) {
+    return (
+      <Image
+        source={{ uri }}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+        contentFit="cover"
+      />
+    );
+  }
   return (
     <View
       className="items-center justify-center rounded-pill bg-accent-dim"

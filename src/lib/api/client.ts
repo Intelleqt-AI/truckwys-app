@@ -111,11 +111,13 @@ export const postData = async <T = unknown>({
 export const patchData = async <T = unknown>({
   url,
   data,
+  config = {},
 }: {
   url: string;
   data: unknown;
+  config?: object;
 }): Promise<T> => {
-  const res = await api.patch<T>(url, data);
+  const res = await api.patch<T>(url, data, config);
   return res.data;
 };
 

@@ -12,6 +12,7 @@ import {
   SelectField,
   Toggle,
   SegmentedControl,
+  Avatar,
   Button,
   IconButton,
   Icon,
@@ -21,7 +22,7 @@ import {
   EmptyState,
   type IconName,
 } from '@/components/ui';
-import { fetchData, postData } from '@/lib/api/client';
+import { fetchData } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore';
@@ -30,6 +31,12 @@ import {
   updateCompanyProfile,
   changePassword,
   updateCompanyLogo,
+  useMe,
+  updateProfile,
+  uploadAvatar,
+  createVehicleType,
+  updateVehicleType,
+  deleteVehicleType,
   useSessions,
   revokeSession,
   setTwoFactor,
@@ -110,14 +117,90 @@ function SettingsMenu({ onOpen }: { onOpen: (k: string) => void }) {
 }
 
 function ProfileSection() {
+  const { data: me } = useMe();
   const user = useAuthStore((s) => s.user);
+  const refreshUser = useAuthStore((s) => s.refreshUser);
+  const qc = useQueryClient();
+  const [seeded, setSeeded] = useState(false);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [phone, setPhone] = useState('');
+  const [avatar, setAvatar] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Seed once from auth/me (falls back to the store user).
+  useEffect(() => {
+    if (seeded) return;
+    const src = (me ?? {}) as Record<string, unknown>;
+    const fallbackName = str(user?.name);
+    setFirstName(str(pick(src, ['first_name'])) || fallbackName.split(' ')[0] || '');
+    setLastName(str(pick(src, ['last_name'])) || fallbackName.split(' ').slice(1).join(' ') || '');
+    setEmail(str(pick(src, ['email'])) || str(user?.email));
+    setJobTitle(str(pick(src, ['job_title'])));
+    setPhone(str(pick(src, ['phone'])) || str(user?.phone));
+    setAvatar(str(pick(src, ['avatar'])));
+    if (me) setSeeded(true);
+  }, [me, user, seeded]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await updateProfile({
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        email: email.trim(),
+        job_title: jobTitle.trim(),
+        phone: phone.trim(),
+      });
+      await Promise.all([qc.invalidateQueries({ queryKey: ['me'] }), refreshUser()]);
+      toast.success();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save profile');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pickAvatar = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    setBusy(true);
+    try {
+      const out = await uploadAvatar({ uri: a.uri, name: a.fileName ?? 'avatar.jpg', type: a.mimeType ?? 'image/jpeg' });
+      const url = str(pick(out ?? {}, ['avatar']));
+      if (url) setAvatar(url);
+      await Promise.all([qc.invalidateQueries({ queryKey: ['me'] }), refreshUser()]);
+      toast.success();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not upload photo');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Group>
-      <DetailRow label="Name" value={user?.name ?? '—'} mono={false} />
-      <DetailRow label="Email" value={user?.email ?? '—'} mono={false} />
-      <DetailRow label="Role" value={user?.role ?? '—'} />
-      <DetailRow label="Phone" value={(user?.phone as string) ?? '—'} last />
-    </Group>
+    <View className="gap-4">
+      <View className="flex-row items-center gap-3">
+        <Avatar name={`${firstName} ${lastName}`.trim() || email} uri={avatar || undefined} size={56} />
+        <Button label="Change photo" variant="secondary" icon="user" onPress={pickAvatar} />
+      </View>
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <TextField label="First name" placeholder="Jane" autoCapitalize="words" value={firstName} onChangeText={setFirstName} />
+        </View>
+        <View className="flex-1">
+          <TextField label="Last name" placeholder="Dlamini" autoCapitalize="words" value={lastName} onChangeText={setLastName} />
+        </View>
+      </View>
+      <TextField label="Email" placeholder="you@company.co.za" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+      <TextField label="Job title" placeholder="e.g. Operations Manager" value={jobTitle} onChangeText={setJobTitle} />
+      <TextField label="Phone" placeholder="+27 82 123 4567" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+      {user?.role ? <DetailRow label="Role" value={user.role} /> : null}
+      <Button label="Save profile" loading={busy} onPress={save} fullWidth />
+    </View>
   );
 }
 
@@ -141,6 +224,11 @@ function AppearanceSection() {
   );
 }
 
+const ACTIVE_OPTIONS = [
+  { label: 'Active', value: 'true' },
+  { label: 'Inactive', value: 'false' },
+];
+
 function VehicleTypesSection() {
   const qc = useQueryClient();
   const { data } = useQuery({
@@ -148,53 +236,205 @@ function VehicleTypesSection() {
     queryFn: async () => asArray(await fetchData('vehicle-types/')),
     retry: false,
   });
+  const list = data ?? [];
+
+  const [editingId, setEditingId] = useState<string | number | null>(null);
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [capacity, setCapacity] = useState('');
+  const [baseRate, setBaseRate] = useState('');
+  const [activeStr, setActiveStr] = useState('true');
   const [busy, setBusy] = useState(false);
 
-  const add = async () => {
+  // Batch-delete selection mode.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const resetForm = () => {
+    setEditingId(null);
+    setName('');
+    setDescription('');
+    setCapacity('');
+    setBaseRate('');
+    setActiveStr('true');
+  };
+
+  const loadForEdit = (t: Record<string, unknown>) => {
+    setEditingId(pick(t, ['id']) as string | number);
+    setName(str(pick(t, ['name'])));
+    setDescription(str(pick(t, ['description'])));
+    setCapacity(pick(t, ['capacity']) != null ? String(num(pick(t, ['capacity']))) : '');
+    setBaseRate(pick(t, ['base_rate']) != null ? String(num(pick(t, ['base_rate']))) : '');
+    setActiveStr(pick(t, ['active']) === false ? 'false' : 'true');
+  };
+
+  const save = async () => {
     if (!name.trim()) return toast.error('Name is required');
     setBusy(true);
+    // capacity is in tons (web stores vehicle-type capacity as tons directly).
+    const payload = {
+      name: name.trim(),
+      description: description.trim(),
+      capacity: capacity ? Number(capacity) : 0,
+      base_rate: baseRate ? Number(baseRate) : 0,
+      active: activeStr === 'true',
+    };
     try {
-      await postData({
-        url: 'vehicle-types/',
-        data: { name: name.trim(), capacity: capacity ? Number(capacity) * 1000 : undefined },
-      });
+      if (editingId != null) await updateVehicleType(editingId, payload);
+      else await createVehicleType(payload);
       await qc.invalidateQueries({ queryKey: ['vehicle-types'] });
-      setName('');
-      setCapacity('');
-      toast.success('Vehicle type added');
+      resetForm();
+      toast.success();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not add type');
+      toast.error(e instanceof Error ? e.message : 'Could not save type');
     } finally {
       setBusy(false);
     }
   };
 
+  const removeOne = (t: Record<string, unknown>) => {
+    const tid = pick(t, ['id']) as string | number;
+    Alert.alert('Delete vehicle type', `Delete "${str(pick(t, ['name']), 'this type')}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteVehicleType(tid);
+            await qc.invalidateQueries({ queryKey: ['vehicle-types'] });
+            if (editingId === tid) resetForm();
+            toast.success();
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Could not delete');
+          }
+        },
+      },
+    ]);
+  };
+
+  const toggleSel = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const batchDelete = () => {
+    if (selected.size === 0) return;
+    Alert.alert('Delete vehicle types', `Delete ${selected.size} selected type(s)?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: `Delete ${selected.size}`,
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            await Promise.all([...selected].map((sid) => deleteVehicleType(sid).catch(() => {})));
+            await qc.invalidateQueries({ queryKey: ['vehicle-types'] });
+            setSelected(new Set());
+            setSelectMode(false);
+            toast.success();
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <View className="gap-4">
-      {data && data.length > 0 ? (
+      <View className="flex-row items-center justify-between">
+        <Label className="text-muted">Vehicle types</Label>
+        {list.length > 0 && (
+          <Pressable
+            hitSlop={8}
+            onPress={() => {
+              setSelectMode((v) => !v);
+              setSelected(new Set());
+            }}
+          >
+            <Mono className="text-micro uppercase tracking-wide text-accent">
+              {selectMode ? 'Done' : 'Select'}
+            </Mono>
+          </Pressable>
+        )}
+      </View>
+
+      {list.length > 0 ? (
         <Group>
-          {data.map((t, i) => {
+          {list.map((t, i) => {
             const r = t as Record<string, unknown>;
-            const cap = num(pick(r, ['capacity', 'capacity_kg']));
+            const tid = String(pick(r, ['id']) ?? i);
+            const cap = num(pick(r, ['capacity']));
+            const isActive = pick(r, ['active']) !== false;
+            const isSel = selected.has(tid);
             return (
-              <DetailRow
-                key={i}
-                label={str(pick(r, ['name']), 'Type')}
-                value={cap ? `${cap / 1000} t` : '—'}
-                last={i === data.length - 1}
-              />
+              <Pressable
+                key={tid}
+                onPress={() => (selectMode ? toggleSel(tid) : loadForEdit(r))}
+                className={`min-h-[52px] flex-row items-center gap-3 px-3.5 py-3 active:bg-surface-hover ${
+                  i === list.length - 1 ? '' : 'border-b border-line-row'
+                }`}
+              >
+                {selectMode &&
+                  (isSel ? (
+                    <Icon name="checkCircle" size={20} color="#4D9EFF" />
+                  ) : (
+                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: '#888888' }} />
+                  ))}
+                <View className="flex-1">
+                  <Txt className="text-body text-fg" numberOfLines={1}>
+                    {str(pick(r, ['name']), 'Type')}
+                  </Txt>
+                  <Mono className="mt-0.5 text-caption text-faint">
+                    {cap ? `${cap} t` : '—'} · {isActive ? 'Active' : 'Inactive'}
+                  </Mono>
+                </View>
+                {!selectMode && (
+                  <IconButton name="x" size={16} accessibilityLabel="Delete type" onPress={() => removeOne(r)} />
+                )}
+              </Pressable>
             );
           })}
         </Group>
       ) : (
         <EmptyState icon="truck" title="No vehicle types" body="Add the classes you operate." />
       )}
-      <Label className="text-muted">Add a type</Label>
-      <TextField label="Name" icon="truck" placeholder="e.g. Superlink 30t" value={name} onChangeText={setName} />
-      <TextField label="Capacity (tons)" placeholder="e.g. 30" icon="box" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
-      <Button label="Add vehicle type" loading={busy} onPress={add} fullWidth />
+
+      {selectMode ? (
+        <Button
+          label={selected.size ? `Delete ${selected.size} selected` : 'Select types to delete'}
+          variant="danger"
+          icon="x"
+          loading={busy}
+          onPress={batchDelete}
+          fullWidth
+        />
+      ) : (
+        <>
+          <Label className="text-muted">{editingId != null ? 'Edit type' : 'Add a type'}</Label>
+          <TextField label="Name" icon="truck" placeholder="e.g. Superlink 30t" value={name} onChangeText={setName} />
+          <TextField label="Description" placeholder="Optional" value={description} onChangeText={setDescription} />
+          <View className="flex-row gap-3">
+            <View className="flex-1">
+              <TextField label="Capacity (tons)" placeholder="e.g. 30" icon="box" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
+            </View>
+            <View className="flex-1">
+              <TextField label="Base rate / km" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
+            </View>
+          </View>
+          {editingId != null && (
+            <SelectField label="Status" options={ACTIVE_OPTIONS} value={activeStr} onSelect={setActiveStr} />
+          )}
+          <Button label={editingId != null ? 'Save changes' : 'Add vehicle type'} loading={busy} onPress={save} fullWidth />
+          {editingId != null && (
+            <Button label="Cancel edit" variant="secondary" onPress={resetForm} fullWidth />
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -352,30 +592,81 @@ function SecuritySection() {
   );
 }
 
+const INDUSTRY_OPTIONS = [
+  { label: 'General freight', value: 'general_freight' },
+  { label: 'Refrigerated', value: 'refrigerated' },
+  { label: 'Hazmat', value: 'hazmat' },
+  { label: 'Construction', value: 'construction' },
+  { label: 'Agriculture', value: 'agriculture' },
+  { label: 'Other', value: 'other' },
+];
+const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC'].map((p) => ({ label: p, value: p }));
+
 function CompanySection() {
   const { data } = useCompanyProfile();
   const qc = useQueryClient();
-  const [name, setName] = useState('');
-  const [baseRate, setBaseRate] = useState('');
+  const [seeded, setSeeded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [logoUrl, setLogoUrl] = useState('');
+
+  const [companyName, setCompanyName] = useState('');
+  const [industry, setIndustry] = useState('general_freight');
+  const [regNumber, setRegNumber] = useState('');
+  const [vatNumber, setVatNumber] = useState('');
+  const [website, setWebsite] = useState('');
+  const [description, setDescription] = useState('');
+  const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
+  const [province, setProvince] = useState('GP');
+  const [postalCode, setPostalCode] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [supportEmail, setSupportEmail] = useState('');
+  const [validityDays, setValidityDays] = useState('');
+  const [baseRate, setBaseRate] = useState('');
 
   useEffect(() => {
-    if (!data) return;
-    // Populate the form once the profile loads (deferred so it isn't a
-    // synchronous setState in the effect body).
-    const id = setTimeout(() => {
-      setName(str(pick(data, ['name', 'company_name'])));
-      setBaseRate(String(pick(data, ['base_rate_per_km', 'base_rate']) ?? ''));
-    }, 0);
-    return () => clearTimeout(id);
-  }, [data]);
+    if (seeded || !data) return;
+    const addr = (pick(data, ['address']) ?? {}) as Record<string, unknown>;
+    const contact = (pick(data, ['contact']) ?? {}) as Record<string, unknown>;
+    setCompanyName(str(pick(data, ['company_name', 'name'])));
+    setIndustry(str(pick(data, ['industry']), 'general_freight'));
+    setRegNumber(str(pick(data, ['registration_number'])));
+    setVatNumber(str(pick(data, ['vat_number'])));
+    setWebsite(str(pick(data, ['website'])));
+    setDescription(str(pick(data, ['description'])));
+    setStreet(str(pick(addr, ['street'])));
+    setCity(str(pick(addr, ['city'])));
+    setProvince(str(pick(addr, ['province']), 'GP'));
+    setPostalCode(str(pick(addr, ['postal_code'])));
+    setPhone(str(pick(contact, ['phone'])));
+    setEmail(str(pick(contact, ['email'])));
+    setSupportEmail(str(pick(contact, ['support_email'])));
+    setValidityDays(pick(data, ['default_quote_validity_days']) != null ? String(num(pick(data, ['default_quote_validity_days']))) : '');
+    setBaseRate(pick(data, ['base_rate_per_km', 'base_rate']) != null ? String(num(pick(data, ['base_rate_per_km', 'base_rate']))) : '');
+    const logo = str(pick(data, ['logo_url']));
+    if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
+    setSeeded(true);
+  }, [data, seeded]);
 
   const save = async () => {
     setBusy(true);
     try {
-      await updateCompanyProfile({ name, base_rate_per_km: baseRate ? Number(baseRate) : undefined });
+      await updateCompanyProfile({
+        company_name: companyName.trim(),
+        name: companyName.trim(),
+        industry,
+        registration_number: regNumber.trim(),
+        vat_number: vatNumber.trim(),
+        website: website.trim(),
+        description: description.trim(),
+        address: { street: street.trim(), city: city.trim(), province, postal_code: postalCode.trim(), country: 'South Africa' },
+        contact: { phone: phone.trim(), email: email.trim(), support_email: supportEmail.trim() },
+        default_quote_validity_days: validityDays ? Number(validityDays) : undefined,
+        base_rate_per_km: baseRate ? Number(baseRate) : undefined,
+      });
       await qc.invalidateQueries({ queryKey: ['company-profile'] });
-      toast.success('Company updated');
+      toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not update company');
     } finally {
@@ -385,13 +676,14 @@ function CompanySection() {
 
   const uploadLogo = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
-    if (res.canceled) return;
+    if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
-    if (!asset) return;
     try {
-      await updateCompanyLogo({ uri: asset.uri, name: 'logo.jpg', type: 'image/jpeg' });
+      const out = (await updateCompanyLogo({ uri: asset.uri, name: 'logo.jpg', type: 'image/jpeg' })) as Record<string, unknown>;
+      const url = str(pick(out ?? {}, ['logo_url']));
+      if (url) setLogoUrl(url);
       await qc.invalidateQueries({ queryKey: ['company-profile'] });
-      toast.success('Logo updated');
+      toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload logo');
     }
@@ -399,9 +691,41 @@ function CompanySection() {
 
   return (
     <View className="gap-4">
-      <TextField label="Company name" placeholder="Your company" icon="building" value={name} onChangeText={setName} />
+      <Label className="text-muted">Company logo</Label>
+      <View className="flex-row items-center gap-3">
+        <Avatar name={companyName} uri={logoUrl || undefined} size={56} />
+        <Button label="Upload logo" variant="secondary" icon="download" onPress={uploadLogo} />
+      </View>
+
+      <Label className="mt-1 text-muted">Business information</Label>
+      <TextField label="Company name" placeholder="Your company" icon="building" value={companyName} onChangeText={setCompanyName} />
+      <SelectField label="Industry" options={INDUSTRY_OPTIONS} value={industry} onSelect={setIndustry} />
+      <TextField label="Registration number" placeholder="YYYY/XXXXXX/XX" value={regNumber} onChangeText={setRegNumber} />
+      <TextField label="VAT number" placeholder="4XXXXXXXXX" value={vatNumber} onChangeText={setVatNumber} />
+      <TextField label="Website" placeholder="https://" autoCapitalize="none" keyboardType="url" value={website} onChangeText={setWebsite} />
+      <TextField label="Description" placeholder="What your company does" value={description} onChangeText={setDescription} multiline />
+
+      <Label className="mt-1 text-muted">Business address</Label>
+      <TextField label="Street address" value={street} onChangeText={setStreet} />
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <TextField label="City" value={city} onChangeText={setCity} />
+        </View>
+        <View className="flex-1">
+          <SelectField label="Province" options={PROVINCE_OPTIONS} value={province} onSelect={setProvince} />
+        </View>
+      </View>
+      <TextField label="Postal code" keyboardType="numeric" value={postalCode} onChangeText={setPostalCode} />
+
+      <Label className="mt-1 text-muted">Contact</Label>
+      <TextField label="Phone" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+      <TextField label="Business email" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+      <TextField label="Support email" autoCapitalize="none" keyboardType="email-address" value={supportEmail} onChangeText={setSupportEmail} />
+
+      <Label className="mt-1 text-muted">Rate & quote defaults</Label>
       <TextField label="Base rate / km (ZAR)" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
-      <Button label="Upload logo" variant="secondary" icon="download" onPress={uploadLogo} fullWidth />
+      <TextField label="Quote validity (days)" placeholder="e.g. 7" keyboardType="numeric" value={validityDays} onChangeText={setValidityDays} />
+
       <Button label="Save changes" loading={busy} onPress={save} fullWidth />
     </View>
   );

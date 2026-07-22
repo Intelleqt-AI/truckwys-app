@@ -21,6 +21,7 @@ import { AdvanceDetailScreen } from '@/features/more/AdvanceDetailScreen';
 import { RiskScoresScreen } from '@/features/more/RiskScoresScreen';
 import { CustomersScreen } from '@/features/customers/CustomersScreen';
 import { CustomerDetailScreen } from '@/features/customers/CustomerDetailScreen';
+import { CustomerRiskScreen } from '@/features/customers/CustomerRiskScreen';
 import { AddCustomerScreen } from '@/features/customers/AddCustomerScreen';
 import { InsightsScreen } from '@/features/more/InsightsScreen';
 import { CapitalScreen } from '@/features/more/CapitalScreen';
@@ -79,6 +80,7 @@ export function AppNavigator() {
         <Stack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
         <Stack.Screen name="Customers" component={CustomersScreen} />
         <Stack.Screen name="CustomerDetail" component={CustomerDetailScreen} />
+        <Stack.Screen name="CustomerRisk" component={CustomerRiskScreen} />
         <Stack.Screen name="Insights" component={InsightsScreen} />
         <Stack.Screen name="Capital" component={CapitalScreen} />
         <Stack.Screen name="Activity" component={ActivityScreen} />

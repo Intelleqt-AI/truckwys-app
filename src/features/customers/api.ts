@@ -26,6 +26,15 @@ export function useCustomerRisk(id: string | number) {
   });
 }
 
+// Quotes for one customer — powers the customer-detail Quotes block.
+export function useCustomerQuotes(id: string | number) {
+  return useQuery<Record<string, unknown>[]>({
+    queryKey: ['customer-quotes', id],
+    queryFn: async () => asArray(await fetchData(`quotes/?customer=${id}&page_size=50`)),
+    enabled: !!id,
+  });
+}
+
 export const createCustomer = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'customers/', data });
 

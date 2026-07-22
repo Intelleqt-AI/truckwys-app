@@ -18,6 +18,8 @@ const ICON_BTN = {
   justifyContent: 'center',
 } as const;
 const pressDim = ({ pressed }: { pressed: boolean }) => [ICON_BTN, { opacity: pressed ? 0.4 : 1 }];
+// Text actions size to their label (auto-width pill), not the icon square.
+const pressDimText = ({ pressed }: { pressed: boolean }) => ({ opacity: pressed ? 0.4 : 1 });
 
 // Full-screen detail screen. Drives the NATIVE iOS header: the system back
 // button (chevron + previous screen name), a large collapsing title, and a
@@ -50,25 +52,36 @@ export function SheetScreen({
   const { colors } = useTheme();
 
   const renderAction = useCallback(
-    () => (
-      <Pressable
-        onPress={onAction}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel={actionLabel}
-        style={pressDim}
-      >
-        <View style={ICON_BTN}>
-          {actionIcon ? (
+    () =>
+      actionIcon ? (
+        <Pressable
+          onPress={onAction}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel}
+          style={pressDim}
+        >
+          <View style={ICON_BTN}>
             <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
-          ) : (
-            <Mono className="text-micro tracking-wide uppercase text-accent" style={{ fontWeight: '600' }}>
-              {actionLabel}
-            </Mono>
-          )}
-        </View>
-      </Pressable>
-    ),
+          </View>
+        </Pressable>
+      ) : (
+        <Pressable
+          onPress={onAction}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={actionLabel}
+          style={pressDimText}
+        >
+          <Mono
+            numberOfLines={1}
+            className="px-1 text-micro tracking-wide uppercase text-accent"
+            style={{ fontWeight: '600' }}
+          >
+            {actionLabel}
+          </Mono>
+        </Pressable>
+      ),
     [onAction, actionLabel, actionIcon, colors.accent],
   );
 

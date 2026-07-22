@@ -146,6 +146,39 @@ export function useUnreadCount() {
   });
 }
 
+// ── Personal profile (auth/me) ───────────────────────────────────────────────
+export function useMe() {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['me'],
+    queryFn: () => fetchData('auth/me/'),
+    retry: false,
+  });
+}
+
+export const updateProfile = (data: Record<string, unknown>) =>
+  patchData<Record<string, unknown>>({ url: 'auth/me/', data });
+
+// Avatar upload = PATCH auth/me/ multipart, field `avatar` (web parity).
+export const uploadAvatar = (file: { uri: string; name: string; type: string }) => {
+  const form = new FormData();
+  form.append('avatar', file as unknown as Blob);
+  return patchData<Record<string, unknown>>({
+    url: 'auth/me/',
+    data: form,
+    config: { headers: { 'Content-Type': 'multipart/form-data' } },
+  });
+};
+
+// ── Vehicle types (settings CRUD) ────────────────────────────────────────────
+export const createVehicleType = (data: Record<string, unknown>) =>
+  postData<Record<string, unknown>>({ url: 'vehicle-types/', data });
+
+export const updateVehicleType = (id: string | number, data: Record<string, unknown>) =>
+  patchData<Record<string, unknown>>({ url: `vehicle-types/${id}/`, data });
+
+export const deleteVehicleType = (id: string | number) =>
+  deleteData({ url: `vehicle-types/${id}/` });
+
 // ── Company profile (settings) ───────────────────────────────────────────────
 export function useCompanyProfile() {
   return useQuery<Record<string, unknown>>({

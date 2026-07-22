@@ -22,7 +22,7 @@ import {
   EmptyState,
   type IconName,
 } from '@/components/ui';
-import { fetchData } from '@/lib/api/client';
+import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore';
@@ -183,7 +183,7 @@ function ProfileSection() {
   return (
     <View className="gap-4">
       <View className="flex-row items-center gap-3">
-        <Avatar name={`${firstName} ${lastName}`.trim() || email} uri={avatar || undefined} size={56} />
+        <Avatar name={`${firstName} ${lastName}`.trim() || email} uri={mediaUrl(avatar)} size={56} />
         <Button label="Change photo" variant="secondary" icon="user" onPress={pickAvatar} />
       </View>
       <View className="flex-row gap-3">
@@ -627,7 +627,7 @@ function CompanySection() {
     <View className="gap-4">
       <Label className="text-muted">Company logo</Label>
       <View className="flex-row items-center gap-3">
-        <Avatar name={companyName} uri={logoUrl || undefined} size={56} />
+        <Avatar name={companyName} uri={mediaUrl(logoUrl)} size={56} />
         <Button label="Upload logo" variant="secondary" icon="download" onPress={uploadLogo} />
       </View>
 

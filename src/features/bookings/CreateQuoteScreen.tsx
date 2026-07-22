@@ -37,6 +37,7 @@ import {
   sendQuote,
 } from './api';
 import { useCustomers } from '@/features/customers/api';
+import { VoiceQuoteBar } from './VoiceQuoteBar';
 import { Skeleton } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { formatCurrency, formatCurrencyCompact, formatDuration } from '@/lib/formatters';
@@ -113,6 +114,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ROUND_TRIP');
   const [crossBorder, setCrossBorder] = useState(true);
   const [notes, setNotes] = useState('');
+  const [nlReply, setNlReply] = useState('');
   const [nlText, setNlText] = useState('');
   const [nlBusy, setNlBusy] = useState(false);
   const [benchmark, setBenchmark] = useState<Record<string, unknown> | null>(null);
@@ -377,15 +379,25 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     (asArray<string>(pick(guard ?? {}, ['suggestions']))[0] as unknown as string) ||
     'Margin is below your guardrail — review before sending.';
 
-  const submitNL = async () => {
-    if (!nlText.trim() || nlBusy) return;
+  const submitNL = async (text?: string) => {
+    const message = (text ?? nlText).trim();
+    if (!message || nlBusy) return;
     setNlBusy(true);
     try {
-      const res = await aiChatQuote(nlText, [], {});
+      const res = await aiChatQuote(message, [], {});
       const ex = (pick(res, ['extracted_fields']) ?? {}) as Record<string, unknown>;
       if (pick(ex, ['cargo_description'])) setCargo(str(pick(ex, ['cargo_description'])));
-      if (pick(ex, ['weight'])) setWeight(String(num(pick(ex, ['weight']))));
+      // Backend weight is in kg → the UI field is tons.
+      if (pick(ex, ['weight'])) {
+        const kg = num(pick(ex, ['weight']));
+        if (kg > 0) setWeight(String(Math.round((kg / 1000) * 100) / 100));
+      }
       if (pick(ex, ['vehicle_type'])) setVehicleType(str(pick(ex, ['vehicle_type'])));
+      if (pick(ex, ['pickup_date'])) setPickupDate(str(pick(ex, ['pickup_date'])));
+      if (pick(ex, ['delivery_date'])) setDeliveryDate(str(pick(ex, ['delivery_date'])));
+      if (pick(ex, ['valid_until'])) setValidUntil(str(pick(ex, ['valid_until'])));
+      const tt = str(pick(ex, ['trip_type'])).toUpperCase();
+      if (tt === 'ONE_WAY' || tt === 'ROUND_TRIP') setTripType(tt);
       const geocode = async (q: string, set: (l: Loc) => void) => {
         const raw = await suggestLocations(q);
         const first = asArray(raw)[0] as Record<string, unknown> | undefined;
@@ -400,7 +412,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       if (pick(ex, ['pickup_location'])) await geocode(str(pick(ex, ['pickup_location'])), setPickup);
       if (pick(ex, ['delivery_location'])) await geocode(str(pick(ex, ['delivery_location'])), setDelivery);
       setNlText('');
-      toast.success('Filled from description');
+      const reply = str(pick(res, ['reply']));
+      setNlReply(reply || 'Filled from your description.');
+      toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not parse');
     } finally {
@@ -492,20 +506,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     >
       <View className="gap-4">
-        {/* Natural-language quick fill */}
-        <View className="rounded-xs border border-line bg-surface p-3">
-          <View className="mb-2 flex-row items-center gap-1.5">
-            <Icon name="sparkle" size={14} color="#4D9EFF" />
-            <Label className="text-accent">Describe it</Label>
-          </View>
-          <TextField
-            placeholder="e.g. 20t steel, Johannesburg to Cape Town, flatbed"
-            value={nlText}
-            onChangeText={setNlText}
-            multiline
-          />
-          <Button label="Fill from description" icon="sparkle" variant="secondary" loading={nlBusy} onPress={submitNL} fullWidth className="mt-2" />
-        </View>
+        {/* AI voice / natural-language quick fill */}
+        <VoiceQuoteBar
+          value={nlText}
+          onChangeText={(t) => {
+            setNlText(t);
+            if (nlReply) setNlReply('');
+          }}
+          onSubmit={() => submitNL()}
+          busy={nlBusy}
+          onTranscribed={(t) => {
+            setNlText(t);
+            submitNL(t);
+          }}
+          note={nlReply || undefined}
+        />
 
         <SelectField label="Client" icon="user" placeholder="Select customer" options={customerOptions} value={customerId} onSelect={setCustomerId} />
         <SelectField label="Vehicle type" icon="truck" placeholder="Select vehicle type" options={vtypeOptions} value={vehicleType} onSelect={setVehicleType} />

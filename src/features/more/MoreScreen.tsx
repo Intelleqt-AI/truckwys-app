@@ -13,6 +13,7 @@ import {
 } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
+import { mediaUrl } from '@/lib/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
 
 const SECTIONS: { icon: IconName; label: string; route: string; danger?: boolean }[][] = [
@@ -66,7 +67,7 @@ export function MoreScreen() {
     <Screen topInset={false} contentClassName="pt-3">
       {/* Profile header */}
       <View className="mb-5 flex-row items-center gap-3 rounded-xs border border-line bg-surface p-4">
-        <Avatar name={user?.name ?? user?.email} size={48} />
+        <Avatar name={user?.name ?? user?.email} uri={mediaUrl(user?.avatar as string | undefined)} size={48} />
         <View className="flex-1">
           <Txt className="text-heading font-semibold text-fg">{user?.name ?? user?.email ?? 'Operator'}</Txt>
           <Mono className="mt-0.5 text-caption text-muted">{user?.email}</Mono>

@@ -24,6 +24,18 @@ function normalizeBase(raw: string): string {
 
 const baseURL = normalizeBase(RAW_BASE ?? 'https://web-production-143e2.up.railway.app');
 
+// Host origin (baseURL minus the /api/vN/ suffix) — media files (avatars,
+// logos) are served from the host root, not under /api/v1.
+const mediaOrigin = baseURL.replace(/\/api\/v\d+\/?$/, '');
+
+// Resolve a possibly-relative media path (e.g. "/media/avatars/x.jpg") to an
+// absolute URL so RN's <Image> can load it. Absolute URLs pass through.
+export const mediaUrl = (path?: string | null): string | undefined => {
+  if (!path) return undefined;
+  if (/^https?:\/\//i.test(path)) return path;
+  return mediaOrigin + (path.startsWith('/') ? path : `/${path}`);
+};
+
 export const api = axios.create({
   baseURL,
   timeout: 30000,

@@ -30,6 +30,16 @@ export function useVehicle(id: string | number, preview?: Record<string, unknown
   });
 }
 
+// Loads for one vehicle — powers the Financial Profile tab (web derives the
+// revenue/utilisation numbers from this list; no dedicated financial endpoint).
+export function useVehicleLoads(id: string | number) {
+  return useQuery<Record<string, unknown>[]>({
+    queryKey: ['vehicle-loads', id],
+    queryFn: async () => asArray(await fetchData(`loads/?vehicle=${id}&page_size=50`)),
+    enabled: !!id,
+  });
+}
+
 export function useDriver(id: string | number, preview?: Record<string, unknown>, enabled = true) {
   return useQuery<Record<string, unknown>>({
     queryKey: ['driver', id],

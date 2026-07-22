@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, ScrollView } from 'react-native';
+import { View, ScrollView, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -71,7 +71,7 @@ export function FinanceScreen({ route }: Props) {
 }
 
 function InvoicesTab() {
-  const { data, isLoading, isError, refetch } = useInvoices();
+  const { data, isLoading, isError, refetch, isRefetching } = useInvoices();
   const { openInvoice } = useAppNavigation();
 
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
@@ -84,6 +84,8 @@ function InvoicesTab() {
     <FlashList
       data={data}
       keyExtractor={(i) => String(i.id)}
+      onRefresh={refetch}
+      refreshing={isRefetching}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3 flex-row gap-3">
@@ -119,7 +121,7 @@ function InvoicesTab() {
 }
 
 function ExpensesTab() {
-  const { data, isLoading, isError, refetch } = useExpenses();
+  const { data, isLoading, isError, refetch, isRefetching } = useExpenses();
   const qc = useQueryClient();
   const removeExpense = async (id: string | number) => {
     try {
@@ -143,6 +145,8 @@ function ExpensesTab() {
     <FlashList
       data={data}
       keyExtractor={(e) => String(e.id)}
+      onRefresh={refetch}
+      refreshing={isRefetching}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
@@ -174,7 +178,8 @@ function ExpensesTab() {
 }
 
 function ReportsTab() {
-  const { data, isLoading, isError, refetch } = useFinanceReports();
+  const { data, isLoading, isError, refetch, isRefetching } = useFinanceReports();
+  const { colors } = useTheme();
   if (isLoading) return <View className="p-screen"><ListSkeleton rows={4} /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load reports." />;
   const { summary: f, monthlyTrend, marginByLane } = data;
@@ -182,7 +187,18 @@ function ReportsTab() {
   const maxTrend = Math.max(1, ...monthlyTrend.flatMap((m) => [m.revenue, m.expense]));
 
   return (
-    <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}>
+    <ScrollView
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefetching}
+          onRefresh={refetch}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+          progressBackgroundColor={colors.surface}
+        />
+      }
+    >
       <View className="mb-5 flex-row flex-wrap gap-3">
         <View style={{ width: '47.5%' }}>
           <StatCard label="Total revenue" value={formatCurrencyCompact(f.totalRevenue)} />

@@ -76,7 +76,7 @@ export function FleetScreen({ route }: Props) {
 }
 
 function VehiclesTab() {
-  const { data, isLoading, isError, refetch } = useVehicles();
+  const { data, isLoading, isError, refetch, isRefetching } = useVehicles();
   const { openVehicle } = useAppNavigation();
   const { colors } = useTheme();
   const [q, setQ] = useState('');
@@ -102,6 +102,8 @@ function VehiclesTab() {
     <FlashList
       data={list}
       keyExtractor={(v) => String(v.id)}
+      onRefresh={refetch}
+      refreshing={isRefetching}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
@@ -143,7 +145,7 @@ function VehiclesTab() {
 }
 
 function DriversTab() {
-  const { data, isLoading, isError, refetch } = useDrivers();
+  const { data, isLoading, isError, refetch, isRefetching } = useDrivers();
   const { openDriver } = useAppNavigation();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('ALL');
@@ -165,6 +167,8 @@ function DriversTab() {
     <FlashList
       data={list}
       keyExtractor={(d) => String(d.id)}
+      onRefresh={refetch}
+      refreshing={isRefetching}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">

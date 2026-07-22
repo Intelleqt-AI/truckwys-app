@@ -79,7 +79,7 @@ const QUOTE_FILTERS = [
 ];
 
 function QuotesTab() {
-  const { data, isLoading, isError, refetch } = useQuotes();
+  const { data, isLoading, isError, refetch, isRefetching } = useQuotes();
   const [filter, setFilter] = useState('ALL');
   const { openQuote } = useAppNavigation();
 
@@ -92,6 +92,8 @@ function QuotesTab() {
     <FlashList
       data={list}
       keyExtractor={(q) => String(q.id)}
+      onRefresh={refetch}
+      refreshing={isRefetching}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ItemSeparatorComponent={() => <View className="h-2.5" />}
       ListHeaderComponent={
@@ -132,7 +134,7 @@ function QuoteCard({ quote, onPress }: { quote: QuoteLite; onPress: () => void }
 
 // ── Orders / History (loads) ───────────────────────────────────────────────
 function OrdersTab() {
-  const { data, isLoading, isError, refetch } = useLoads();
+  const { data, isLoading, isError, refetch, isRefetching } = useLoads();
   const [filter, setFilter] = useState('ALL');
   const { openLoad } = useAppNavigation();
 
@@ -147,6 +149,8 @@ function OrdersTab() {
     <LoadList
       list={list}
       onOpen={openLoad}
+      onRefresh={refetch}
+      refreshing={isRefetching}
       stats={[
         { label: 'Active orders', value: String(active.length) },
         { label: 'In transit', value: String(active.filter((l) => l.status === 'IN_TRANSIT').length) },
@@ -167,7 +171,7 @@ function OrdersTab() {
 }
 
 function HistoryTab() {
-  const { data, isLoading, isError, refetch } = useLoads();
+  const { data, isLoading, isError, refetch, isRefetching } = useLoads();
   const [filter, setFilter] = useState('ALL');
   const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();
@@ -187,6 +191,8 @@ function HistoryTab() {
     <LoadList
       list={list}
       onOpen={openLoad}
+      onRefresh={refetch}
+      refreshing={isRefetching}
       search={{ value: q, onChange: setQ }}
       stats={[
         { label: 'Completed', value: String(done.filter((l) => l.status !== 'CANCELLED').length) },
@@ -214,6 +220,8 @@ function LoadList({
   filter,
   onFilter,
   search,
+  onRefresh,
+  refreshing,
 }: {
   list: LoadLite[];
   onOpen: (id: string | number, preview?: Record<string, unknown>) => void;
@@ -222,11 +230,15 @@ function LoadList({
   filter: string;
   onFilter: (v: string) => void;
   search?: { value: string; onChange: (v: string) => void };
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   return (
     <FlashList
       data={list}
       keyExtractor={(l) => String(l.id)}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">

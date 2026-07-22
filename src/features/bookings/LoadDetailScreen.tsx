@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, Pressable, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -17,8 +17,8 @@ import {
   Label,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
-import { useLoad, updateLoadStatus, convertLoadToInvoice } from './api';
-import { LOAD_STEPS, VALID_TRANSITIONS } from './constants';
+import { useLoad, updateLoadStatus, convertLoadToInvoice, uploadLoadPod } from './api';
+import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL } from './constants';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -33,7 +33,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
-  const [pod, setPod] = useState(false);
+  const [podBusy, setPodBusy] = useState(false);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this booking." />;
   const l = (data ?? {}) as Record<string, unknown>;
@@ -46,16 +46,20 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const total = num(pick(l, ['total_amount']));
   const ratePerKm = distance ? (rate / distance).toFixed(2) : '0.00';
   const invoiced = status === 'INVOICED' || !!pick(l, ['invoice_id', 'invoice']);
+  const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
 
-  const changeStatus = async (next: string) => {
+  const refresh = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ['load', id] }),
+      qc.invalidateQueries({ queryKey: ['loads'] }),
+    ]);
+
+  const doStatus = async (next: string) => {
     setBusy(true);
     try {
       await updateLoadStatus(id, next);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['load', id] }),
-        qc.invalidateQueries({ queryKey: ['loads'] }),
-      ]);
-      toast.success(`Marked ${next.replace(/_/g, ' ').toLowerCase()}`);
+      await refresh();
+      toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
     } finally {
@@ -63,12 +67,24 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  const changeStatus = (next: string) => {
+    // Cancelling a load that's already moving is destructive — confirm first.
+    if (next === 'CANCELLED' && !['PENDING', 'LOADING'].includes(status)) {
+      Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it.', [
+        { text: 'Keep', style: 'cancel' },
+        { text: 'Cancel load', style: 'destructive', onPress: () => doStatus('CANCELLED') },
+      ]);
+      return;
+    }
+    doStatus(next);
+  };
+
   const createInvoice = async () => {
     setBusy(true);
     try {
       await convertLoadToInvoice(id);
-      await qc.invalidateQueries({ queryKey: ['load', id] });
-      toast.success('Invoice created');
+      await refresh();
+      toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not create invoice');
     } finally {
@@ -77,13 +93,21 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   };
 
   const uploadPod = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.7,
-    });
-    if (res.canceled) return;
-    setPod(true);
-    toast.success('Proof of delivery attached');
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+    if (res.canceled || !res.assets?.[0]) return;
+    const asset = res.assets[0];
+    setPodBusy(true);
+    try {
+      const name = asset.fileName ?? `pod-${id}.jpg`;
+      const type = asset.mimeType ?? 'image/jpeg';
+      await uploadLoadPod(id, { uri: asset.uri, name, type });
+      await refresh();
+      toast.success();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not upload POD');
+    } finally {
+      setPodBusy(false);
+    }
   };
 
   return (
@@ -93,13 +117,14 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
       footer={
         <View className="gap-2.5">
-          {status === 'DELIVERED' && !invoiced && (
+          {!invoiced && (
             <Button label="Create invoice" icon="receipt" loading={busy} onPress={createInvoice} fullWidth />
           )}
           <Button
-            label={pod ? 'POD attached' : 'Upload POD'}
+            label={hasPod ? 'POD uploaded' : 'Upload POD'}
             icon="download"
             variant="secondary"
+            loading={podBusy}
             onPress={uploadPod}
             fullWidth
           />
@@ -111,32 +136,54 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         <Txt className="text-callout text-muted">{str(pick(l, ['customer_name', 'customer']), '')}</Txt>
       </View>
 
-      {/* Stepper */}
+      {/* Progress stepper — cumulative fill + glowing active dot */}
       <View className="mb-5 rounded-xs border border-line bg-surface px-3 py-4">
-        <View className="flex-row items-start">
+        <View className="flex-row items-center">
           {LOAD_STEPS.map((step, i) => {
             const past = i <= idx;
             const current = i === idx;
             return (
-              <View key={step} className="flex-1 flex-row items-start">
+              <View key={step} className="flex-1 flex-row items-center">
                 {i > 0 && (
                   <View
-                    className="mt-1.5 h-0.5 flex-1"
-                    style={{ backgroundColor: i <= idx ? colors.accent : colors.line }}
-                  />
-                )}
-                <View className="items-center gap-1.5" style={{ width: 52 }}>
-                  <View
                     style={{
-                      width: current ? 14 : 12,
-                      height: current ? 14 : 12,
-                      borderRadius: 14,
+                      flex: 1,
+                      height: 3,
+                      borderRadius: 3,
+                      marginBottom: 16,
                       backgroundColor: past ? colors.accent : colors.line,
                     }}
                   />
+                )}
+                <View className="items-center" style={{ width: 56, gap: 6 }}>
+                  <View
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: current ? 'rgba(77,158,255,0.22)' : 'transparent',
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: current ? 12 : 10,
+                        height: current ? 12 : 10,
+                        borderRadius: 6,
+                        backgroundColor: past ? colors.accent : colors.line,
+                      }}
+                    />
+                  </View>
                   <Mono
-                    className="text-center"
-                    style={{ fontSize: 8, color: past ? colors.accent : colors.faint, lineHeight: 10 }}
+                    className="text-center uppercase"
+                    style={{
+                      fontSize: 8.5,
+                      letterSpacing: 0.4,
+                      lineHeight: 11,
+                      fontWeight: current ? '700' : '500',
+                      color: past ? colors.accent : colors.faint,
+                    }}
                   >
                     {step.replace(/_/g, ' ')}
                   </Mono>
@@ -166,7 +213,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   <Mono
                     className={`text-micro tracking-wide uppercase ${danger ? 'text-danger' : 'text-fg'}`}
                   >
-                    {ns.replace(/_/g, ' ')}
+                    {STATUS_LABEL(ns)}
                   </Mono>
                 </Pressable>
               );
@@ -240,7 +287,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       <Group label="Financials">
         <DetailRow label="Base rate" value={formatCurrency(rate)} />
         <DetailRow label="Fuel surcharge" value={formatCurrency(num(pick(l, ['fuel_surcharge'])))} />
-        <DetailRow label="Additional" value={formatCurrency(num(pick(l, ['additional'])))} />
+        <DetailRow label="Additional" value={formatCurrency(num(pick(l, ['additional_charges', 'additional'])))} />
         <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
           <Txt className="text-callout font-semibold text-fg">Total</Txt>
           <Mono className="text-heading font-semibold text-accent">{formatCurrency(total)}</Mono>

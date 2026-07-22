@@ -134,9 +134,11 @@ export function DetailRow({
         last ? '' : 'border-b border-line-row'
       }`}
     >
-      <Txt className="text-callout text-muted">{label}</Txt>
+      <Txt className="shrink-0 text-callout text-muted">{label}</Txt>
       <ValueCmp
-        className="text-right text-sub font-medium text-fg"
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        className="flex-1 text-right text-sub font-medium text-fg"
         style={valueColor ? { color: valueColor } : undefined}
       >
         {value}

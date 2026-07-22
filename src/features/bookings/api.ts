@@ -146,9 +146,21 @@ export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
 };
 
 // ── Load mutations / actions ────────────────────────────────────────────────
-// Correct: dedicated action that validates the transition.
+// Web patches the detail resource directly (there is no update_status action —
+// POST there returns "method not allowed").
 export const updateLoadStatus = (id: string | number, status: string) =>
-  postData({ url: `loads/${id}/update_status/`, data: { status } });
+  patchData({ url: `loads/${id}/`, data: { status } });
 
 export const convertLoadToInvoice = (id: string | number) =>
-  postData({ url: `loads/${id}/convert_to_invoice/`, data: {} });
+  postData<Record<string, unknown>>({ url: `loads/${id}/convert_to_invoice/`, data: {} });
+
+// Multipart POST — field name `pod_document` (matches the web upload).
+export const uploadLoadPod = (id: string | number, file: { uri: string; name: string; type: string }) => {
+  const form = new FormData();
+  form.append('pod_document', file as unknown as Blob);
+  return postData<Record<string, unknown>>({
+    url: `loads/${id}/upload_pod/`,
+    data: form,
+    config: { headers: { 'Content-Type': 'multipart/form-data' } },
+  });
+};

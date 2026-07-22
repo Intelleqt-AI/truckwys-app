@@ -1,42 +1,40 @@
-import { useEffect } from 'react';
-import { View } from 'react-native';
-import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
+import { Platform, View } from 'react-native';
+import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 import { create } from 'zustand';
 import { Mono } from '@/components/ui/Text';
 
-// Minimal global toast — replaces the web app's `toast` util. Errors and
-// confirmations surface as a hairline banner near the top; auto-dismisses.
-type ToastKind = 'error' | 'success' | 'info';
-type ToastItem = { id: number; kind: ToastKind; message: string };
+// Global feedback. Native-feel policy: successes/info are SILENT visually —
+// the UI updates and a light success haptic confirms. Only ERRORS surface a
+// toast, anchored at the BOTTOM (above the tab bar) so it never covers the
+// header. Call sites are unchanged (success/info still callable).
+type ToastItem = { id: number; message: string };
 
 interface ToastState {
   items: ToastItem[];
-  push: (kind: ToastKind, message: string) => void;
-  remove: (id: number) => void;
+  push: (message: string) => void;
 }
 
 let seq = 0;
 const useToastStore = create<ToastState>((set) => ({
   items: [],
-  push: (kind, message) => {
+  push: (message) => {
     const id = ++seq;
-    set((s) => ({ items: [...s.items, { id, kind, message }] }));
+    set((s) => ({ items: [...s.items, { id, message }] }));
     setTimeout(() => set((s) => ({ items: s.items.filter((i) => i.id !== id) })), 3500);
   },
-  remove: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
 }));
 
-export const toast = {
-  error: (m: string) => useToastStore.getState().push('error', m),
-  success: (m: string) => useToastStore.getState().push('success', m),
-  info: (m: string) => useToastStore.getState().push('info', m),
+const successHaptic = () => {
+  if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 };
 
-const KIND_CLASS: Record<ToastKind, { border: string; text: string }> = {
-  error: { border: 'border-danger', text: 'text-danger' },
-  success: { border: 'border-success', text: 'text-success' },
-  info: { border: 'border-accent', text: 'text-accent' },
+export const toast = {
+  error: (m: string) => useToastStore.getState().push(m),
+  // Silent + haptic — the screen already reflects the change.
+  success: (_m?: string) => successHaptic(),
+  info: (_m?: string) => successHaptic(),
 };
 
 export function ToastHost() {
@@ -47,7 +45,7 @@ export function ToastHost() {
     <View
       pointerEvents="none"
       className="absolute left-0 right-0 z-50 items-center gap-2 px-4"
-      style={{ top: insets.top + 8 }}
+      style={{ bottom: insets.bottom + 90 }}
     >
       {items.map((i) => (
         <ToastRow key={i.id} item={i} />
@@ -57,15 +55,13 @@ export function ToastHost() {
 }
 
 function ToastRow({ item }: { item: ToastItem }) {
-  const c = KIND_CLASS[item.kind];
-  useEffect(() => {}, []);
   return (
     <Animated.View
-      entering={FadeInUp.duration(180)}
-      exiting={FadeOutUp.duration(180)}
-      className={`w-full rounded-xs border ${c.border} bg-elevated px-4 py-3`}
+      entering={FadeInDown.duration(200)}
+      exiting={FadeOutDown.duration(180)}
+      className="w-full rounded-xs border border-danger bg-elevated px-4 py-3"
     >
-      <Mono className={`text-caption ${c.text}`}>{item.message}</Mono>
+      <Mono className="text-caption text-danger">{item.message}</Mono>
     </Animated.View>
   );
 }

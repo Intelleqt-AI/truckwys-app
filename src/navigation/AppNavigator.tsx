@@ -16,6 +16,7 @@ import { InvoiceDetailScreen } from '@/features/finance/InvoiceDetailScreen';
 import { CreateInvoiceScreen } from '@/features/finance/CreateInvoiceScreen';
 import { AddExpenseScreen } from '@/features/finance/AddExpenseScreen';
 import { AddVehicleScreen } from '@/features/fleet/AddVehicleScreen';
+import { AddVehicleTypeScreen } from '@/features/more/AddVehicleTypeScreen';
 import { AddDriverScreen } from '@/features/fleet/AddDriverScreen';
 import { AdvanceDetailScreen } from '@/features/more/AdvanceDetailScreen';
 import { RiskScoresScreen } from '@/features/more/RiskScoresScreen';
@@ -109,6 +110,7 @@ export function AppNavigator() {
         <Stack.Screen name="CreateInvoice" component={CreateInvoiceScreen} />
         <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
         <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />
+        <Stack.Screen name="AddVehicleType" component={AddVehicleTypeScreen} />
         <Stack.Screen name="AddDriver" component={AddDriverScreen} />
       </Stack.Group>
     </Stack.Navigator>

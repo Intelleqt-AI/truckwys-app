@@ -44,26 +44,25 @@ export function CustomersScreen({ navigation }: Props) {
     });
   }, [navigation, colors.bgDeep, renderAdd]);
 
-  const cards = data
-    ? [
-        { label: 'Total customers', value: String(data.length) },
-        { label: 'With credit limit', value: String(data.filter((c) => num(pick(c.raw, ['credit_limit'])) > 0).length) },
-        { label: 'Cities covered', value: String(new Set(data.map((c) => str(pick(c.raw, ['city']))).filter(Boolean)).size) },
-        { label: 'NET30 clients', value: String(data.filter((c) => (str(pick(c.raw, ['payment_terms_default'])) || 'NET30') === 'NET30').length) },
-      ]
-    : [];
+  const total = data?.length ?? 0;
+  const withCredit = data ? data.filter((c) => num(pick(c.raw, ['credit_limit'])) > 0).length : 0;
+  const cities = data ? new Set(data.map((c) => str(pick(c.raw, ['city']))).filter(Boolean)).size : 0;
+  const net30 = data ? data.filter((c) => (str(pick(c.raw, ['payment_terms_default'])) || 'NET30') === 'NET30').length : 0;
 
   return (
     <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
       <View className="px-screen pt-3">
-        {cards.length > 0 && (
-          <View className="mb-3 flex-row flex-wrap gap-3">
-            {cards.map((c) => (
-              <View key={c.label} style={{ width: '47.5%' }}>
-                <StatCard label={c.label} value={c.value} />
-              </View>
-            ))}
+        {data && (
+          <View className="mb-3 gap-3">
+            <View className="flex-row gap-3">
+              <StatCard label="Total customers" value={String(total)} />
+              <StatCard label="With credit limit" value={String(withCredit)} />
+            </View>
+            <View className="flex-row gap-3">
+              <StatCard label="Cities covered" value={String(cities)} />
+              <StatCard label="NET30 clients" value={String(net30)} />
+            </View>
           </View>
         )}
         <View className="pb-3">

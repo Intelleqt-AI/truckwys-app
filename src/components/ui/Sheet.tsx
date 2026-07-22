@@ -7,10 +7,17 @@ import { Icon, type IconName } from './icons';
 import { AmbientGlow } from './layout';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Square, centred box so the icon sits dead-centre. The inner View owns the
-// layout; the Pressable just wraps it for touch + a press dim (no background).
-const ICON_BTN = { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' } as const;
-const pressDim = ({ pressed }: { pressed: boolean }) => ({ opacity: pressed ? 0.4 : 1 });
+// Fixed square so the icon centres AND the native iOS bar-button frame is
+// square — otherwise the iOS 26 glass capsule stretches into an oval ("not
+// round"). No background; press feedback via opacity.
+const ICON_BTN = {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  alignItems: 'center',
+  justifyContent: 'center',
+} as const;
+const pressDim = ({ pressed }: { pressed: boolean }) => [ICON_BTN, { opacity: pressed ? 0.4 : 1 }];
 
 // Full-screen detail screen. Drives the NATIVE iOS header: the system back
 // button (chevron + previous screen name), a large collapsing title, and a

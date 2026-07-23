@@ -152,7 +152,7 @@ export function VoiceQuoteBar({
     <View className="rounded-xs border border-line bg-surface p-3">
       <View className="mb-2 flex-row items-center gap-1.5">
         <Icon name="sparkle" size={14} color={colors.accent} />
-        <Label className="text-accent">Describe it — type or speak</Label>
+        <Label className="text-accent">Describe it</Label>
       </View>
       <TextField
         placeholder="e.g. 20t steel, Johannesburg to Cape Town, flatbed Tuesday"
@@ -161,12 +161,12 @@ export function VoiceQuoteBar({
         multiline
       />
       {note ? <Txt className="mt-1.5 text-caption text-muted">{note}</Txt> : null}
-      <View className="mt-2 flex-row gap-2.5">
+      <View className="mt-2 flex-row items-stretch gap-2.5">
         <Pressable
           onPress={start}
           accessibilityRole="button"
           accessibilityLabel="Record voice"
-          className="h-11 w-11 items-center justify-center rounded-xs border border-line-active bg-surface active:opacity-70"
+          className="w-12 items-center justify-center rounded-xs border border-line-active bg-surface active:opacity-70"
         >
           <Icon name="mic" size={20} color={colors.accent} />
         </Pressable>

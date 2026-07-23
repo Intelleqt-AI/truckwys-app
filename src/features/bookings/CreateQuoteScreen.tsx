@@ -106,7 +106,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [vehicleType, setVehicleType] = useState('');
   const [pickup, setPickup] = useState<Loc | null>(null);
   const [delivery, setDelivery] = useState<Loc | null>(null);
-  const [weight, setWeight] = useState(str(prefill?.weight, '28'));
+  const [weight, setWeight] = useState(str(prefill?.weight));
   const [pickupDate, setPickupDate] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
   const [validUntil, setValidUntil] = useState(plusDays(7));
@@ -136,11 +136,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const routeReq = useRef(0);
   const aiReq = useRef(0);
 
-  // Defaults from company profile (deferred to avoid sync setState in effect).
+  // Prefill R/km from the company default only if one is configured — no
+  // hard-coded fallback (leave blank so the field isn't pre-filled with a
+  // made-up rate). Deferred to avoid sync setState in effect.
   useEffect(() => {
     if (!company || baseRatePerKm || editing) return;
-    const t = setTimeout(() => setBaseRatePerKm(String(num(pick(company, ['default_base_rate_per_km']), 10))), 0);
-    return () => clearTimeout(t);
+    const def = num(pick(company, ['default_base_rate_per_km']));
+    if (def > 0) {
+      const t = setTimeout(() => setBaseRatePerKm(String(def)), 0);
+      return () => clearTimeout(t);
+    }
   }, [company, baseRatePerKm, editing]);
 
   // Company can force cross-border off (derived, no state churn).

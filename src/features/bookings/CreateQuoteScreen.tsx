@@ -14,6 +14,7 @@ import {
   TextField,
   DateField,
   Toggle,
+  Badge,
   Button,
   Icon,
   Txt,
@@ -466,8 +467,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   });
 
   const save = async (send: boolean) => {
+    // Draft can be saved any time (just needs a client to attach to).
     if (!customerId) return toast.error('Select a client');
-    if (!ready) return toast.error('Add pickup and drop-off');
+    if (send) {
+      if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
+      const missing: string[] = [];
+      if (!(Number(weight) > 0)) missing.push('weight');
+      if (!pickupDate) missing.push('pickup date');
+      if (!deliveryDate) missing.push('delivery date');
+      if (missing.length) return toast.error(`Add ${missing.join(', ')} before sending`);
+    }
     setBusy(true);
     try {
       const payload = buildPayload(send ? 'SENT' : 'DRAFT');
@@ -556,7 +565,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Weight (tons)" placeholder="e.g. 20" keyboardType="numeric" value={weight} onChangeText={setWeight} />
+            <TextField label="Weight (tons) *" placeholder="e.g. 20" keyboardType="numeric" value={weight} onChangeText={setWeight} />
           </View>
           <View className="flex-1">
             <TextField label="R / km" placeholder="e.g. 25" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
@@ -565,10 +574,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <TextField label="Cargo" placeholder="e.g. Steel coils" value={cargo} onChangeText={setCargo} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <DateField label="Pickup date" value={pickupDate} onChange={setPickupDate} />
+            <DateField label="Pickup date *" value={pickupDate} onChange={setPickupDate} />
           </View>
           <View className="flex-1">
-            <DateField label="Delivery date" value={deliveryDate} onChange={setDeliveryDate} />
+            <DateField label="Delivery date *" value={deliveryDate} onChange={setDeliveryDate} />
           </View>
         </View>
         <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />
@@ -786,6 +795,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 }
 
 
+// A location is cross-border when its country code isn't South Africa.
+const isForeignCc = (cc?: string) => {
+  if (!cc) return false;
+  const c = cc.replace(/\s/g, '').toUpperCase();
+  return c !== '' && !['ZA', 'ZAF', 'SOUTHAFRICA'].includes(c);
+};
+
+type LocSuggest = Loc & { foreign: boolean; country: string };
+
 // ── Location autocomplete with coordinates ──────────────────────────────────
 function LocationField({
   label,
@@ -801,7 +819,7 @@ function LocationField({
   const { colors } = useTheme();
   const [text, setText] = useState(value?.label ?? '');
   const [focused, setFocused] = useState(false);
-  const [results, setResults] = useState<Loc[]>([]);
+  const [results, setResults] = useState<LocSuggest[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reflect an externally-set value (e.g. edit-mode hydration) into the input.
@@ -826,12 +844,16 @@ function LocationField({
         const list = asArray(raw)
           .map((r) => {
             const o = r as Record<string, unknown>;
+            const cc = str(pick(o, ['country_code', 'country'])) || undefined;
+            const foreign = Boolean(pick(o, ['cross_border'])) || isForeignCc(cc);
             return {
               label: str(pick(o, ['label', 'name', 'description', 'address'])),
               lat: num(pick(o, ['lat', 'latitude'])),
               lon: num(pick(o, ['lon', 'lng', 'longitude'])),
-              cc: str(pick(o, ['country_code', 'country'])) || undefined,
-            } as Loc;
+              cc,
+              foreign,
+              country: str(pick(o, ['country', 'country_name'])),
+            } as LocSuggest;
           })
           .filter((l) => l.label && l.lat && l.lon)
           .slice(0, 6);
@@ -848,7 +870,7 @@ function LocationField({
   return (
     <View>
       <Label className="mb-1.5 text-muted">{label}</Label>
-      <View className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}>
+      <View className={`h-12 flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}>
         <Icon name="pin" size={16} color={value ? colors.accent : colors.faint} />
         <TextInput
           className="flex-1 text-body text-fg"
@@ -858,9 +880,14 @@ function LocationField({
           onChangeText={setText}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 150)}
-          style={{ paddingVertical: 12 }}
+          style={{ height: '100%', paddingVertical: 0, includeFontPadding: false, textAlignVertical: 'center' }}
         />
       </View>
+      {value?.cc && isForeignCc(value.cc) && (
+        <View className="mt-1.5 flex-row">
+          <Badge label="Cross-border" tone="warning" />
+        </View>
+      )}
       {focused && results.length > 0 && (
         <View className="mt-2 overflow-hidden rounded-xs border border-line bg-surface">
           {results.map((r, i) => (
@@ -873,8 +900,11 @@ function LocationField({
               }}
               className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3 active:bg-surface-hover"
             >
-              <Icon name="pin" size={15} color={colors.faint} />
-              <Txt className="flex-1 text-sub text-fg">{r.label}</Txt>
+              <Icon name="pin" size={15} color={r.foreign ? '#F59E0B' : colors.faint} />
+              <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
+                {r.label}
+              </Txt>
+              {r.foreign && <Badge label={r.country || 'Cross-border'} tone="warning" />}
             </Pressable>
           ))}
         </View>

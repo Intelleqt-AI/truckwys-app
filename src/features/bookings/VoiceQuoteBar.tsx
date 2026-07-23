@@ -8,12 +8,7 @@ import Animated, {
   Easing,
   type SharedValue,
 } from 'react-native-reanimated';
-import {
-  useAudioRecorder,
-  RecordingPresets,
-  AudioModule,
-  setAudioModeAsync,
-} from 'expo-audio';
+import { useAudioRecorder, RecordingPresets, AudioModule, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { TextField, Button, Icon, Label, Mono, Txt } from '@/components/ui';
 import { aiVoiceQuote } from './api';
@@ -34,7 +29,9 @@ function WaveBar({ clock, index }: { clock: SharedValue<number>; index: number }
     const amp = 0.5 + 0.5 * Math.sin(phase);
     return { height: 5 + amp * 24 };
   });
-  return <Animated.View style={[{ width: 3, borderRadius: 2, backgroundColor: colors.accent }, style]} />;
+  return (
+    <Animated.View style={[{ width: 3, borderRadius: 2, backgroundColor: colors.accent }, style]} />
+  );
 }
 
 function Waveform() {
@@ -126,7 +123,10 @@ export function VoiceQuoteBar({
             style={{ backgroundColor: '#FF4949' }}
           >
             <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: '#fff' }} />
-            <Mono className="text-micro font-semibold uppercase tracking-wide" style={{ color: '#fff' }}>
+            <Mono
+              className="text-micro font-semibold uppercase tracking-wide"
+              style={{ color: '#fff' }}
+            >
               Stop
             </Mono>
           </Pressable>
@@ -166,7 +166,7 @@ export function VoiceQuoteBar({
           onPress={start}
           accessibilityRole="button"
           accessibilityLabel="Record voice"
-          className="w-12 items-center justify-center rounded-xs border border-line-active bg-surface active:opacity-70"
+          className="w-14 items-center justify-center rounded-xs border border-line-active bg-surface active:opacity-70"
         >
           <Icon name="mic" size={20} color={colors.accent} />
         </Pressable>

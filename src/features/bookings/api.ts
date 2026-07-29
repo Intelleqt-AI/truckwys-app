@@ -128,14 +128,22 @@ export const patchQuote = (id: string | number, data: Record<string, unknown>) =
 export const sendQuote = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `quotes/${id}/send_to_customer/`, data: {} });
 
-export const updateQuoteStatus = (id: string | number, status: string) =>
-  patchData({ url: `quotes/${id}/update_status/`, data: { status } });
+// Won/lost capture. PATCH, not POST — matches the web outcome modal.
+export interface QuoteOutcome {
+  outcome: 'accepted' | 'rejected';
+  final_price?: number;
+  rejection_reason?: string;
+}
 
-export const recordQuoteOutcome = (id: string | number, data: Record<string, unknown>) =>
-  postData({ url: `quotes/${id}/outcome/`, data });
+export const recordQuoteOutcome = (id: string | number, data: QuoteOutcome) =>
+  patchData({ url: `quotes/${id}/outcome/`, data });
 
-export const convertQuoteToLoad = (id: string | number) =>
-  postData({ url: `quotes/${id}/convert_to_load/`, data: {} });
+// Driver/vehicle are optional — converting with neither leaves the booking
+// unassigned, to be picked up later from the load detail screen.
+export const convertQuoteToLoad = (
+  id: string | number,
+  data: { driver_id?: string; vehicle_id?: string } = {},
+) => postData({ url: `quotes/${id}/convert_to_load/`, data });
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
@@ -150,6 +158,13 @@ export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
 // POST there returns "method not allowed").
 export const updateLoadStatus = (id: string | number, status: string) =>
   patchData({ url: `loads/${id}/`, data: { status } });
+
+// Assigns (or clears) both at once — the endpoint takes null to unassign.
+export const assignLoadDriver = (
+  id: string | number,
+  driver_id: number | null,
+  vehicle_id: number | null,
+) => postData({ url: `loads/${id}/assign_driver/`, data: { driver_id, vehicle_id } });
 
 export const convertLoadToInvoice = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `loads/${id}/convert_to_invoice/`, data: {} });

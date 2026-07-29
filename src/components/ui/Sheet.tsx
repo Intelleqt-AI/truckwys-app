@@ -1,5 +1,5 @@
 import { type ReactNode, useLayoutEffect, useCallback } from 'react';
-import { View, ScrollView, Pressable } from 'react-native';
+import { View, ScrollView, Pressable, RefreshControl } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Mono, Label } from './Text';
@@ -35,6 +35,8 @@ export function SheetScreen({
   children,
   footer,
   variant = 'push',
+  onRefresh,
+  refreshing,
 }: {
   eyebrow?: string;
   title?: string;
@@ -46,6 +48,10 @@ export function SheetScreen({
   children: ReactNode;
   footer?: ReactNode;
   variant?: 'push' | 'modal';
+  // Opt-in pull-to-refresh. Screens whose data can change server-side (the
+  // notification inbox, detail screens) should pass this.
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -125,6 +131,15 @@ export function SheetScreen({
         }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              refreshing={!!refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.accent}
+            />
+          ) : undefined
+        }
       >
         {eyebrow && <Label className="mb-3 mt-1">{eyebrow}</Label>}
         {children}

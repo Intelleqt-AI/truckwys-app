@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Pressable, Alert } from 'react-native';
+import { View, Pressable, Alert, Modal } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -25,6 +25,8 @@ import {
 import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { useAuthStore } from '@/stores/authStore';
+import { useRole, canAccessSettingsSection } from '@/lib/access';
+import { WEB_APP_URL } from '@/lib/legal';
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore';
 import {
   useCompanyProfile,
@@ -43,7 +45,14 @@ import {
   inviteUser,
   updateUserRole,
   removeUser,
+  useNotificationPrefs,
+  updateNotificationPrefs,
+  useBillingStatus,
+  NOTIFICATION_DEFAULTS,
+  type NotificationChannel,
+  type NotificationPrefs,
 } from './api';
+import { formatCurrency, formatDate } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
@@ -66,8 +75,13 @@ const SECTIONS: { key: string; label: string; icon: IconName }[] = [
 ];
 
 export function SettingsScreen({ route, navigation }: Props) {
-  const section = route.params?.section;
+  const role = useRole();
+  const requested = route.params?.section;
+  // Fall back to the menu when this role can't reach the requested section —
+  // web redirects to /settings/profile for the same case.
+  const section = requested && canAccessSettingsSection(role, requested) ? requested : undefined;
   const current = SECTIONS.find((s) => s.key === section);
+  const visibleSections = SECTIONS.filter((s) => canAccessSettingsSection(role, s.key));
 
   return (
     <SheetScreen
@@ -75,7 +89,12 @@ export function SettingsScreen({ route, navigation }: Props) {
       title={current?.label ?? 'Settings'}
       onBack={() => navigation.goBack()}
     >
-      {!section && <SettingsMenu onOpen={(k) => navigation.push('Settings', { section: k })} />}
+      {!section && (
+        <SettingsMenu
+          sections={visibleSections}
+          onOpen={(k) => navigation.push('Settings', { section: k })}
+        />
+      )}
       {section === 'profile' && <ProfileSection />}
       {section === 'appearance' && <AppearanceSection />}
       {section === 'notifications' && <NotificationsSection />}
@@ -94,16 +113,22 @@ export function SettingsScreen({ route, navigation }: Props) {
   );
 }
 
-function SettingsMenu({ onOpen }: { onOpen: (k: string) => void }) {
+function SettingsMenu({
+  sections,
+  onOpen,
+}: {
+  sections: typeof SECTIONS;
+  onOpen: (k: string) => void;
+}) {
   const { colors } = useTheme();
   return (
     <Group>
-      {SECTIONS.map((s, i) => (
+      {sections.map((s, i) => (
         <Pressable
           key={s.key}
           onPress={() => onOpen(s.key)}
           className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
-            i === SECTIONS.length - 1 ? '' : 'border-b border-line-row'
+            i === sections.length - 1 ? '' : 'border-b border-line-row'
           }`}
         >
           <Icon name={s.icon} size={19} color={colors.muted} />
@@ -373,37 +398,108 @@ function VehicleTypesSection() {
   );
 }
 
-const NOTIF_KEYS = [
-  { key: 'quotes', label: 'Quote activity', desc: 'Viewed, accepted or expired quotes' },
-  { key: 'loads', label: 'Load updates', desc: 'Status changes on your bookings' },
-  { key: 'finance', label: 'Finance', desc: 'Invoices paid and overdue' },
-  { key: 'fleet', label: 'Fleet alerts', desc: 'Service due and compliance' },
+// Labels for the canonical backend schema (see NOTIFICATION_DEFAULTS).
+const NOTIF_CHANNELS: {
+  channel: NotificationChannel;
+  label: string;
+  disabled?: boolean;
+  keys: { key: string; label: string; desc: string }[];
+}[] = [
+  {
+    channel: 'email',
+    label: 'Email',
+    keys: [
+      { key: 'quotes', label: 'Quote activity', desc: 'Viewed, accepted or expired quotes' },
+      { key: 'invoices', label: 'Invoices', desc: 'Issued, due and overdue invoices' },
+      { key: 'payments', label: 'Payments', desc: 'Payments received and failed' },
+      { key: 'fleet_alerts', label: 'Fleet alerts', desc: 'Service due and compliance' },
+      { key: 'weekly_reports', label: 'Weekly reports', desc: 'Monday summary of the week' },
+    ],
+  },
+  {
+    channel: 'push',
+    label: 'Push',
+    keys: [
+      { key: 'new_bookings', label: 'New bookings', desc: 'A quote became an active load' },
+      { key: 'payment_received', label: 'Payment received', desc: 'An invoice was paid' },
+      { key: 'maintenance_due', label: 'Maintenance due', desc: 'A vehicle is due for service' },
+      { key: 'driver_updates', label: 'Driver updates', desc: 'Status changes from drivers' },
+      { key: 'product_news', label: 'Product news', desc: 'New features and tips from Truckwys' },
+    ],
+  },
+  {
+    channel: 'sms',
+    label: 'SMS',
+    disabled: true,
+    keys: [
+      { key: 'critical_alerts', label: 'Critical alerts', desc: 'Breakdowns and incidents' },
+      { key: 'payment_confirmations', label: 'Payment confirmations', desc: 'Confirmed payments' },
+    ],
+  },
 ];
 
 function NotificationsSection() {
-  const [state, setState] = useState<Record<string, boolean>>({
-    quotes: true,
-    loads: true,
-    finance: true,
-    fleet: false,
-  });
+  const { data } = useNotificationPrefs();
+  const qc = useQueryClient();
+  const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Seed once from the server, then edit locally until saved.
+  useEffect(() => {
+    if (data && !prefs) setPrefs(data);
+  }, [data, prefs]);
+
+  const state = prefs ?? NOTIFICATION_DEFAULTS;
+
+  const toggle = (channel: NotificationChannel, key: string, value: boolean) =>
+    setPrefs((p) => {
+      const base = p ?? NOTIFICATION_DEFAULTS;
+      return { ...base, [channel]: { ...base[channel], [key]: value } };
+    });
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await updateNotificationPrefs(state);
+      await qc.invalidateQueries({ queryKey: ['notification-settings'] });
+      toast.success('Notification preferences saved');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save preferences');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Group>
-      {NOTIF_KEYS.map((n, i) => (
-        <View
-          key={n.key}
-          className={`flex-row items-center justify-between gap-3 px-4 py-3.5 ${
-            i === NOTIF_KEYS.length - 1 ? '' : 'border-b border-line-row'
-          }`}
+    <View className="gap-4">
+      {NOTIF_CHANNELS.map((group) => (
+        <Group
+          key={group.channel}
+          label={group.disabled ? `${group.label} · coming soon` : group.label}
         >
-          <View className="flex-1">
-            <Txt className="text-callout text-fg">{n.label}</Txt>
-            <Txt className="mt-0.5 text-caption text-faint">{n.desc}</Txt>
-          </View>
-          <Toggle value={!!state[n.key]} onValueChange={(v) => setState((s) => ({ ...s, [n.key]: v }))} />
-        </View>
+          {group.keys.map((n, i) => (
+            <View
+              key={n.key}
+              className={`flex-row items-center justify-between gap-3 px-4 py-3.5 ${
+                i === group.keys.length - 1 ? '' : 'border-b border-line-row'
+              }`}
+              style={group.disabled ? { opacity: 0.45 } : undefined}
+            >
+              <View className="flex-1">
+                <Txt className="text-callout text-fg">{n.label}</Txt>
+                <Txt className="mt-0.5 text-caption text-faint">{n.desc}</Txt>
+              </View>
+              <Toggle
+                value={!!state[group.channel][n.key]}
+                onValueChange={(v) => toggle(group.channel, n.key, v)}
+                disabled={group.disabled}
+              />
+            </View>
+          ))}
+        </Group>
       ))}
-    </Group>
+      <Button label="Save preferences" loading={busy} onPress={save} fullWidth />
+    </View>
   );
 }
 
@@ -428,6 +524,32 @@ function SecuritySection() {
   const user = useAuthStore((s) => s.user);
   const signOutStore = useAuthStore((s) => s.signOut);
   const [twoFa, setTwoFa] = useState(Boolean(user?.two_factor_enabled));
+  const [showDelete, setShowDelete] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const closeDelete = () => {
+    setShowDelete(false);
+    setDeletePassword('');
+  };
+
+  const confirmDelete = async () => {
+    if (!deletePassword) return;
+    setDeleteBusy(true);
+    try {
+      await deleteAccount(deletePassword);
+      closeDelete();
+      // signOut also unregisters this device from push.
+      await signOutStore();
+    } catch (e) {
+      // Surface the real reason (usually a wrong password) rather than
+      // deflecting the user to support — Apple 5.1.1(v) requires deletion to
+      // actually work in-app.
+      toast.error(e instanceof Error ? e.message : 'Could not delete account');
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
   const { data: sessions } = useSessions();
   const qc = useQueryClient();
 
@@ -472,33 +594,61 @@ function SecuritySection() {
 
       <Group label="Danger zone">
         <Pressable
-          onPress={() =>
-            Alert.alert(
-              'Delete account',
-              'This permanently deletes your account and data. This cannot be undone.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await deleteAccount();
-                      await signOutStore();
-                    } catch {
-                      toast.info('Contact support@truckwys.co.za to complete account deletion.');
-                    }
-                  },
-                },
-              ],
-            )
-          }
+          onPress={() => setShowDelete(true)}
           className="min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover"
         >
           <Icon name="x" size={18} color="#FF4949" />
           <Txt className="flex-1 text-body text-danger">Delete account</Txt>
         </Pressable>
       </Group>
+
+      {/* The endpoint requires the current password, and Alert.alert can't
+          collect input — hence a real modal rather than a system dialog. */}
+      {showDelete && (
+        <Modal visible transparent animationType="fade" onRequestClose={closeDelete}>
+          <Pressable
+            onPress={closeDelete}
+            className="flex-1 items-center justify-center bg-black/65 px-6"
+          >
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+            >
+              <Txt className="text-heading font-semibold text-fg">Delete account</Txt>
+              <Txt className="mt-1.5 text-sub text-muted">
+                This deactivates your account, signs you out of every device, and cannot be undone.
+                Enter your password to confirm.
+              </Txt>
+              <View className="mt-4">
+                <TextField
+                  label="Password"
+                  placeholder="Your current password"
+                  secureTextEntry
+                  icon="lock"
+                  autoCapitalize="none"
+                  value={deletePassword}
+                  onChangeText={setDeletePassword}
+                />
+              </View>
+              <View className="mt-5 flex-row gap-2.5">
+                <View className="flex-1">
+                  <Button label="Cancel" variant="secondary" onPress={closeDelete} fullWidth />
+                </View>
+                <View className="flex-1">
+                  <Button
+                    label="Delete account"
+                    variant="danger"
+                    loading={deleteBusy}
+                    disabled={!deletePassword}
+                    onPress={confirmDelete}
+                    fullWidth
+                  />
+                </View>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
 
       {!!sessions?.length && (
         <Group label="Active sessions">
@@ -556,8 +706,15 @@ function CompanySection() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
+  // Quote defaults — all consumed by the quote calculator.
   const [validityDays, setValidityDays] = useState('');
+  const [allowCrossBorder, setAllowCrossBorder] = useState('yes');
   const [baseRate, setBaseRate] = useState('');
+  const [tollRate, setTollRate] = useState('');
+  const [fuelPrice, setFuelPrice] = useState('');
+  const [slaHours, setSlaHours] = useState('');
+  const [surchargeThreshold, setSurchargeThreshold] = useState('');
+  const [surchargePct, setSurchargePct] = useState('');
 
   useEffect(() => {
     if (seeded || !data) return;
@@ -576,14 +733,48 @@ function CompanySection() {
     setPhone(str(pick(contact, ['phone'])));
     setEmail(str(pick(contact, ['email'])));
     setSupportEmail(str(pick(contact, ['support_email'])));
-    setValidityDays(pick(data, ['default_quote_validity_days']) != null ? String(num(pick(data, ['default_quote_validity_days']))) : '');
-    setBaseRate(pick(data, ['base_rate_per_km', 'base_rate']) != null ? String(num(pick(data, ['base_rate_per_km', 'base_rate']))) : '');
+    // Numeric fields stay blank when unset, so an empty box never means "0".
+    const seedNum = (keys: string[], set: (v: string) => void) => {
+      const raw = pick(data, keys);
+      if (raw != null) set(String(num(raw)));
+    };
+    seedNum(['default_quote_validity_days'], setValidityDays);
+    // Web reads default_base_rate_per_km; older records used base_rate_per_km.
+    seedNum(['default_base_rate_per_km', 'base_rate_per_km', 'base_rate'], setBaseRate);
+    seedNum(['default_toll_rate_per_km'], setTollRate);
+    seedNum(['fuel_price_per_litre'], setFuelPrice);
+    seedNum(['default_sla_hours'], setSlaHours);
+    seedNum(['weight_surcharge_threshold_kg'], setSurchargeThreshold);
+    seedNum(['weight_surcharge_pct'], setSurchargePct);
+    setAllowCrossBorder(pick(data, ['allow_cross_border']) === false ? 'no' : 'yes');
     const logo = str(pick(data, ['logo_url']));
     if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
     setSeeded(true);
   }, [data, seeded]);
 
   const save = async () => {
+    // Same bounds the web company page enforces.
+    if (validityDays && (Number(validityDays) < 1 || Number(validityDays) > 365)) {
+      return toast.error('Quote validity must be between 1 and 365 days');
+    }
+    if (surchargePct && (Number(surchargePct) < 0 || Number(surchargePct) > 100)) {
+      return toast.error('Weight surcharge must be between 0 and 100%');
+    }
+    const nonNegative: [string, string][] = [
+      ['Weight surcharge threshold', surchargeThreshold],
+      ['Base rate / km', baseRate],
+      ['Toll rate / km', tollRate],
+      ['Fuel price', fuelPrice],
+      ['SLA hours', slaHours],
+    ];
+    for (const [label, v] of nonNegative) {
+      if (v && Number(v) < 0) return toast.error(`${label} can't be negative`);
+    }
+
+    // Only send a numeric field when it has a value — an empty box must leave
+    // the stored default alone rather than zeroing it.
+    const optionalNum = (v: string) => (v.trim() ? Number(v) : undefined);
+
     setBusy(true);
     try {
       await updateCompanyProfile({
@@ -596,8 +787,14 @@ function CompanySection() {
         description: description.trim(),
         address: { street: street.trim(), city: city.trim(), province, postal_code: postalCode.trim(), country: 'South Africa' },
         contact: { phone: phone.trim(), email: email.trim(), support_email: supportEmail.trim() },
-        default_quote_validity_days: validityDays ? Number(validityDays) : undefined,
-        base_rate_per_km: baseRate ? Number(baseRate) : undefined,
+        allow_cross_border: allowCrossBorder === 'yes',
+        default_quote_validity_days: optionalNum(validityDays),
+        default_base_rate_per_km: optionalNum(baseRate),
+        default_toll_rate_per_km: optionalNum(tollRate),
+        fuel_price_per_litre: optionalNum(fuelPrice),
+        default_sla_hours: optionalNum(slaHours),
+        weight_surcharge_threshold_kg: optionalNum(surchargeThreshold),
+        weight_surcharge_pct: optionalNum(surchargePct),
       });
       await qc.invalidateQueries({ queryKey: ['company-profile'] });
       toast.success();
@@ -656,9 +853,39 @@ function CompanySection() {
       <TextField label="Business email" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
       <TextField label="Support email" autoCapitalize="none" keyboardType="email-address" value={supportEmail} onChangeText={setSupportEmail} />
 
-      <Label className="mt-1 text-muted">Rate & quote defaults</Label>
-      <TextField label="Base rate / km (ZAR)" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
+      <Label className="mt-1 text-muted">Quote defaults</Label>
+      <SelectField
+        label="Cross-border routes"
+        options={[
+          { label: 'Yes', value: 'yes' },
+          { label: 'No', value: 'no' },
+        ]}
+        value={allowCrossBorder}
+        onSelect={setAllowCrossBorder}
+      />
+      <Txt className="-mt-1 text-caption text-faint">
+        Whether your fleet is set up to run loads that cross into neighbouring countries. Set to
+        &quot;No&quot; and any quote whose route actually crosses a border is refused rather than priced.
+      </Txt>
       <TextField label="Quote validity (days)" placeholder="e.g. 7" keyboardType="numeric" value={validityDays} onChangeText={setValidityDays} />
+      <TextField label="Base rate / km (ZAR)" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
+      <TextField label="Toll rate / km (ZAR)" placeholder="e.g. 0.95" icon="dollar" keyboardType="numeric" value={tollRate} onChangeText={setTollRate} />
+      <Txt className="-mt-1 text-caption text-faint">
+        Fallback only — used when the routing service can&apos;t itemise toll plazas.
+      </Txt>
+      <TextField label="Diesel price / litre (ZAR)" placeholder="e.g. 21.70" icon="fuel" keyboardType="numeric" value={fuelPrice} onChangeText={setFuelPrice} />
+      <Txt className="-mt-1 text-caption text-faint">
+        Fallback only — the live national diesel price is used when available.
+      </Txt>
+      <TextField label="Default SLA (hours)" placeholder="e.g. 48" icon="clock" keyboardType="numeric" value={slaHours} onChangeText={setSlaHours} />
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <TextField label="Surcharge over (kg)" placeholder="e.g. 5000" keyboardType="numeric" value={surchargeThreshold} onChangeText={setSurchargeThreshold} />
+        </View>
+        <View className="flex-1">
+          <TextField label="Surcharge (%)" placeholder="e.g. 15" keyboardType="numeric" value={surchargePct} onChangeText={setSurchargePct} />
+        </View>
+      </View>
 
       <Button label="Save changes" loading={busy} onPress={save} fullWidth />
     </View>
@@ -752,26 +979,63 @@ function UsersSection() {
   );
 }
 
+// Read-only by design: no purchase, management or link-out path lives in the
+// app. Subscriptions are handled entirely on the web dashboard.
 function BillingSection() {
-  const { data } = useQuery({
-    queryKey: ['billing-status'],
-    queryFn: () => fetchData('billing/status/') as Promise<Record<string, unknown>>,
-    retry: false,
-  });
+  const { data } = useBillingStatus();
+  const d = data ?? {};
+  const flatPlan = (pick(d, ['flat_plan']) ?? {}) as Record<string, unknown>;
+  const card = (pick(d, ['card']) ?? {}) as Record<string, unknown>;
+  const grace = (pick(d, ['grace']) ?? {}) as Record<string, unknown>;
+
+  const planLabel =
+    str(pick(flatPlan, ['label'])) || str(pick(d, ['plan', 'subscription_plan']), '—');
+  const status = str(pick(d, ['status', 'subscription_status']), '—');
+  const amount = num(pick(d, ['amount'])) || num(pick(flatPlan, ['amount']));
+  const last4 = str(pick(card, ['last4']));
+  const cardType = str(pick(card, ['card_type']));
+  const suspended = Boolean(pick(d, ['suspended']));
+  const graceDays = num(pick(grace, ['days_remaining']));
+  const graceExpires = str(pick(grace, ['grace_period_expires_at']));
+
   return (
     <View className="gap-4">
+      {suspended && (
+        <View className="flex-row items-start gap-2.5 rounded-xs border border-danger bg-danger-bg p-3">
+          <Icon name="alert" size={17} color="#FF4949" />
+          <Txt className="flex-1 text-sub text-muted">
+            Your subscription is suspended. You can still view existing data and manage drivers and
+            vehicles, but new quotes and invoices are blocked until payment is settled.
+          </Txt>
+        </View>
+      )}
+      {!suspended && graceDays > 0 && (
+        <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+          <Icon name="alert" size={17} color="#F59E0B" />
+          <Txt className="flex-1 text-sub text-muted">
+            Payment is overdue — {graceDays} day{graceDays === 1 ? '' : 's'} of grace remaining
+            {graceExpires ? ` (until ${formatDate(graceExpires)})` : ''}.
+          </Txt>
+        </View>
+      )}
+
       <Group>
-        <DetailRow label="Plan" value={str(pick(data ?? {}, ['plan', 'subscription_plan']), '—')} mono={false} />
-        <DetailRow label="Status" value={str(pick(data ?? {}, ['status', 'subscription_status']), '—')} />
-        <DetailRow label="Renews" value={str(pick(data ?? {}, ['renews_at', 'next_billing_date']), '—')} last />
+        <DetailRow label="Plan" value={planLabel} mono={false} />
+        <DetailRow label="Status" value={status} />
+        {amount > 0 ? <DetailRow label="Amount" value={formatCurrency(amount)} /> : null}
+        {last4 ? (
+          <DetailRow label="Card" value={`${cardType || 'Card'} •••• ${last4}`} mono={false} />
+        ) : null}
+        <DetailRow
+          label="Renews"
+          value={str(pick(d, ['renews_at', 'next_billing_date']), '—')}
+          last
+        />
       </Group>
-      <Button
-        label="Manage on web"
-        variant="secondary"
-        icon="link"
-        onPress={() => WebBrowser.openBrowserAsync('https://app.truckwys.co.za/settings/billing')}
-        fullWidth
-      />
+
+      <Txt className="text-caption text-faint">
+        Subscription and payment details are managed on the web dashboard.
+      </Txt>
     </View>
   );
 }
@@ -800,7 +1064,7 @@ function IntegrationsSection() {
         label={connected ? 'Manage on web' : 'Connect on web'}
         variant="secondary"
         icon="link"
-        onPress={() => WebBrowser.openBrowserAsync('https://app.truckwys.co.za/settings/integrations/xero')}
+        onPress={() => WebBrowser.openBrowserAsync(`${WEB_APP_URL}/settings/integrations/xero`)}
         fullWidth
       />
     </View>

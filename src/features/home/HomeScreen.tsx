@@ -22,6 +22,7 @@ import { HomeSkeleton, ErrorState } from '@/components/feedback';
 import { useOverview } from './api';
 import { useUnreadCount } from '@/features/more/api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
+import { useRole, visibleTabs } from '@/lib/access';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
 
@@ -30,6 +31,9 @@ export function HomeScreen() {
   const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } = useAppNavigation();
   const { data: unread } = useUnreadCount();
   const { colors } = useTheme();
+  const tabs = visibleTabs(useRole());
+  const hasFleet = tabs.includes('Fleet');
+  const hasFinance = tabs.includes('Finance');
 
   const heatColor = useCallback(
     (v: number) =>
@@ -75,7 +79,14 @@ export function HomeScreen() {
         <View className="mb-5 flex-row rounded-xs border border-line bg-surface py-3">
           {[
             { label: 'Active loads', value: String(data.activeLoads), onPress: () => goTab('Bookings', { tab: 'orders' }), warn: false },
-            { label: 'Fleet ready', value: `${data.activeVehicles}/${data.totalVehicles}`, onPress: () => goTab('Fleet'), warn: false },
+            // Fleet ready still reads fine for a driver; it just isn't tappable
+            // when the Fleet tab is hidden for their role.
+            {
+              label: 'Fleet ready',
+              value: `${data.activeVehicles}/${data.totalVehicles}`,
+              onPress: hasFleet ? () => goTab('Fleet') : undefined,
+              warn: false,
+            },
             { label: 'Advances', value: String(data.advancesPending), onPress: openMore, warn: data.advancesPending > 0 },
           ].map((s, i) => (
             <Pressable
@@ -216,15 +227,21 @@ export function HomeScreen() {
           <View className="flex-1" style={{ minWidth: '46%' }}>
             <Button label="New quote" icon="plus" onPress={() => createQuote()} fullWidth />
           </View>
-          <View className="flex-1" style={{ minWidth: '46%' }}>
-            <Button label="Invoices" icon="receipt" variant="secondary" onPress={() => goTab('Finance', { tab: 'invoices' })} fullWidth />
-          </View>
-          <View className="flex-1" style={{ minWidth: '46%' }}>
-            <Button label="Add expense" icon="dollar" variant="secondary" onPress={() => goTab('Finance', { tab: 'expenses' })} fullWidth />
-          </View>
-          <View className="flex-1" style={{ minWidth: '46%' }}>
-            <Button label="Reports" icon="chart" variant="secondary" onPress={() => goTab('Finance', { tab: 'reports' })} fullWidth />
-          </View>
+          {/* Finance shortcuts only exist when the role actually has that tab —
+              navigating to a screen the navigator never registered is a no-op. */}
+          {hasFinance && (
+            <>
+              <View className="flex-1" style={{ minWidth: '46%' }}>
+                <Button label="Invoices" icon="receipt" variant="secondary" onPress={() => goTab('Finance', { tab: 'invoices' })} fullWidth />
+              </View>
+              <View className="flex-1" style={{ minWidth: '46%' }}>
+                <Button label="Add expense" icon="dollar" variant="secondary" onPress={() => goTab('Finance', { tab: 'expenses' })} fullWidth />
+              </View>
+              <View className="flex-1" style={{ minWidth: '46%' }}>
+                <Button label="Reports" icon="chart" variant="secondary" onPress={() => goTab('Finance', { tab: 'reports' })} fullWidth />
+              </View>
+            </>
+          )}
         </View>
       </Screen>
       <Fab onPress={() => createQuote()} />

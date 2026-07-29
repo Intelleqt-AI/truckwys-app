@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Pressable } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQueryClient } from '@tanstack/react-query';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
   AmbientGlow,
@@ -13,6 +14,7 @@ import {
   StatusPill,
   Avatar,
   Card,
+  Icon,
   Txt,
   Mono,
   ListRow,
@@ -21,10 +23,13 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useQuotes, useLoads } from './api';
+import { useQuotes, useLoads, convertQuoteToLoad } from './api';
+import { AssignSheet } from './AssignSheet';
+import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
+import { toast } from '@/lib/toast';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
 
 type Props = BottomTabScreenProps<TabParamList, 'Bookings'>;
@@ -81,7 +86,36 @@ const QUOTE_FILTERS = [
 function QuotesTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useQuotes();
   const [filter, setFilter] = useState('ALL');
-  const { openQuote } = useAppNavigation();
+  // One sheet instance serves the whole list — the card only sets the target.
+  const [convertQuote, setConvertQuote] = useState<QuoteLite | null>(null);
+  const [convertBusy, setConvertBusy] = useState(false);
+  const { openQuote, openLoad } = useAppNavigation();
+  const qc = useQueryClient();
+
+  const convert = async (driverId: string, vehicleId: string) => {
+    if (!convertQuote) return;
+    setConvertBusy(true);
+    try {
+      const created = await convertQuoteToLoad(convertQuote.id, {
+        driver_id: driverId,
+        vehicle_id: vehicleId,
+      });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['quotes'] }),
+        qc.invalidateQueries({ queryKey: ['loads'] }),
+        qc.invalidateQueries({ queryKey: ['drivers-available-for-assign'] }),
+        qc.invalidateQueries({ queryKey: ['vehicles-available-for-assign'] }),
+      ]);
+      setConvertQuote(null);
+      toast.success(driverId && vehicleId ? 'Converted and assigned' : 'Converted to booking');
+      const loadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
+      if (loadId != null) openLoad(loadId as string | number);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not convert quote');
+    } finally {
+      setConvertBusy(false);
+    }
+  };
 
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load quotes." />;
@@ -89,25 +123,54 @@ function QuotesTab() {
   const list = data.filter((q) => filter === 'ALL' || q.status === filter);
 
   return (
-    <FlashList
-      data={list}
-      keyExtractor={(q) => String(q.id)}
-      onRefresh={refetch}
-      refreshing={isRefetching}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
-      ItemSeparatorComponent={() => <View className="h-2.5" />}
-      ListHeaderComponent={
-        <View className="mb-3">
-          <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
-        </View>
-      }
-      ListEmptyComponent={<EmptyState icon="file" title="No quotes" body="No quotes match this filter." />}
-      renderItem={({ item }) => <QuoteCard quote={item} onPress={() => openQuote(item.id, item.raw)} />}
-    />
+    <>
+      <FlashList
+        data={list}
+        keyExtractor={(q) => String(q.id)}
+        onRefresh={refetch}
+        refreshing={isRefetching}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
+        ItemSeparatorComponent={() => <View className="h-2.5" />}
+        ListHeaderComponent={
+          <View className="mb-3">
+            <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
+          </View>
+        }
+        ListEmptyComponent={<EmptyState icon="file" title="No quotes" body="No quotes match this filter." />}
+        renderItem={({ item }) => (
+          <QuoteCard
+            quote={item}
+            onPress={() => openQuote(item.id, item.raw)}
+            onConvert={() => setConvertQuote(item)}
+          />
+        )}
+      />
+      {convertQuote && (
+        <AssignSheet
+          mode="convert"
+          reference={convertQuote.code}
+          vehicleType={str(pick(convertQuote.raw, ['vehicle_type'])) || undefined}
+          busy={convertBusy}
+          onConfirm={convert}
+          onCancel={() => setConvertQuote(null)}
+        />
+      )}
+    </>
   );
 }
 
-function QuoteCard({ quote, onPress }: { quote: QuoteLite; onPress: () => void }) {
+function QuoteCard({
+  quote,
+  onPress,
+  onConvert,
+}: {
+  quote: QuoteLite;
+  onPress: () => void;
+  onConvert: () => void;
+}) {
+  // Web offers → Booking on accepted cards in the list as well as on the
+  // detail page (QuotesList.tsx).
+  const accepted = ['ACCEPTED', 'APPROVED'].includes(quote.status);
   return (
     <Card>
       <Pressable className="p-3.5 active:bg-surface-hover" onPress={onPress}>
@@ -128,6 +191,15 @@ function QuoteCard({ quote, onPress }: { quote: QuoteLite; onPress: () => void }
           )}
         </View>
       </Pressable>
+      {accepted && (
+        <Pressable
+          onPress={onConvert}
+          className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
+        >
+          <Mono className="text-micro tracking-label uppercase text-accent">Convert to booking</Mono>
+          <Icon name="arrowRight" size={14} color="#4D9EFF" />
+        </Pressable>
+      )}
     </Card>
   );
 }

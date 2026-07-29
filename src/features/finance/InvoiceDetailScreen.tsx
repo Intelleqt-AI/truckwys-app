@@ -14,6 +14,7 @@ import {
   recordPayment,
 } from './api';
 import { num, str, pick } from '@/lib/api/list';
+import { invoiceShareUrl } from '@/lib/legal';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -75,7 +76,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const share = async () => {
     if (!token) return toast.info('No public link available');
     await Share.share({
-      message: `Invoice ${str(pick(inv, ['invoice_number']), '')}: https://app.truckwys.co.za/invoice/view/${id}/${token}`,
+      message: `Invoice ${str(pick(inv, ['invoice_number']), '')}: ${invoiceShareUrl(id, token)}`,
     });
   };
 

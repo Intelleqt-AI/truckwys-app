@@ -105,7 +105,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
         const username = `${firstName.toLowerCase()}.${lastName.toLowerCase()}`.replace(/\s+/g, '');
         const user = await createUser({
           username,
-          email: email.trim() || `${username}@truckwys.co.za`,
+          email: email.trim() || `${username}@truckwys.com`,
           first_name: firstName.trim(),
           last_name: lastName.trim(),
           phone: phone.trim() || undefined,

@@ -18,7 +18,8 @@ import {
   Label,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
-import { useLoad, updateLoadStatus, convertLoadToInvoice, uploadLoadPod } from './api';
+import { useLoad, updateLoadStatus, convertLoadToInvoice, uploadLoadPod, assignLoadDriver } from './api';
+import { AssignSheet, assignedIds } from './AssignSheet';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL } from './constants';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDate } from '@/lib/formatters';
@@ -35,6 +36,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [podBusy, setPodBusy] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this booking." />;
   const l = (data ?? {}) as Record<string, unknown>;
@@ -48,6 +51,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const ratePerKm = distance ? (rate / distance).toFixed(2) : '0.00';
   const invoiced = status === 'INVOICED' || !!pick(l, ['invoice_id', 'invoice']);
   const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
+  const current = assignedIds(l);
+  const hasAssignment = !!(current.driverId || current.vehicleId);
 
   const refresh = () =>
     Promise.all([
@@ -91,6 +96,25 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       toast.error(e instanceof Error ? e.message : 'Could not create invoice');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitAssign = async (driverId: string, vehicleId: string) => {
+    setAssignBusy(true);
+    try {
+      await assignLoadDriver(id, driverId ? Number(driverId) : null, vehicleId ? Number(vehicleId) : null);
+      await Promise.all([
+        refresh(),
+        // Availability changed for whoever was picked up or released.
+        qc.invalidateQueries({ queryKey: ['drivers-available-for-assign'] }),
+        qc.invalidateQueries({ queryKey: ['vehicles-available-for-assign'] }),
+      ]);
+      setShowAssign(false);
+      toast.success(driverId && vehicleId ? 'Assigned' : 'Unassigned');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not assign');
+    } finally {
+      setAssignBusy(false);
     }
   };
 
@@ -284,19 +308,37 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       </Group>
 
       {/* Assignment */}
-      <Group label="Assignment">
+      <Group
+        label="Assignment"
+        action={hasAssignment ? 'Reassign' : 'Assign'}
+        onAction={() => setShowAssign(true)}
+      >
         <DetailRow
           label="Driver"
-          value={str(pick(l, ['driver_name', 'driver']), 'Unassigned')}
+          value={str(pick(l, ['driver_name']), '') || 'Unassigned'}
           mono={false}
         />
         <DetailRow
           label="Vehicle"
-          value={str(pick(l, ['vehicle_info', 'vehicle']), 'Unassigned')}
+          value={str(pick(l, ['vehicle_info']), '') || 'Unassigned'}
           mono={false}
         />
         <DetailRow label="Quote" value={str(pick(l, ['quote_number', 'quote']), '—')} last />
       </Group>
+
+      {showAssign && (
+        <AssignSheet
+          mode="reassign"
+          // Web doesn't filter by type when re-assigning; we do, so the picker
+          // can't offer a truck that can't run this load.
+          vehicleType={str(pick(l, ['vehicle_type'])) || undefined}
+          initialDriverId={current.driverId}
+          initialVehicleId={current.vehicleId}
+          busy={assignBusy}
+          onConfirm={submitAssign}
+          onCancel={() => setShowAssign(false)}
+        />
+      )}
     </SheetScreen>
   );
 }

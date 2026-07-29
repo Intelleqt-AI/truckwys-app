@@ -22,7 +22,7 @@ function normalizeBase(raw: string): string {
   return b + '/';
 }
 
-const baseURL = normalizeBase(RAW_BASE ?? 'https://web-production-143e2.up.railway.app');
+const baseURL = normalizeBase(RAW_BASE ?? 'https://api.truckwys.com');
 
 // Host origin (baseURL minus the /api/vN/ suffix) — media files (avatars,
 // logos) are served from the host root, not under /api/v1.
@@ -66,10 +66,7 @@ api.interceptors.response.use(
     const reqUrl = error.config?.url ?? '';
     // A 401 on the auth endpoints means "bad credentials"/"already gone", not an
     // expired mid-session token — do not force a global sign-out for those.
-    const isAuthEndpoint =
-      reqUrl.includes('auth/login') ||
-      reqUrl.includes('auth/register') ||
-      reqUrl.includes('auth/logout');
+    const isAuthEndpoint = reqUrl.includes('auth/login') || reqUrl.includes('auth/logout');
 
     if (error.response?.status === 401 && !isAuthEndpoint) {
       onUnauthorized?.();
@@ -94,6 +91,9 @@ api.interceptors.response.use(
           : 'Network error — check your connection'),
     );
     (err as Error & { status?: number }).status = error.response?.status;
+    // Keep the raw body too — some callers need the machine-readable code, not
+    // just the message (e.g. `cross_border_not_allowed` from route/calculate/).
+    (err as Error & { data?: unknown }).data = data;
     throw err;
   },
 );

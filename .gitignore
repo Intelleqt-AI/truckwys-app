@@ -41,3 +41,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase client config — pulled in at build time via env vars, and
+# injected into EAS builds as file secrets. Not committed.
+google-services.json
+GoogleService-Info.plist

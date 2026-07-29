@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Share, Alert } from 'react-native';
+import { View, Share, Alert, Modal, Pressable } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useQueryClient } from '@tanstack/react-query';
@@ -11,6 +11,8 @@ import {
   RoutePreview,
   StatusPill,
   SelectField,
+  TextField,
+  RadioRows,
   Badge,
   Button,
   Icon,
@@ -22,11 +24,14 @@ import {
   useQuote,
   sendQuote,
   convertQuoteToLoad,
+  recordQuoteOutcome,
   deleteQuote,
   downloadQuotePdf,
   patchQuote,
 } from './api';
+import { AssignSheet } from './AssignSheet';
 import { num, str, pick } from '@/lib/api/list';
+import { quoteShareUrl } from '@/lib/legal';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -43,6 +48,14 @@ const STATUS_OPTIONS = [
   { label: 'Completed', value: 'COMPLETED' },
 ];
 
+// Same fixed reasons the web outcome modal offers.
+const REJECTION_REASONS = [
+  'Price too high',
+  'Went with competitor',
+  'Job cancelled',
+  'Other',
+] as const;
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
 
@@ -54,6 +67,12 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const [convertBusy, setConvertBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [outcomeType, setOutcomeType] = useState<'accepted' | 'rejected' | null>(null);
+  const [outcomeBusy, setOutcomeBusy] = useState(false);
+  const [finalPrice, setFinalPrice] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [customReason, setCustomReason] = useState('');
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this quote." />;
   const q = (data ?? {}) as Record<string, unknown>;
@@ -64,7 +83,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const confidence = str(pick(q, ['confidence']));
   const roundTrip = str(pick(q, ['trip_type'])).toUpperCase() === 'ROUND_TRIP';
   const token = str(pick(q, ['token', 'view_token']));
-  const shareUrl = token ? `https://app.truckwys.co.za/quotes/view/${id}/${token}` : undefined;
+  const shareUrl = token ? quoteShareUrl(id, token) : undefined;
 
   // Full-text locations (web uses pickup_location / delivery_location, not codes).
   const origin = str(pick(q, ['pickup_location', 'origin_city', 'origin', 'pickup_city']), '—');
@@ -112,6 +131,9 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const notes = str(pick(q, ['notes']));
 
   const accepted = ['ACCEPTED', 'APPROVED'].includes(status);
+  const outcome = str(pick(q, ['outcome'])).toLowerCase();
+  // Web only offers won/lost capture while the quote is still open.
+  const canRecordOutcome = !outcome && ['SENT', 'DRAFT'].includes(status);
 
   const refresh = () =>
     Promise.all([
@@ -140,7 +162,58 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   };
 
   const doSend = () => run(setSendBusy, () => sendQuote(id), 'Quote sent to client');
-  const convert = () => run(setConvertBusy, () => convertQuoteToLoad(id), 'Converted to booking', true);
+
+  const convert = async (driverId: string, vehicleId: string) => {
+    setConvertBusy(true);
+    try {
+      const created = await convertQuoteToLoad(id, { driver_id: driverId, vehicle_id: vehicleId });
+      // The new load lands in Orders, and the chosen vehicle/driver are no
+      // longer "available".
+      await Promise.all([
+        refresh(),
+        qc.invalidateQueries({ queryKey: ['loads'] }),
+        qc.invalidateQueries({ queryKey: ['drivers-available-for-assign'] }),
+        qc.invalidateQueries({ queryKey: ['vehicles-available-for-assign'] }),
+      ]);
+      setShowAssign(false);
+      toast.success(driverId && vehicleId ? 'Converted and assigned' : 'Converted to booking');
+      // The quote is now a booking — replace rather than stack, matching web.
+      const loadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
+      if (loadId != null) navigation.replace('LoadDetail', { id: loadId as string | number });
+      else navigation.goBack();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not convert quote');
+    } finally {
+      setConvertBusy(false);
+    }
+  };
+
+  const closeOutcome = () => {
+    setOutcomeType(null);
+    setFinalPrice('');
+    setRejectionReason('');
+    setCustomReason('');
+  };
+
+  const reasonText = rejectionReason === 'Other' ? customReason.trim() : rejectionReason;
+  const canSubmitOutcome = outcomeType === 'accepted' || !!reasonText;
+
+  const submitOutcome = () => {
+    if (!outcomeType || !canSubmitOutcome) return;
+    const payload =
+      outcomeType === 'accepted'
+        ? { outcome: 'accepted' as const, ...(Number(finalPrice) > 0 ? { final_price: Number(finalPrice) } : {}) }
+        : { outcome: 'rejected' as const, rejection_reason: reasonText };
+    run(
+      setOutcomeBusy,
+      async () => {
+        await recordQuoteOutcome(id, payload);
+        closeOutcome();
+      },
+      outcomeType === 'accepted' ? 'Marked as won' : 'Marked as lost',
+    );
+  };
+
   const editQuote = () => navigation.navigate('CreateQuote', { quoteId: id });
   const changeStatus = (s: string) => {
     if (s === status || statusBusy) return;
@@ -192,8 +265,36 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           <Button label="Send" icon="send" loading={sendBusy} onPress={doSend} fullWidth />
         </View>
       </View>
+      {canRecordOutcome && (
+        <View className="flex-row gap-2.5">
+          <View className="flex-1">
+            <Button
+              label="Mark accepted"
+              icon="checkCircle"
+              variant="secondary"
+              onPress={() => setOutcomeType('accepted')}
+              fullWidth
+            />
+          </View>
+          <View className="flex-1">
+            <Button
+              label="Mark rejected"
+              icon="x"
+              variant="secondary"
+              onPress={() => setOutcomeType('rejected')}
+              fullWidth
+            />
+          </View>
+        </View>
+      )}
       {accepted && (
-        <Button label="Convert to booking" icon="arrowRight" loading={convertBusy} onPress={convert} fullWidth />
+        <Button
+          label="Convert to booking"
+          icon="arrowRight"
+          loading={convertBusy}
+          onPress={() => setShowAssign(true)}
+          fullWidth
+        />
       )}
       <View className="flex-row gap-2.5">
         <View className="flex-1">
@@ -218,6 +319,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     >
       <View className="mb-4 flex-row flex-wrap items-center gap-2.5">
         <StatusPill status={status} />
+        {outcome === 'accepted' && <Badge label="✓ Won" tone="success" />}
+        {outcome === 'rejected' && <Badge label="✗ Lost" tone="danger" />}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
         {marginPct > 0 && <Mono className="text-micro text-faint">Margin {marginPct}%</Mono>}
       </View>
@@ -309,6 +412,86 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           </View>
         </Group>
       ) : null}
+
+      {showAssign && (
+        <AssignSheet
+          mode="convert"
+          reference={str(pick(q, ['quote_number']))}
+          vehicleType={str(pick(q, ['vehicle_type'])) || undefined}
+          busy={convertBusy}
+          onConfirm={convert}
+          onCancel={() => setShowAssign(false)}
+        />
+      )}
+
+      {outcomeType && (
+        <Modal visible transparent animationType="fade" onRequestClose={closeOutcome}>
+          <Pressable
+            onPress={closeOutcome}
+            className="flex-1 items-center justify-center bg-black/65 px-6"
+          >
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+            >
+              <Txt className="text-heading font-semibold text-fg">
+                {outcomeType === 'accepted' ? 'Mark quote as accepted' : 'Mark quote as rejected'}
+              </Txt>
+
+              {outcomeType === 'accepted' ? (
+                <View className="mt-4">
+                  <TextField
+                    label="Final agreed price (optional)"
+                    placeholder={formatCurrency(total)}
+                    icon="dollar"
+                    keyboardType="numeric"
+                    value={finalPrice}
+                    onChangeText={setFinalPrice}
+                  />
+                  <Txt className="mt-1.5 text-caption text-faint">
+                    Leave blank to keep the quoted {formatCurrency(total)}.
+                  </Txt>
+                </View>
+              ) : (
+                <View className="mt-4 gap-3.5">
+                  {/* Inline rows, not a SelectField — its picker is itself a
+                      Modal, and nesting Modals is unreliable on iOS. */}
+                  <RadioRows
+                    label="Reason"
+                    options={REJECTION_REASONS.map((r) => ({ label: r, value: r }))}
+                    value={rejectionReason}
+                    onSelect={setRejectionReason}
+                  />
+                  {rejectionReason === 'Other' && (
+                    <TextField
+                      label="Please specify"
+                      placeholder="Why was this quote lost?"
+                      value={customReason}
+                      onChangeText={setCustomReason}
+                    />
+                  )}
+                </View>
+              )}
+
+              <View className="mt-5 flex-row gap-2.5">
+                <View className="flex-1">
+                  <Button label="Cancel" variant="secondary" onPress={closeOutcome} fullWidth />
+                </View>
+                <View className="flex-1">
+                  <Button
+                    label={outcomeType === 'accepted' ? 'Mark accepted' : 'Mark rejected'}
+                    variant={outcomeType === 'accepted' ? 'primary' : 'danger'}
+                    loading={outcomeBusy}
+                    disabled={!canSubmitOutcome}
+                    onPress={submitOutcome}
+                    fullWidth
+                  />
+                </View>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
     </SheetScreen>
   );
 }

@@ -10,9 +10,22 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemedStatusBar } from '@/components/ThemedStatusBar';
 import { ToastHost } from '@/lib/toast';
 import { queryClient } from '@/lib/queryClient';
+import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebase/messaging';
 
 // Keep the splash up until auth state is hydrated (RootNavigator hides it).
 void SplashScreen.preventAutoHideAsync();
+
+// Background/quit-state message handler. MUST be registered at module scope,
+// outside any component: when a push wakes a killed app, React has not mounted
+// yet and Firebase looks for this handler immediately.
+//
+// The OS already draws the notification (the backend sends a `notification`
+// block), so there is nothing to display here — returning promptly keeps the
+// wake-up cheap. The tap itself is handled by getInitialNotification() /
+// onNotificationOpenedApp in usePushNotifications.
+setBackgroundMessageHandler(getMessaging(), async () => {
+  // Intentionally a no-op.
+});
 
 export default function App() {
   useEffect(() => {

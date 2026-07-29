@@ -1,11 +1,19 @@
 import { useEffect } from 'react';
-import { NavigationContainer, DefaultTheme, DarkTheme, type Theme } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DefaultTheme,
+  DarkTheme,
+  type Theme,
+  type LinkingOptions,
+} from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
 import { AuthStack } from './AuthStack';
 import { AppNavigator } from './AppNavigator';
 import { useAuthStore, forceSignOut } from '@/stores/authStore';
 import { setUnauthorizedHandler } from '@/lib/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
+import { WEB_APP_URL } from '@/lib/legal';
+import type { AppStackParamList } from './types';
 
 // Build a React Navigation theme from our tokens so native transitions/backgrounds
 // match the deep canvas (no white flash between screens).
@@ -26,6 +34,29 @@ function useNavTheme(): Theme {
   };
 }
 
+// Deep links, e.g. truckwys://bookings/12 from an email or a shared link. The
+// scheme has always been declared in app.config.ts but was never wired up.
+// Notification taps do NOT come through here — they carry a `link` in the FCM
+// payload and are routed by usePushNotifications.
+const linking: LinkingOptions<AppStackParamList> = {
+  // The https prefix needs an apple-app-site-association file hosted on that
+  // domain plus the associatedDomains entitlement before iOS honours it; until
+  // then only the truckwys:// scheme resolves. Harmless either way.
+  prefixes: ['truckwys://', `${WEB_APP_URL}`],
+  config: {
+    screens: {
+      LoadDetail: 'bookings/:id',
+      QuoteDetail: 'quotes/:id',
+      InvoiceDetail: 'finance/invoices/:id',
+      CustomerDetail: 'customers/:id',
+      Notifications: 'notifications',
+      Capital: 'capital',
+      Insights: 'insights',
+      Copilot: 'copilot',
+    },
+  },
+};
+
 export function RootNavigator() {
   const status = useAuthStore((s) => s.status);
   const hydrate = useAuthStore((s) => s.hydrate);
@@ -44,7 +75,9 @@ export function RootNavigator() {
   if (status === 'loading') return null; // splash stays visible
 
   return (
-    <NavigationContainer theme={navTheme}>
+    // Deep links only resolve against the authed stack; a link arriving while
+    // signed out lands on Login and is dropped, which is the correct behaviour.
+    <NavigationContainer theme={navTheme} linking={status === 'authed' ? linking : undefined}>
       {status === 'authed' ? <AppNavigator /> : <AuthStack />}
     </NavigationContainer>
   );

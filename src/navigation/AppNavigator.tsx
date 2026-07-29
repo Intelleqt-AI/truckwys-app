@@ -30,13 +30,17 @@ import { ActivityScreen } from '@/features/more/ActivityScreen';
 import { NotificationsScreen } from '@/features/more/NotificationsScreen';
 import { CopilotScreen } from '@/features/more/CopilotScreen';
 import { SettingsScreen } from '@/features/more/SettingsScreen';
-import { StubScreen } from '@/features/more/StubScreen';
+import { SupportScreen } from '@/features/more/SupportScreen';
 import { MoreScreen } from '@/features/more/MoreScreen';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
 export function AppNavigator() {
   const { colors, scheme } = useTheme();
+  // Only mounted for a signed-in user, so registration always has an auth
+  // header and a notification tap always has somewhere to navigate.
+  usePushNotifications();
 
   // Native iOS large-title header with a Liquid Glass blur bar and the system
   // back button (chevron + previous screen name + interactive swipe-back).
@@ -91,7 +95,7 @@ export function AppNavigator() {
         <Stack.Screen name="AdvanceDetail" component={AdvanceDetailScreen} />
         <Stack.Screen name="RiskScores" component={RiskScoresScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
-        <Stack.Screen name="Stub" component={StubScreen} />
+        <Stack.Screen name="Support" component={SupportScreen} />
       </Stack.Group>
 
       {/* Modal (slide up) — opaque native header, inline title; SheetScreen adds an X close */}

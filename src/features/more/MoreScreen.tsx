@@ -12,23 +12,32 @@ import {
   type IconName,
 } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
+import { useRole, canSeeInsights, canSeeFinanceFeatures, canAccessSettings } from '@/lib/access';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { mediaUrl } from '@/lib/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
 
-const SECTIONS: { icon: IconName; label: string; route: string; danger?: boolean }[][] = [
+type MenuItem = {
+  icon: IconName;
+  label: string;
+  route: string;
+  /** Roles allowed to see this item; omitted means everyone. */
+  allow?: (role: string) => boolean;
+};
+
+const SECTIONS: MenuItem[][] = [
   [
-    { icon: 'users', label: 'Customers', route: 'Customers' },
-    { icon: 'sparkle', label: 'Insights', route: 'Insights' },
-    { icon: 'dollar', label: 'Fast Pay Capital', route: 'Capital' },
+    { icon: 'users', label: 'Customers', route: 'Customers', allow: canSeeInsights },
+    { icon: 'sparkle', label: 'Insights', route: 'Insights', allow: canSeeInsights },
+    { icon: 'dollar', label: 'Fast Pay Capital', route: 'Capital', allow: canSeeFinanceFeatures },
   ],
   [
     { icon: 'bell', label: 'Notifications', route: 'Notifications' },
     { icon: 'clock', label: 'Activity', route: 'Activity' },
-    { icon: 'sparkle', label: 'AI Copilot', route: 'Copilot' },
+    { icon: 'sparkle', label: 'AI Copilot', route: 'Copilot', allow: canSeeInsights },
   ],
   [
-    { icon: 'settings', label: 'Settings', route: 'Settings' },
+    { icon: 'settings', label: 'Settings', route: 'Settings', allow: canAccessSettings },
     { icon: 'shield', label: 'Support', route: 'Support' },
   ],
 ];
@@ -39,6 +48,12 @@ export function MoreScreen() {
   const { nav } = useAppNavigation();
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const role = useRole();
+
+  // Drop items this role can't reach, then any group left empty.
+  const visibleSections = SECTIONS.map((group) =>
+    group.filter((item) => !item.allow || item.allow(role)),
+  ).filter((group) => group.length > 0);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -49,13 +64,7 @@ export function MoreScreen() {
     });
   }, [navigation, colors.bgDeep]);
 
-  const go = (route: string) => {
-    if (route === 'Support') {
-      nav.navigate('Stub', { title: 'Support', body: 'Reach the Truckwys team at support@truckwys.co.za.' });
-    } else {
-      nav.navigate(route as never);
-    }
-  };
+  const go = (route: string) => nav.navigate(route as never);
 
   const confirmLogout = () =>
     Alert.alert('Sign out', 'Sign out of Truckwys on this device?', [
@@ -75,7 +84,7 @@ export function MoreScreen() {
         {user?.role && <Label className="text-accent">{user.role}</Label>}
       </View>
 
-      {SECTIONS.map((group, gi) => (
+      {visibleSections.map((group, gi) => (
         <Group key={gi}>
           {group.map((item, i) => (
             <Pressable

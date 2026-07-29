@@ -110,18 +110,39 @@ export function useActivity() {
 }
 
 // ── Notifications ────────────────────────────────────────────────────────────
+export interface NotificationItem {
+  id: string;
+  title: string;
+  body: string;
+  read: boolean;
+  time: string;
+  /** info | success | warning | alert — drives the row's dot colour. */
+  type: string;
+  /** Web path (e.g. "/bookings/12"); resolved by lib/notificationLink. */
+  link: string;
+}
+
 export function useNotifications() {
-  return useQuery({
+  return useQuery<NotificationItem[]>({
     queryKey: ['notifications'],
+    // NotificationSerializer sends `description` (not body/message) and
+    // `unread` (the INVERSE of read). Reading the wrong names left every row
+    // body-less and permanently unread. DRF paginates at 20 and nothing here
+    // asks for page 2, so raise the window explicitly.
     queryFn: async () =>
-      asArray(await fetchData('notifications/')).map((n, i) => {
+      asArray(await fetchData('notifications/?limit=50')).map((n, i) => {
         const r = n as Record<string, unknown>;
+        const unread = pick(r, ['unread']);
         return {
           id: str(pick(r, ['id']), String(i)),
           title: str(pick(r, ['title']), 'Notification'),
-          body: str(pick(r, ['body', 'message']), ''),
-          read: Boolean(pick(r, ['read', 'is_read'])),
+          body: str(pick(r, ['description', 'body', 'message']), ''),
+          // Prefer the field the API actually sends; fall back to the legacy
+          // shape so an older backend still renders correctly.
+          read: unread != null ? !unread : Boolean(pick(r, ['read', 'is_read'])),
           time: str(pick(r, ['created_at', 'timestamp'])),
+          type: str(pick(r, ['type']), 'info').toLowerCase(),
+          link: str(pick(r, ['link'])),
         };
       }),
   });
@@ -143,6 +164,62 @@ export function useUnreadCount() {
     },
     retry: false,
     refetchInterval: 60_000,
+  });
+}
+
+// ── Notification preferences ─────────────────────────────────────────────────
+// Canonical schema — mirrors backend core/services/notification_prefs.py and the
+// web NotificationSettings page.
+export type NotificationChannel = 'email' | 'push' | 'sms';
+export type NotificationPrefs = Record<NotificationChannel, Record<string, boolean>>;
+
+// `product_news` is off by default and stays off until the user turns it on —
+// App Store Review 4.5.4 forbids using push for marketing or promotion without
+// an express opt-in.
+export const NOTIFICATION_DEFAULTS: NotificationPrefs = {
+  email: { quotes: true, invoices: true, payments: true, fleet_alerts: true, weekly_reports: false },
+  push: {
+    new_bookings: true,
+    payment_received: true,
+    maintenance_due: true,
+    driver_updates: false,
+    product_news: false,
+  },
+  sms: { critical_alerts: false, payment_confirmations: false },
+};
+
+// Merge per channel so a key the server omits still renders its default rather
+// than an undefined toggle.
+const mergePrefs = (raw: unknown): NotificationPrefs => {
+  const src = (raw ?? {}) as Partial<Record<NotificationChannel, Record<string, unknown>>>;
+  const out = {} as NotificationPrefs;
+  for (const channel of Object.keys(NOTIFICATION_DEFAULTS) as NotificationChannel[]) {
+    const defaults = NOTIFICATION_DEFAULTS[channel];
+    const incoming = src[channel] ?? {};
+    out[channel] = Object.fromEntries(
+      Object.keys(defaults).map((k) => [k, Boolean(incoming[k] ?? defaults[k])]),
+    );
+  }
+  return out;
+};
+
+export function useNotificationPrefs() {
+  return useQuery<NotificationPrefs>({
+    queryKey: ['notification-settings'],
+    queryFn: async () => mergePrefs(await fetchData('notifications/settings/')),
+    retry: false,
+  });
+}
+
+export const updateNotificationPrefs = (prefs: NotificationPrefs) =>
+  patchData({ url: 'notifications/settings/', data: prefs });
+
+// ── Billing (read-only on mobile) ────────────────────────────────────────────
+export function useBillingStatus() {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['billing-status'],
+    queryFn: () => fetchData('billing/status/'),
+    retry: false,
   });
 }
 
@@ -227,8 +304,14 @@ export const revokeSession = (id: string | number) => deleteData({ url: `auth/se
 export const setTwoFactor = (enabled: boolean) =>
   patchData({ url: 'auth/me/', data: { two_factor_enabled: enabled } });
 
-// Apple 5.1.1(v): in-app account deletion entry point.
-export const deleteAccount = () => deleteData({ url: 'auth/me/' });
+// Apple 5.1.1(v): in-app account deletion. The endpoint is auth/delete-account/
+// — auth/me/ implements only GET and PATCH and returns 405, which used to leave
+// the UI silently falling back to "email support".
+// The current password is required: deletion revokes every session and cannot
+// be undone from the app, so it must not be reachable from an unlocked handset
+// alone.
+export const deleteAccount = (password: string) =>
+  deleteData({ url: 'auth/delete-account/', data: { password } });
 
 // ── Users & permissions ──────────────────────────────────────────────────────
 export function useUsers() {

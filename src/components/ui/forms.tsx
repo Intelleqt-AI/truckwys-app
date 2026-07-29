@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, TextInput, Pressable, type TextInputProps } from 'react-native';
-import { Mono, Label } from './Text';
+import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -125,15 +125,18 @@ export function SegmentedControl<T extends string>({
 export function Toggle({
   value,
   onValueChange,
+  disabled,
 }: {
   value: boolean;
   onValueChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="switch"
-      accessibilityState={{ checked: value }}
+      accessibilityState={{ checked: value, disabled: !!disabled }}
+      disabled={disabled}
       onPress={() => onValueChange(!value)}
       style={{
         width: 46,
@@ -154,5 +157,55 @@ export function Toggle({
         }}
       />
     </Pressable>
+  );
+}
+
+// ── RadioRows: inline single-select list ───────────────────────────────────
+// Used where a SelectField can't be: inside an already-presented Modal, where
+// nesting SelectField's own Modal is unreliable on iOS.
+export function RadioRows({
+  label,
+  value,
+  options,
+  onSelect,
+  emptyText,
+}: {
+  label?: string;
+  value?: string;
+  options: { label: string; value: string; sub?: string }[];
+  onSelect: (value: string) => void;
+  emptyText?: string;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View>
+      {label && <Label className="mb-1.5 text-muted">{label}</Label>}
+      {options.length === 0 ? (
+        <Mono className="text-micro text-warning">{emptyText ?? 'Nothing available'}</Mono>
+      ) : (
+        <View className="overflow-hidden rounded-xs border border-line bg-surface">
+          {options.map((o, i) => {
+            const active = o.value === value;
+            return (
+              <Pressable
+                key={`${o.value}-${i}`}
+                onPress={() => onSelect(o.value)}
+                className={`min-h-[44px] flex-row items-center gap-3 px-3 py-2.5 active:bg-surface-hover ${
+                  i === options.length - 1 ? '' : 'border-b border-line-row'
+                }`}
+              >
+                <View className="flex-1">
+                  <Txt className={`text-callout ${active ? 'text-fg' : 'text-muted'}`} numberOfLines={1}>
+                    {o.label}
+                  </Txt>
+                  {o.sub ? <Txt className="mt-0.5 text-caption text-faint">{o.sub}</Txt> : null}
+                </View>
+                {active && <Icon name="check" size={17} color={colors.accent} strokeWidth={2.4} />}
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+    </View>
   );
 }

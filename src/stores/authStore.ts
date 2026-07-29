@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { setAuthToken } from '@/lib/api/client';
 import { storage } from '@/lib/storage';
 import { authApi } from '@/features/auth/api';
+import { unregisterPush } from '@/lib/push';
 import type { AuthUser } from '@/types/auth';
 
 // Client-side session state. Server data is owned by React Query; this store owns
@@ -57,6 +58,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    // Drop the push registration FIRST, while the auth header is still valid —
+    // otherwise this handset keeps receiving the previous user's notifications.
+    try {
+      await unregisterPush();
+    } catch {
+      // never block sign-out on it
+    }
     try {
       await authApi.logout();
     } catch {
@@ -69,8 +77,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 }));
 
 // Called by the API client on an unexpected 401 (expired/revoked token).
+// The token is already dead, so the unregister DELETE would fail — clear the
+// local FCM token anyway so a stale install stops receiving pushes.
 export const forceSignOut = () => {
   setAuthToken(null);
+  void unregisterPush().catch(() => {});
   void storage.clear();
   useAuthStore.setState({ token: null, user: null, status: 'guest' });
 };

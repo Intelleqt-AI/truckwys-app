@@ -17,18 +17,13 @@ export const authApi = {
   resendOtp: (pending_token: string) =>
     postData({ url: 'auth/login/resend-otp/', data: { pending_token } }),
 
-  register: (data: {
-    email: string;
-    password: string;
-    name?: string;
-    company_name?: string;
-    phone?: string;
-  }) => postData<LoginResponse>({ url: 'auth/register/', data }),
-
   me: () => fetchData<AuthUser>('auth/me/'),
 
   logout: () => postData({ url: 'auth/logout/' }),
 
   passwordReset: (email: string) =>
     postData({ url: 'auth/password-reset/', data: { email } }),
+
+  passwordResetConfirm: (email: string, code: string, new_password: string) =>
+    postData({ url: 'auth/password-reset/confirm/', data: { email, code, new_password } }),
 };

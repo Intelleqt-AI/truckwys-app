@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,6 +9,7 @@ import { loginSchema, type LoginValues } from '../schemas';
 import { authApi } from '../api';
 import { isOtpRequired } from '@/types/auth';
 import { useAuthStore } from '@/stores/authStore';
+import { PRIVACY_POLICY_URL, TERMS_URL } from '@/lib/legal';
 import { toast } from '@/lib/toast';
 import type { AuthStackParamList } from '@/navigation/types';
 
@@ -105,10 +107,22 @@ export function LoginScreen({ navigation }: Props) {
           fullWidth
         />
 
-        <View className="mt-8 flex-row justify-center gap-1.5">
-          <Txt className="text-callout text-muted">No account?</Txt>
-          <Pressable onPress={() => navigation.navigate('Signup')} hitSlop={8}>
-            <Mono className="text-callout text-accent">Create one</Mono>
+        {/* Accounts are created on the web dashboard only — deliberately plain
+            text with no link or browser hand-off. */}
+        <Txt className="mt-8 text-center text-callout text-muted">
+          New to Truckwys? Create your account at{' '}
+          <Mono className="text-callout text-fg">truckwys.com</Mono>, then sign in here.
+        </Txt>
+
+        {/* Reachable without an account, so the policy is available even to
+            someone who can't sign in (App Store Review 5.1.1). */}
+        <View className="mt-8 flex-row justify-center gap-4">
+          <Pressable onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL)} hitSlop={8}>
+            <Mono className="text-caption text-muted">Privacy</Mono>
+          </Pressable>
+          <Txt className="text-caption text-faint">·</Txt>
+          <Pressable onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)} hitSlop={8}>
+            <Mono className="text-caption text-muted">Terms</Mono>
           </Pressable>
         </View>
       </KeyboardAvoidingView>

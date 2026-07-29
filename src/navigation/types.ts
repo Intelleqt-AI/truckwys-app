@@ -43,14 +43,16 @@ export type AppStackParamList = {
   Insights: undefined;
   Capital: undefined;
   Notifications: undefined;
-  Stub: { title: string; body?: string };
+  Support: undefined;
 };
 
+// No Signup screen: accounts are created on the web dashboard only (the web
+// signup flow is payment-gated), so the app is sign-in only.
 export type AuthStackParamList = {
   Login: undefined;
   VerifyOtp: { pendingToken: string; email: string };
-  Signup: undefined;
   ForgotPassword: undefined;
+  ResetPassword: { email: string };
 };
 
 declare global {

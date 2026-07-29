@@ -13,7 +13,6 @@ import {
   SelectField,
   TextField,
   DateField,
-  Toggle,
   Badge,
   Button,
   Icon,
@@ -38,6 +37,7 @@ import {
   sendQuote,
 } from './api';
 import { useCustomers } from '@/features/customers/api';
+import { RouteMap, type GeoPoint } from '@/components/RouteMap';
 import { VoiceQuoteBar } from './VoiceQuoteBar';
 import { Skeleton } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
@@ -113,7 +113,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [validUntil, setValidUntil] = useState(plusDays(7));
   const [cargo, setCargo] = useState(str(prefill?.cargo_description));
   const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ROUND_TRIP');
-  const [crossBorder, setCrossBorder] = useState(true);
   const [notes, setNotes] = useState('');
   const [nlReply, setNlReply] = useState('');
   const [nlText, setNlText] = useState('');
@@ -126,6 +125,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [serviceCharge, setServiceCharge] = useState(0);
 
   const [routeData, setRouteData] = useState<Record<string, unknown> | null>(null);
+  const [routeBlockedMessage, setRouteBlockedMessage] = useState('');
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null);
   const [guard, setGuard] = useState<Record<string, unknown> | null>(null);
@@ -149,9 +149,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   }, [company, baseRatePerKm, editing]);
 
-  // Company can force cross-border off (derived, no state churn).
+  // Cross-border is a company policy, not a per-quote choice (web moved it to
+  // Settings → Company Details). The form only reacts to it: an early warning
+  // when a picked location is foreign, and a hard block once /route/calculate/
+  // refuses the route.
   const allowCrossBorder = pick(company ?? {}, ['allow_cross_border']) !== false;
-  const effectiveCrossBorder = crossBorder && allowCrossBorder;
 
   // Hydrate from an existing quote (edit mode).
   useEffect(() => {
@@ -227,21 +229,29 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           dest_lon: delivery.lon,
           dest_country: delivery.cc,
           vehicle_type: vehicleType || 'Flatbed',
-          cross_border_enabled: effectiveCrossBorder,
           weight_kg: Number(weight) * 1000 || 20000,
         });
         if (id === routeReq.current && (res as { success?: boolean }).success !== false) {
+          setRouteBlockedMessage('');
           setRouteData(res);
           setSelectedRouteIndex(num(pick(res, ['best_index'])) || 0);
         }
-      } catch {
-        /* leave prior route */
+      } catch (e) {
+        if (id !== routeReq.current) return;
+        // Company policy gate: the route genuinely crosses a border but the
+        // company isn't set up for cross-border work. Anything else — just keep
+        // the previous route rather than blanking the form.
+        const body = (e as { data?: { error?: string; message?: string } }).data;
+        if (body?.error === 'cross_border_not_allowed') {
+          setRouteBlockedMessage(body.message || "This route isn't allowed for your company.");
+          setRouteData(null);
+        }
       } finally {
         if (id === routeReq.current) setRouteBusy(false);
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, vehicleType, weight, effectiveCrossBorder]);
+  }, [ready, pickup, delivery, vehicleType, weight]);
 
   const routes = useMemo(
     () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
@@ -469,6 +479,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const save = async (send: boolean) => {
     // Draft can be saved any time (just needs a client to attach to).
     if (!customerId) return toast.error('Select a client');
+    if (routeBlockedMessage) return toast.error(routeBlockedMessage);
     if (send) {
       if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
       const missing: string[] = [];
@@ -514,7 +525,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             <Button label="Save draft" variant="secondary" loading={busy} onPress={() => save(false)} fullWidth />
           </View>
           <View className="flex-1">
-            <Button label="Send to client" icon="send" loading={busy} disabled={!ready} onPress={() => save(true)} fullWidth />
+            <Button
+              label="Send to client"
+              icon="send"
+              loading={busy}
+              disabled={!ready || !!routeBlockedMessage}
+              onPress={() => save(true)}
+              fullWidth
+            />
           </View>
         </View>
       }
@@ -541,6 +559,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <LocationField label="Collection" value={pickup} onChange={setPickup} placeholder="Search origin" />
         <LocationField label="Drop-off" value={delivery} onChange={setDelivery} placeholder="Search destination" />
 
+        {/* Early heads-up the moment a picked location is outside SA, before the
+            rest of the form is filled in. The real enforcement happens once
+            /route/calculate/ runs — see routeBlockedMessage below. */}
+        {!allowCrossBorder && (isForeignCc(pickup?.cc) || isForeignCc(delivery?.cc)) && (
+          <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+            <Icon name="alert" size={17} color="#F59E0B" />
+            <Txt className="flex-1 text-sub text-muted">
+              This location is outside South Africa, but your company isn&apos;t set up for cross-border
+              routes (Settings → Company details). This quote will be refused once calculated — pick a
+              domestic location or ask an admin to enable cross-border routes.
+            </Txt>
+          </View>
+        )}
+
         <View>
           <Label className="mb-2 text-muted">Trip</Label>
           <SegmentedControl
@@ -553,24 +585,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           />
         </View>
 
-        {allowCrossBorder && (
-          <View className="flex-row items-center justify-between rounded-xs border border-line bg-surface px-3.5 py-3">
-            <View className="flex-1 pr-3">
-              <Txt className="text-callout text-fg">Cross-border</Txt>
-              <Txt className="mt-0.5 text-caption text-faint">Include border fees, weighbridge & non-SA tolls</Txt>
-            </View>
-            <Toggle value={crossBorder} onValueChange={setCrossBorder} />
-          </View>
-        )}
-
-        <View className="flex-row gap-3">
-          <View className="flex-1">
-            <TextField label="Weight (tons) *" placeholder="e.g. 20" keyboardType="numeric" value={weight} onChangeText={setWeight} />
-          </View>
-          <View className="flex-1">
-            <TextField label="R / km" placeholder="e.g. 25" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
-          </View>
-        </View>
+        {/* R/km lives in the overrides section further down, next to the other
+            cost levers — it isn't repeated here. */}
+        <TextField label="Weight (tons) *" placeholder="e.g. 20" keyboardType="numeric" value={weight} onChangeText={setWeight} />
         <TextField label="Cargo" placeholder="e.g. Steel coils" value={cargo} onChangeText={setCargo} />
         <View className="flex-row gap-3">
           <View className="flex-1">
@@ -584,9 +601,26 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <TextField label="Notes" placeholder="Anything the client should see" value={notes} onChangeText={setNotes} multiline />
       </View>
 
+      {/* Route refused by company policy — replaces the whole estimate block,
+          same as web. */}
+      {ready && routeBlockedMessage && (
+        <View className="mt-5 rounded-xs border border-danger bg-danger-bg p-4">
+          <Txt className="text-callout font-semibold text-danger">Route not allowed</Txt>
+          <Txt className="mt-1.5 text-sub text-muted">{routeBlockedMessage}</Txt>
+        </View>
+      )}
+
       {/* Route + estimate */}
-      {ready && (
+      {ready && !routeBlockedMessage && (
         <View className="mt-5 gap-5">
+          {/* Static OSM map of the selected route. Geometry already comes back
+              from route/calculate/ — this just draws it. */}
+          <RouteMap
+            geometry={asArray(pick(currentRoute, ['geometry'])) as GeoPoint[]}
+            pickup={pickup ? { lat: pickup.lat, lon: pickup.lon } : null}
+            delivery={delivery ? { lat: delivery.lat, lon: delivery.lon } : null}
+          />
+
           <RoutePreview
             origin={pickup!.label}
             dest={delivery!.label}

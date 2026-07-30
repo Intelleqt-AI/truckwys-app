@@ -14,24 +14,33 @@ exactly: **`za.co.truckwys.mobile`**
 
 ## Part A — Link the EAS project ✅ DONE
 
-```bash
-npx eas-cli login
-npx eas-cli init
+`eas init` was run once and created `@iamsaif5/truckwys-mobile` — a project
+under a personal account. Turned out there was already a **separate, older
+project, `@intelleqt/truckwys`**, linked via a GitHub integration to this repo
+(`Intelleqt-AI/truckwys-app`) and used for the real STORE/production build
+attempts. Two projects for one app is a trap — a build triggered through the
+GitHub integration and one triggered from a local `eas build` would silently
+use different projects, different secrets, different push tokens.
+
+**Consolidated on `@intelleqt/truckwys`** (the org one — it's the one already
+wired to real builds):
+
+```
+slug: 'truckwys'                                          // must match exactly
+projectId: '0ef68ce5-03e0-46d7-b4c4-6fc1a9c5f170'
 ```
 
-Created **`@iamsaif5/truckwys-mobile`**, project ID
-`e8ce2d12-4e7b-45ca-862c-ebd0e8f7f22c`.
-
-`eas init` ends with `Cannot automatically write to dynamic config` and a
-non-zero exit. **That is not a failure** — the project was created; the CLI just
-won't edit a `.ts` config for you. The ID is now hardcoded in `app.config.ts`
-under `extra.eas.projectId`, so there is no env var to set and nothing to add to
-`eas.json`.
-
-Verify any time with:
+Both are set in `app.config.ts`. The `slug` field isn't cosmetic here — EAS
+hard-errors (`project:info command failed`) if it doesn't match the project's
+real slug once a `projectId` is set. Verify either any time with:
 ```bash
-npx expo config --type public | grep projectId
+npx eas-cli project:info
 ```
+should print `fullName  @intelleqt/truckwys`.
+
+The abandoned `@iamsaif5/truckwys-mobile` project still exists on EAS with a
+duplicate copy of the Firebase secrets (Part C) — harmless, but worth deleting
+later via the Expo dashboard to avoid confusing a future you.
 
 ---
 
@@ -81,6 +90,51 @@ npx eas-cli env:list --environment development
 npx eas-cli env:list --environment preview
 npx eas-cli env:list --environment production
 ```
+
+Verified the actual file *content* too (`--include-file-content`), not just
+presence — both match your real Firebase app exactly:
+`project_id: truckwys`, `package_name` / `BUNDLE_ID: za.co.truckwys.mobile`.
+One thing to revisit later, unrelated to push: the iOS plist has
+`IS_ANALYTICS_ENABLED: false` — worth turning on in the Firebase console if
+per-platform Analytics matters to you (it doesn't block anything here).
+
+> **Note:** by the time this was checked, all six secrets already existed on
+> **`@intelleqt/truckwys`** (not only the personal project the commands above
+> were run against) — content-verified identical, not just same-named. Exactly
+> why isn't fully pinned down; treat it as confirmed-correct rather than
+> mysterious, but if you ever see stale Firebase config in a build, re-check
+> both projects rather than assuming.
+
+---
+
+## Build failure: `npm ci` lock file out of sync ✅ FIXED (on this branch)
+
+A STORE build on `@intelleqt/truckwys` failed in `INSTALL_DEPENDENCIES`:
+```
+npm error `npm ci` can only install packages when your package.json and
+package-lock.json ... are in sync.
+npm error Missing: @emnapi/core@1.11.3 from lock file
+npm error Missing: @emnapi/runtime@1.11.3 from lock file
+npm error Invalid: lock file's @emnapi/wasi-threads@1.2.2 does not satisfy ...@1.2.3
+```
+
+**Unrelated to Firebase/push** — it built off `main` at the commit before any
+of this work started, and `main`'s `package-lock.json` was already drifted from
+`package.json` (a transitive-dependency lock corruption, not something either
+of us touched). `npm ci` enforces byte-exact sync and refuses to reconcile it;
+`npm install` does.
+
+This branch's lock file is already healthy — the several `npx expo install`
+calls made while adding the push/map dependencies regenerated it as a side
+effect. Confirmed with a dry run:
+```bash
+npm ci --include=dev --dry-run   # → "up to date", no errors
+```
+
+**`main` itself is still broken** until this branch merges. If a build needs to
+run off `main` before that, someone needs to run `npm install` there and commit
+the regenerated `package-lock.json` — a small, separate fix, not bundled into
+this branch's diff.
 
 ---
 
@@ -228,11 +282,12 @@ further notifications reach that handset.
 
 ## Ordered checklist
 
-- [x] A. `eas login && eas init` — done, project ID hardcoded in `app.config.ts`
-- [ ] B. Firebase project with Analytics on; iOS + Android apps added; both config files downloaded and in the repo root; paths in `.env`
-- [ ] C. Both config files uploaded as EAS file env vars
+- [x] A. `eas login && eas init`; consolidated onto `@intelleqt/truckwys` (the GitHub-linked org project) after finding two projects existed for one app
+- [x] B. Firebase project `truckwys` created with Analytics; iOS + Android apps added; both config files in the repo root; paths in `.env`
+- [x] C. Both config files uploaded as EAS file env vars to all three environments on `@intelleqt/truckwys`, content-verified
+- [x] npm ci lock-file drift fixed on this branch (unrelated pre-existing bug); `main` still needs it separately
 - [ ] D. *(after Apple account)* APNs `.p8` created, uploaded to **Firebase** with Key ID + Team ID
-- [ ] E. Service account key set as `FIREBASE_CREDENTIALS`; `pip install -r requirements.txt`; `migrate`; restart
+- [x] E. Service account key set as `FIREBASE_CREDENTIALS`; `firebase-admin` installed; `migrate` applied; Firebase app confirmed initializing
 - [ ] F. Android dev build verified across all three app states, then iOS
 
 ---

@@ -27,8 +27,12 @@ const MAX_ZOOM = 12;
 // are sub-pixel anyway. The backend does the same thing (geometry[::10]).
 const MAX_POINTS = 300;
 
+// tile.openstreetmap.org blocks direct app traffic under its usage policy
+// (no throttling, no descriptive User-Agent from a mobile client) — MapTiler
+// is a paid/free-tier host that explicitly allows this traffic pattern.
+const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY ?? '';
 const OSM_TILE = (z: number, x: number, y: number) =>
-  `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${MAPTILER_KEY}`;
 
 export interface GeoPoint {
   lat: number;
@@ -191,8 +195,8 @@ export function RouteMap({
         </Svg>
       </View>
 
-      {/* ODbL + OSM tile policy both require attribution. */}
-      <Mono className="mt-1 text-right text-nano text-faint">© OpenStreetMap contributors</Mono>
+      {/* MapTiler's ToS and OSM's ODbL both require attribution. */}
+      <Mono className="mt-1 text-right text-nano text-faint">© MapTiler © OpenStreetMap contributors</Mono>
     </View>
   );
 }

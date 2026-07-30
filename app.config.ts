@@ -9,7 +9,9 @@ const DEEP = '#030303';
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'Truckwys',
-  slug: 'truckwys-mobile',
+  // Must match the EAS project's own slug exactly — the CLI hard-errors on a
+  // mismatch (see extra.eas.projectId below, @intelleqt/truckwys).
+  slug: 'truckwys',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
@@ -120,10 +122,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   extra: {
     eas: {
-      // From `eas init` (@iamsaif5/truckwys-mobile). Not a secret, and fixed for
+      // @intelleqt/truckwys — the org project, GitHub-integration-linked to
+      // this repo (Intelleqt-AI/truckwys-app) and used for real STORE builds.
+      // Not @iamsaif5/truckwys-mobile, an earlier personal-account project
+      // created during setup and since abandoned. Not a secret, and fixed for
       // the life of the project — hardcoded so a missing env var can never
       // break a build or stop getToken() issuing a push token.
-      projectId: 'e8ce2d12-4e7b-45ca-862c-ebd0e8f7f22c',
+      projectId: '0ef68ce5-03e0-46d7-b4c4-6fc1a9c5f170',
     },
   },
 });

@@ -24,7 +24,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // built for a phone (floating tab bar, pageSheet modals, 2-up stat grids).
     supportsTablet: false,
     bundleIdentifier: 'za.co.truckwys.mobile',
-    buildNumber: '1',
+    // buildNumber intentionally omitted — eas.json's cli.appVersionSource is
+    // "remote", so EAS's own servers track and auto-increment it per build.
+    // A value here would be ignored for the build but still surface via
+    // expo-constants, which is misleading. Seed/inspect with
+    // `eas build:version:set` / `eas build:version:get --platform ios`.
     // Firebase Cloud Messaging delivers iOS push via APNs. 'production' is
     // correct for TestFlight and App Store builds; EAS rewrites it for dev
     // client builds.
@@ -68,7 +72,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
   android: {
     package: 'za.co.truckwys.mobile',
-    versionCode: 1,
+    // versionCode intentionally omitted — see the buildNumber comment under
+    // ios above; same reasoning, same remote-version-source mechanism.
     adaptiveIcon: {
       backgroundColor: DEEP,
       foregroundImage: './assets/android-icon-foreground.png',

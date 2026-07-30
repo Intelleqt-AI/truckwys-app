@@ -71,7 +71,8 @@ export function usePushNotifications() {
       await refreshLists();
       const title = msg.notification?.title ?? 'Truckwys';
       const body = msg.notification?.body ?? '';
-      await presentForeground(title, body, (msg.data ?? {}) as Record<string, string>);
+      const data = (msg.data ?? {}) as Record<string, string>;
+      await presentForeground(title, body, data, data.channel);
     });
 
     // Tapping a notification the OS displayed while the app was backgrounded.

@@ -18,7 +18,21 @@ import { postData, deleteData } from '@/lib/api/client';
 // Mirrors the web push contract (src/lib/push.ts there): probe capability →
 // request permission → obtain a token → register it with the backend.
 
-const ANDROID_CHANNEL_ID = 'default';
+// Mirrors core/services/notify_copy.py's channel_for() on the backend — same
+// three ids, same fallback ('bookings'), so a push always lands in the same
+// channel whether the OS delivered it itself (backgrounded/killed, driven by
+// the server-set AndroidNotification.channel_id) or notifee displayed it here
+// (foregrounded).
+const CHANNELS = [
+  { id: 'bookings', name: 'Bookings & Quotes', description: 'New quotes, bookings and status updates' },
+  { id: 'finance', name: 'Payments & Invoices', description: 'Invoice and payment activity' },
+  { id: 'fleet', name: 'Fleet Alerts', description: 'Maintenance and driver alerts' },
+] as const;
+const DEFAULT_CHANNEL_ID = 'bookings';
+// Every device that installed before this change already has this channel;
+// Android won't let a channel be renamed or merged, only replaced, so it's
+// deleted once new installs exist rather than left to confuse Settings.
+const LEGACY_CHANNEL_ID = 'default';
 
 // The token this device last registered. Kept in memory so sign-out can
 // unregister exactly that row without a round-trip to fetch it.
@@ -26,15 +40,14 @@ let registeredToken: string | null = null;
 
 export type PushStatus = 'unsupported' | 'denied' | 'registered';
 
-/** Android needs an explicit channel; without one notifications are silent. */
+/** Android needs explicit channels; without one notifications are silent. */
 async function ensureAndroidChannel() {
   if (Platform.OS !== 'android') return;
-  await notifee.createChannel({
-    id: ANDROID_CHANNEL_ID,
-    name: 'Operations',
-    description: 'Bookings, quotes, payments and fleet alerts',
-    importance: AndroidImportance.HIGH,
-    sound: 'default',
+  for (const channel of CHANNELS) {
+    await notifee.createChannel({ ...channel, importance: AndroidImportance.HIGH, sound: 'default' });
+  }
+  await notifee.deleteChannel(LEGACY_CHANNEL_ID).catch(() => {
+    /* no-op on a fresh install that never had it */
   });
 }
 
@@ -123,13 +136,19 @@ export async function presentForeground(
   title: string,
   body: string,
   data?: Record<string, string>,
+  channelId: string = DEFAULT_CHANNEL_ID,
 ) {
   await ensureAndroidChannel();
   await notifee.displayNotification({
     title,
     body,
     data,
-    android: { channelId: ANDROID_CHANNEL_ID, smallIcon: 'ic_launcher', pressAction: { id: 'default' } },
+    android: {
+      channelId,
+      smallIcon: 'ic_launcher',
+      color: '#4D9EFF',
+      pressAction: { id: 'default' },
+    },
     ios: { sound: 'default' },
   });
 }

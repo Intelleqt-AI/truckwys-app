@@ -45,24 +45,28 @@ export function AppNavigator() {
   // Native iOS large-title header with a Liquid Glass blur bar and the system
   // back button (chevron + previous screen name + interactive swipe-back).
   // Each screen's SheetScreen sets its headerTitle / headerRight at runtime.
+  //
+  // iOS-only: a transparent/large-title header. React Navigation's Android
+  // implementation of this combination doesn't reliably reserve space for
+  // the status bar in edge-to-edge mode (forced on since SDK 54) — the
+  // back button/title render underneath the clock/battery icons. More/
+  // Customers/Copilot already use a plain opaque header elsewhere in this
+  // same stack and render correctly on Android; mirroring that here instead
+  // of fighting the transparent-header inset bug.
+  const iosHeader = Platform.OS === 'ios';
   const detailHeader: NativeStackNavigationOptions = {
     headerShown: true,
-    headerLargeTitle: true,
-    headerTransparent: true,
-    // SheetScreen's custom headerRight/headerLeft forces RN Navigation's own
-    // JS header instead of the native Android toolbar; that header only pads
-    // itself below the status bar when this is explicitly set (its own
-    // topInset auto-detection collapses to 0 on Android in edge-to-edge mode,
-    // forced-on since SDK 54 — see react-navigation#12014). No-op on iOS,
-    // where topInset was already non-zero here.
-    statusBarTranslucent: true,
-    headerBlurEffect: scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterial',
+    headerLargeTitle: iosHeader,
+    headerTransparent: iosHeader,
+    headerBlurEffect: iosHeader
+      ? scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterial'
+      : undefined,
     headerLargeTitleShadowVisible: false,
     headerShadowVisible: false,
     headerTintColor: colors.accent,
     headerTitleStyle: { color: colors.fg },
     headerLargeTitleStyle: { color: colors.fg },
-    headerStyle: { backgroundColor: 'transparent' },
+    headerStyle: { backgroundColor: iosHeader ? 'transparent' : colors.bgDeep },
     // Round chevron button only — no "Tabs"/previous-screen label.
     headerBackButtonDisplayMode: 'minimal',
     headerTitle: '',

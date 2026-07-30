@@ -49,6 +49,13 @@ export function AppNavigator() {
     headerShown: true,
     headerLargeTitle: true,
     headerTransparent: true,
+    // SheetScreen's custom headerRight/headerLeft forces RN Navigation's own
+    // JS header instead of the native Android toolbar; that header only pads
+    // itself below the status bar when this is explicitly set (its own
+    // topInset auto-detection collapses to 0 on Android in edge-to-edge mode,
+    // forced-on since SDK 54 — see react-navigation#12014). No-op on iOS,
+    // where topInset was already non-zero here.
+    statusBarTranslucent: true,
     headerBlurEffect: scheme === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterial',
     headerLargeTitleShadowVisible: false,
     headerShadowVisible: false,

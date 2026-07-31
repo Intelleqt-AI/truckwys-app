@@ -28,7 +28,8 @@ import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
 
 export function HomeScreen() {
   const { data, isLoading, isError, refetch, isRefetching } = useOverview();
-  const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } = useAppNavigation();
+  const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } =
+    useAppNavigation();
   const { data: unread } = useUnreadCount();
   const { colors } = useTheme();
   const tabs = visibleTabs(useRole());
@@ -60,17 +61,31 @@ export function HomeScreen() {
           right={
             <View className="flex-row items-center gap-1">
               <View>
-                <IconButton name="bell" size={23} color={colors.fg} accessibilityLabel="Notifications" onPress={openNotifications} />
+                <IconButton
+                  name="bell"
+                  size={23}
+                  color={colors.fg}
+                  accessibilityLabel="Notifications"
+                  onPress={openNotifications}
+                />
                 {!!unread && unread > 0 && (
                   <View
                     className="absolute right-0.5 top-0 min-w-[16px] items-center justify-center rounded-pill px-1"
                     style={{ height: 16, backgroundColor: '#FF4949' }}
                   >
-                    <Mono style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>{unread > 9 ? '9+' : unread}</Mono>
+                    <Mono style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>
+                      {unread > 9 ? '9+' : unread}
+                    </Mono>
                   </View>
                 )}
               </View>
-              <IconButton name="settings" size={23} color={colors.fg} accessibilityLabel="Settings & more" onPress={openMore} />
+              <IconButton
+                name="settings"
+                size={23}
+                color={colors.fg}
+                accessibilityLabel="Settings & more"
+                onPress={openMore}
+              />
             </View>
           }
         />
@@ -78,7 +93,12 @@ export function HomeScreen() {
         {/* Command strip */}
         <View className="mb-5 flex-row rounded-xs border border-line bg-surface py-3">
           {[
-            { label: 'Active loads', value: String(data.activeLoads), onPress: () => goTab('Bookings', { tab: 'orders' }), warn: false },
+            {
+              label: 'Active loads',
+              value: String(data.activeLoads),
+              onPress: () => goTab('Bookings', { tab: 'orders' }),
+              warn: false,
+            },
             // Fleet ready still reads fine for a driver; it just isn't tappable
             // when the Fleet tab is hidden for their role.
             {
@@ -87,7 +107,12 @@ export function HomeScreen() {
               onPress: hasFleet ? () => goTab('Fleet') : undefined,
               warn: false,
             },
-            { label: 'Advances', value: String(data.advancesPending), onPress: openMore, warn: data.advancesPending > 0 },
+            {
+              label: 'Advances',
+              value: String(data.advancesPending),
+              onPress: openMore,
+              warn: data.advancesPending > 0,
+            },
           ].map((s, i) => (
             <Pressable
               key={s.label}
@@ -112,14 +137,22 @@ export function HomeScreen() {
           <StatCard
             label="Total revenue"
             value={formatCurrencyCompact(f.totalRevenue)}
-            delta={f.revenueChangePct ? `${f.revenueChangePct > 0 ? '+' : ''}${f.revenueChangePct}%` : undefined}
+            delta={
+              f.revenueChangePct
+                ? `${f.revenueChangePct > 0 ? '+' : ''}${f.revenueChangePct}%`
+                : undefined
+            }
             deltaTone={f.revenueChangePct >= 0 ? 'up' : 'down'}
           />
           <View className="flex-row gap-3">
             <StatCard
               label="Net margin"
               value={`${f.netMarginPct}%`}
-              delta={f.marginChangePts ? `${f.marginChangePts > 0 ? '+' : ''}${f.marginChangePts} pts` : undefined}
+              delta={
+                f.marginChangePts
+                  ? `${f.marginChangePts > 0 ? '+' : ''}${f.marginChangePts} pts`
+                  : undefined
+              }
               deltaTone={f.marginChangePts >= 0 ? 'up' : 'down'}
             />
             <StatCard
@@ -136,7 +169,10 @@ export function HomeScreen() {
             <View className="mb-3.5 flex-row items-end justify-between">
               <View>
                 <Mono className="text-fg" style={{ fontSize: 24, fontWeight: '600' }}>
-                  {data.totalVehicles ? Math.round((data.activeVehicles / data.totalVehicles) * 100) : 0}%
+                  {data.totalVehicles
+                    ? Math.round((data.activeVehicles / data.totalVehicles) * 100)
+                    : 0}
+                  %
                 </Mono>
                 <Txt className="mt-0.5 text-caption text-muted">
                   {data.activeVehicles} of {data.totalVehicles} vehicles active
@@ -232,13 +268,31 @@ export function HomeScreen() {
           {hasFinance && (
             <>
               <View className="flex-1" style={{ minWidth: '46%' }}>
-                <Button label="Invoices" icon="receipt" variant="secondary" onPress={() => goTab('Finance', { tab: 'invoices' })} fullWidth />
+                <Button
+                  label="Invoices"
+                  icon="receipt"
+                  variant="secondary"
+                  onPress={() => goTab('Finance', { tab: 'invoices' })}
+                  fullWidth
+                />
               </View>
               <View className="flex-1" style={{ minWidth: '46%' }}>
-                <Button label="Add expense" icon="dollar" variant="secondary" onPress={() => goTab('Finance', { tab: 'expenses' })} fullWidth />
+                <Button
+                  label="Add expense"
+                  icon="dollar"
+                  variant="secondary"
+                  onPress={() => goTab('Finance', { tab: 'expenses' })}
+                  fullWidth
+                />
               </View>
               <View className="flex-1" style={{ minWidth: '46%' }}>
-                <Button label="Reports" icon="chart" variant="secondary" onPress={() => goTab('Finance', { tab: 'reports' })} fullWidth />
+                <Button
+                  label="Reports"
+                  icon="chart"
+                  variant="secondary"
+                  onPress={() => goTab('Finance', { tab: 'reports' })}
+                  fullWidth
+                />
               </View>
             </>
           )}

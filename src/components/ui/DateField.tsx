@@ -24,11 +24,17 @@ export function DateField({
   value,
   onChange,
   placeholder = 'Select date',
+  maximumDate,
+  minimumDate,
 }: {
   label?: string;
   value: string;
   onChange: (iso: string) => void;
   placeholder?: string;
+  /** Blocks later dates in the picker (e.g. a payment can't be in the future). */
+  maximumDate?: Date;
+  /** Blocks earlier dates (e.g. an invoice due date can't be in the past). */
+  minimumDate?: Date;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -73,6 +79,8 @@ export function DateField({
                 mode="date"
                 display="spinner"
                 textColor={colors.fg}
+                maximumDate={maximumDate}
+                minimumDate={minimumDate}
                 onChange={(_e: DateTimePickerEvent, d?: Date) => d && onChange(toISODate(d))}
               />
             </Pressable>
@@ -85,6 +93,8 @@ export function DateField({
           value={current}
           mode="date"
           display="default"
+          maximumDate={maximumDate}
+          minimumDate={minimumDate}
           onChange={(_e: DateTimePickerEvent, d?: Date) => {
             setOpen(false);
             if (d) onChange(toISODate(d));

@@ -17,6 +17,8 @@ function plusDays(n: number) {
   return d.toISOString().slice(0, 10);
 }
 
+const today = () => plusDays(0);
+
 export function CreateInvoiceScreen({ navigation }: Props) {
   const qc = useQueryClient();
   const { data: customers } = useCustomers();
@@ -37,15 +39,21 @@ export function CreateInvoiceScreen({ navigation }: Props) {
   const submit = async () => {
     if (!customerId) return toast.error('Select a customer');
     if (sub <= 0) return toast.error('Enter an amount');
+    if (dueDate < today()) return toast.error('Due date cannot be in the past');
     setBusy(true);
     try {
       await createInvoice({
         customer: Number(customerId),
         subtotal: sub,
         total_amount: total,
-        description,
+        // The Invoice model has no `description` column — the free-text field
+        // it does have is `notes`. Sending `description` looked like it worked
+        // (DRF drops unknown keys silently) but the text was never stored.
+        notes: description,
         due_date: dueDate,
-        status: 'UNPAID',
+        // invoice_number, balance and status are all filled server-side
+        // (InvoiceSerializer.create / model defaults). 'UNPAID' isn't even a
+        // valid status choice — sending it was what 400'd every create.
       });
       await qc.invalidateQueries({ queryKey: ['invoices'] });
       toast.success('Invoice created');

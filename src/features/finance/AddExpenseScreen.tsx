@@ -65,9 +65,15 @@ export function AddExpenseScreen({ route, navigation }: Props) {
         description: description.trim(),
         amount: Number(effectiveAmount),
         expense_date: date,
+        // vehicle is a nullable FK, so null is right for "no vehicle".
         vehicle: vehicle || null,
-        vendor: vendor.trim() || null,
-        receipt_number: receipt.trim() || null,
+        // vendor/receipt_number are blank=True but NOT null=True, so DRF sets
+        // allow_null=False on them — sending null 400s ("may not be null"),
+        // which meant an expense only saved if BOTH were filled in. '' is the
+        // empty value those columns actually accept, and it also makes
+        // clearing a vendor possible on the edit (PATCH) path.
+        vendor: vendor.trim(),
+        receipt_number: receipt.trim(),
         notes: outNotes,
       };
       if (editing) await updateExpense(editId, payload);

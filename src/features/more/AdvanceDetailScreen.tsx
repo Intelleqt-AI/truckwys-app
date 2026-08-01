@@ -11,6 +11,12 @@ type Props = NativeStackScreenProps<AppStackParamList, 'AdvanceDetail'>;
 
 const LIFECYCLE = ['REQUESTED', 'UNDER_REVIEW', 'APPROVED', 'DISBURSED', 'REPAID'];
 
+// The risk tier lives on the nested risk_score_detail, not at the top level.
+function advanceTier(a: Record<string, unknown>): string {
+  const detail = a.risk_score_detail as Record<string, unknown> | null | undefined;
+  return str(pick(a, ['risk_tier'])) || (detail ? str(pick(detail, ['tier', 'risk_tier'])) : '') || '—';
+}
+
 export function AdvanceDetailScreen({ route, navigation }: Props) {
   const { id } = route.params;
   const { data, isError, refetch } = useAdvance(id);
@@ -26,13 +32,17 @@ export function AdvanceDetailScreen({ route, navigation }: Props) {
       </View>
       <View className="mb-5 flex-row gap-3">
         <StatCard label="Advance" value={formatCurrency(num(pick(a, ['amount', 'advance_amount'])), { maximumFractionDigits: 0 })} />
-        <StatCard label="Fee" value={`${num(pick(a, ['fee_pct', 'fee']))}%`} />
+        {/* AdvanceRequestSerializer calls these fee_percent / invoice_due_date,
+            and puts the tier under risk_score_detail — the old fee_pct / tier /
+            repayment_date keys don't exist on it, so Fee read 0% and Tier and
+            Repay-by both read "—" on every advance. */}
+        <StatCard label="Fee" value={`${num(pick(a, ['fee_percent', 'fee_pct']))}%`} />
       </View>
 
       <Group label="Details">
         <DetailRow label="Invoice" value={str(pick(a, ['invoice_number', 'invoice']), '—')} />
-        <DetailRow label="Tier" value={str(pick(a, ['tier', 'risk_tier']), '—')} mono={false} />
-        <DetailRow label="Repay by" value={formatDate(str(pick(a, ['repayment_date', 'due_date'])) || new Date().toISOString())} last />
+        <DetailRow label="Tier" value={advanceTier(a)} mono={false} />
+        <DetailRow label="Repay by" value={formatDate(str(pick(a, ['invoice_due_date', 'due_date'])) || new Date().toISOString())} last />
       </Group>
 
       <Group label="Status">

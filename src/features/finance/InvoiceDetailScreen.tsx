@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { View, Share, Alert } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Share, Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, StatCard, StatusPill, Group, DetailRow, Button, Badge, Txt } from '@/components/ui';
+import { SheetScreen, StatCard, StatusPill, Group, DetailRow, Button, Badge, Txt, Mono } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
 import {
   useInvoice,
@@ -13,6 +13,15 @@ import {
   markInvoicePaid,
   recordPayment,
 } from './api';
+import {
+  useCapitalEligible,
+  findEligible,
+  findIneligible,
+  loadAppliedIds,
+  saveAppliedId,
+  MERCHANT_CAPITAL_URL,
+} from './fastpay';
+import { RecordPaymentSheet, type PaymentDraft } from './RecordPaymentSheet';
 import { num, str, pick } from '@/lib/api/list';
 import { invoiceShareUrl } from '@/lib/legal';
 import { formatCurrency, formatDate } from '@/lib/formatters';
@@ -21,13 +30,28 @@ import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'InvoiceDetail'>;
 
+// Which statuses each action is valid for. These mirror the web gates AND what
+// the backend will actually accept — sending a reminder on a DRAFT invoice, for
+// instance, is rejected with "Reminders can only be sent for outstanding
+// invoices", so offering the button there just produces an error toast.
+const CAN_SEND = ['DRAFT', 'SENT', 'VIEWED'];
+const CAN_REMIND = ['SENT', 'VIEWED', 'OVERDUE'];
+const CAN_PAY = ['SENT', 'VIEWED', 'OVERDUE', 'PARTIALLY_PAID'];
+
 export function InvoiceDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
   const { data, isError, refetch } = useInvoice(id, preview);
+  const { data: capital } = useCapitalEligible();
   const qc = useQueryClient();
   const [pdfBusy, setPdfBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [payBusy, setPayBusy] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [applied, setApplied] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    void loadAppliedIds().then(setApplied);
+  }, []);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this invoice." />;
   const inv = (data ?? {}) as Record<string, unknown>;
@@ -35,14 +59,34 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const total = num(pick(inv, ['total', 'total_amount']));
   const balance = num(pick(inv, ['balance', 'balance_due', 'amount_due']));
   const paid = num(pick(inv, ['paid', 'amount_paid'])) || total - balance;
-  const eligible = Boolean(pick(inv, ['early_pay_eligible']));
   const token = str(pick(inv, ['view_token', 'token']));
-  const status = str(pick(inv, ['status']), 'UNPAID').toUpperCase();
+  // 'DRAFT' is the model default; the old 'UNPAID' fallback isn't a real status.
+  const status = str(pick(inv, ['status']), 'DRAFT').toUpperCase();
+
+  // Eligibility is set membership against the backend's list — never computed
+  // here. See fastpay.ts for why `early_pay_eligible` must not be used.
+  const eligibleEntry = findEligible(capital?.invoices ?? [], id);
+  const ineligibleEntry = eligibleEntry ? undefined : findIneligible(capital?.ineligible_invoices ?? [], id);
+  // The Capital page honours this and the invoice pages historically didn't;
+  // the stricter behaviour is the correct one.
+  const riskBlocked = !!eligibleEntry?.risk_blocked;
+  const tier = str(eligibleEntry?.risk_tier ?? eligibleEntry?.tier);
+  const hasApplied = applied.has(String(id));
+
+  const applyForCapital = async () => {
+    setApplied(await saveAppliedId(id));
+    await Linking.openURL(MERCHANT_CAPITAL_URL);
+  };
 
   const refresh = () =>
     Promise.all([
       qc.invalidateQueries({ queryKey: ['invoice', id] }),
       qc.invalidateQueries({ queryKey: ['invoices'] }),
+      // Sending or paying an invoice changes whether it's advanceable, so the
+      // Fast Pay list must be re-fetched too (the web app forgets this after a
+      // payment and goes stale). Phase 2 replaces this with a shared map.
+      qc.invalidateQueries({ queryKey: ['capital-eligible'] }),
+      qc.invalidateQueries({ queryKey: ['overview'] }),
     ]);
 
   // Per-action flags so each button spins independently.
@@ -80,14 +124,17 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     });
   };
 
-  const confirmPayment = () =>
-    Alert.alert('Record payment', `Record full balance of ${formatCurrency(balance)} as paid?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Record',
-        onPress: () => run(setPayBusy, () => recordPayment({ invoice: Number(id), amount: balance }), 'Payment recorded'),
-      },
-    ]);
+  // payment_date and payment_method are required by the API and were never
+  // sent by the old one-tap confirm, so every payment 400'd. The sheet collects
+  // them (plus a partial amount and an optional reference).
+  const submitPayment = async (draft: PaymentDraft) => {
+    setPayOpen(false);
+    await run(
+      setPayBusy,
+      () => recordPayment({ invoice: Number(id), ...draft }),
+      draft.amount < balance ? 'Partial payment recorded' : 'Payment recorded',
+    );
+  };
 
   return (
     <SheetScreen
@@ -103,33 +150,68 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
             <View className="flex-1">
               <Button label="PDF" icon="download" variant="secondary" loading={pdfBusy} onPress={openPdf} fullWidth />
             </View>
-            <View className="flex-1">
-              <Button label="Send" icon="send" loading={sendBusy} onPress={() => run(setSendBusy, () => sendInvoice(id), 'Invoice sent')} fullWidth />
-            </View>
+            {CAN_SEND.includes(status) && (
+              <View className="flex-1">
+                <Button
+                  label={status === 'VIEWED' ? 'Resend' : 'Send'}
+                  icon="send"
+                  loading={sendBusy}
+                  onPress={() => run(setSendBusy, () => sendInvoice(id), 'Invoice sent')}
+                  fullWidth
+                />
+              </View>
+            )}
           </View>
-          {status !== 'PAID' && (
-            <View className="flex-row gap-2.5">
+          <View className="flex-row gap-2.5">
+            {CAN_REMIND.includes(status) && (
               <View className="flex-1">
                 <Button label="Reminder" icon="bell" variant="secondary" onPress={() => run(setSendBusy, () => sendInvoiceReminder(id), 'Reminder sent')} fullWidth />
               </View>
+            )}
+            {CAN_PAY.includes(status) && (
               <View className="flex-1">
-                <Button label="Record payment" icon="dollar" loading={payBusy} onPress={confirmPayment} fullWidth />
+                <Button label="Record payment" icon="dollar" loading={payBusy} onPress={() => setPayOpen(true)} fullWidth />
               </View>
-            </View>
-          )}
+            )}
+          </View>
           {status !== 'PAID' && (
             <Button label="Mark as paid" variant="secondary" onPress={() => run(setPayBusy, () => markInvoicePaid(id), 'Marked paid')} fullWidth />
           )}
-          {eligible && status !== 'PAID' && (
-            <Button label="Request Fast Pay advance" icon="dollar" onPress={() => navigation.navigate('Capital')} fullWidth />
+          {/* Applications are completed on Merchant Capital's own site — there's
+              no in-app advance request behind this, same as the web app. */}
+          {eligibleEntry && !riskBlocked && (
+            <Button
+              label={hasApplied ? 'Applied ✓' : 'Apply for capital →'}
+              icon="dollar"
+              variant={hasApplied ? 'secondary' : 'primary'}
+              onPress={applyForCapital}
+              fullWidth
+            />
           )}
         </View>
       }
     >
-      <View className="mb-4 flex-row items-center gap-2.5">
+      <View className="mb-4 flex-row flex-wrap items-center gap-2.5">
         <StatusPill status={status} />
-        {eligible && <Badge label="Fast Pay eligible" tone="info" />}
+        {eligibleEntry && !riskBlocked && tier && <Badge label={tier.toUpperCase()} tone="info" />}
+        {riskBlocked && <Badge label="High risk" tone="danger" />}
       </View>
+
+      {/* The backend writes these reasons (no POD, invoice too old, no facility,
+          …) — show them verbatim rather than a generic "not eligible". */}
+      {ineligibleEntry?.reason && (
+        <View className="mb-5 rounded-xs border border-line bg-surface p-3">
+          <Mono className="mb-1 text-micro tracking-wide uppercase text-faint">Fast Pay</Mono>
+          <Txt className="text-caption text-muted">{ineligibleEntry.reason}</Txt>
+        </View>
+      )}
+      {riskBlocked && (
+        <View className="mb-5 rounded-xs border border-warning bg-warning-bg p-3">
+          <Txt className="text-caption text-fg">
+            {`Customer risk ${eligibleEntry?.customer_risk_pct ?? '—'}% is above the 70% Fast Pay limit.`}
+          </Txt>
+        </View>
+      )}
 
       <View className="mb-5 flex-row gap-3">
         <StatCard label="Total" value={formatCurrency(total, { maximumFractionDigits: 0 })} />
@@ -153,6 +235,15 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
           </Txt>
         </View>
       </Group>
+
+      {payOpen && (
+        <RecordPaymentSheet
+          balance={balance}
+          busy={payBusy}
+          onConfirm={submitPayment}
+          onCancel={() => setPayOpen(false)}
+        />
+      )}
     </SheetScreen>
   );
 }

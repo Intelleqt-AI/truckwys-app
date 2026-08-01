@@ -23,6 +23,7 @@ import { num, str, pick, asArray } from '@/lib/api/list';
 import { formatCurrency, formatCurrencyCompact, formatDate, formatNumber } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'VehicleDetail'>;
@@ -80,10 +81,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
     if (next === status) return;
     try {
       await updateVehicle(id, { status: next });
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['vehicle', id] }),
-        qc.invalidateQueries({ queryKey: ['vehicles'] }),
-      ]);
+      invalidateFor(qc, 'vehicle');
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
@@ -99,7 +97,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
         onPress: async () => {
           try {
             await deleteVehicle(id);
-            await qc.invalidateQueries({ queryKey: ['vehicles'] });
+            invalidateFor(qc, 'vehicle');
             toast.success();
             navigation.goBack();
           } catch (e) {

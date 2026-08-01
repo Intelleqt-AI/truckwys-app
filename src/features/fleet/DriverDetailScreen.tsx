@@ -7,6 +7,7 @@ import { useDriver, deleteDriver } from './api';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'DriverDetail'>;
@@ -28,7 +29,7 @@ export function DriverDetailScreen({ route, navigation }: Props) {
         onPress: async () => {
           try {
             await deleteDriver(id);
-            await qc.invalidateQueries({ queryKey: ['drivers'] });
+            invalidateFor(qc, 'driver');
             toast.success('Driver deleted');
             navigation.goBack();
           } catch (e) {

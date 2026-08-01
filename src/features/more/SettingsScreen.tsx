@@ -56,6 +56,7 @@ import { formatCurrency, formatDate } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Settings'>;
@@ -178,7 +179,7 @@ function ProfileSection() {
         job_title: jobTitle.trim(),
         phone: phone.trim(),
       });
-      await Promise.all([qc.invalidateQueries({ queryKey: ['me'] }), refreshUser()]);
+      await Promise.all([Promise.resolve(invalidateFor(qc, 'user')), refreshUser()]);
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save profile');
@@ -196,7 +197,7 @@ function ProfileSection() {
       const out = await uploadAvatar({ uri: a.uri, name: a.fileName ?? 'avatar.jpg', type: a.mimeType ?? 'image/jpeg' });
       const url = str(pick(out ?? {}, ['avatar']));
       if (url) setAvatar(url);
-      await Promise.all([qc.invalidateQueries({ queryKey: ['me'] }), refreshUser()]);
+      await Promise.all([Promise.resolve(invalidateFor(qc, 'user')), refreshUser()]);
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload photo');
@@ -273,7 +274,7 @@ function VehicleTypesSection() {
         onPress: async () => {
           try {
             await deleteVehicleType(tid);
-            await qc.invalidateQueries({ queryKey: ['vehicle-types'] });
+            invalidateFor(qc, 'vehicle-type');
             toast.success();
           } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Could not delete');
@@ -302,7 +303,7 @@ function VehicleTypesSection() {
           setBusy(true);
           try {
             await Promise.all([...selected].map((sid) => deleteVehicleType(sid).catch(() => {})));
-            await qc.invalidateQueries({ queryKey: ['vehicle-types'] });
+            invalidateFor(qc, 'vehicle-type');
             setSelected(new Set());
             setSelectMode(false);
             toast.success();
@@ -796,7 +797,7 @@ function CompanySection() {
         weight_surcharge_threshold_kg: optionalNum(surchargeThreshold),
         weight_surcharge_pct: optionalNum(surchargePct),
       });
-      await qc.invalidateQueries({ queryKey: ['company-profile'] });
+      invalidateFor(qc, 'company');
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not update company');
@@ -813,7 +814,7 @@ function CompanySection() {
       const out = (await updateCompanyLogo({ uri: asset.uri, name: 'logo.jpg', type: 'image/jpeg' })) as Record<string, unknown>;
       const url = str(pick(out ?? {}, ['logo_url']));
       if (url) setLogoUrl(url);
-      await qc.invalidateQueries({ queryKey: ['company-profile'] });
+      invalidateFor(qc, 'company');
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload logo');
@@ -900,7 +901,7 @@ function UsersSection() {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('OPERATOR');
   const [busy, setBusy] = useState(false);
-  const refresh = () => qc.invalidateQueries({ queryKey: ['users'] });
+  const refresh = () => invalidateFor(qc, 'user');
 
   const invite = async () => {
     if (!email.trim()) return toast.error('Enter an email');

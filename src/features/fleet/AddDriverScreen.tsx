@@ -14,6 +14,7 @@ import {
 } from './api';
 import { str, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddDriver'>;
@@ -117,11 +118,9 @@ export function AddDriverScreen({ route, navigation }: Props) {
         const newId = pick(newDriver, ['id']);
         if (vehicle && newId) await updateVehicle(vehicle, { driver: newId });
       }
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['drivers'] }),
-        qc.invalidateQueries({ queryKey: ['vehicles'] }),
-        editing ? qc.invalidateQueries({ queryKey: ['driver', editId] }) : Promise.resolve(),
-      ]);
+      // This screen also POST/PATCHes users/, which the old list never
+      // invalidated — the Settings team list stayed stale.
+      invalidateFor(qc, 'driver');
       toast.success(editing ? 'Driver updated' : 'Driver added');
       navigation.goBack();
     } catch (e) {

@@ -30,7 +30,9 @@ import type { QuoteLite, LoadLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 
 type Props = BottomTabScreenProps<TabParamList, 'Bookings'>;
 
@@ -85,6 +87,7 @@ const QUOTE_FILTERS = [
 
 function QuotesTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useQuotes();
+  useRefetchOnFocus(refetch);
   const [filter, setFilter] = useState('ALL');
   // One sheet instance serves the whole list — the card only sets the target.
   const [convertQuote, setConvertQuote] = useState<QuoteLite | null>(null);
@@ -100,12 +103,7 @@ function QuotesTab() {
         driver_id: driverId,
         vehicle_id: vehicleId,
       });
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['quotes'] }),
-        qc.invalidateQueries({ queryKey: ['loads'] }),
-        qc.invalidateQueries({ queryKey: ['drivers-available-for-assign'] }),
-        qc.invalidateQueries({ queryKey: ['vehicles-available-for-assign'] }),
-      ]);
+      invalidateFor(qc, 'quote', 'load');
       setConvertQuote(null);
       toast.success(driverId && vehicleId ? 'Converted and assigned' : 'Converted to booking');
       const loadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
@@ -207,6 +205,7 @@ function QuoteCard({
 // ── Orders / History (loads) ───────────────────────────────────────────────
 function OrdersTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useLoads();
+  useRefetchOnFocus(refetch);
   const [filter, setFilter] = useState('ALL');
   const { openLoad } = useAppNavigation();
 
@@ -244,6 +243,7 @@ function OrdersTab() {
 
 function HistoryTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useLoads();
+  useRefetchOnFocus(refetch);
   const [filter, setFilter] = useState('ALL');
   const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();

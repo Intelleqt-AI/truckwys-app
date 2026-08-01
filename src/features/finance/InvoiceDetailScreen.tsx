@@ -26,6 +26,7 @@ import { num, str, pick } from '@/lib/api/list';
 import { invoiceShareUrl } from '@/lib/legal';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'InvoiceDetail'>;
@@ -78,23 +79,17 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     await Linking.openURL(MERCHANT_CAPITAL_URL);
   };
 
-  const refresh = () =>
-    Promise.all([
-      qc.invalidateQueries({ queryKey: ['invoice', id] }),
-      qc.invalidateQueries({ queryKey: ['invoices'] }),
-      // Sending or paying an invoice changes whether it's advanceable, so the
-      // Fast Pay list must be re-fetched too (the web app forgets this after a
-      // payment and goes stale). Phase 2 replaces this with a shared map.
-      qc.invalidateQueries({ queryKey: ['capital-eligible'] }),
-      qc.invalidateQueries({ queryKey: ['overview'] }),
-    ]);
+  // 'invoice' covers the detail + list + Fast Pay eligibility + the Home
+  // dashboard and finance reports. The web app forgets capital-eligible after
+  // a payment and goes stale; the shared map can't.
+  const refresh = () => invalidateFor(qc, 'invoice');
 
   // Per-action flags so each button spins independently.
   const run = async (setFlag: (v: boolean) => void, fn: () => Promise<unknown>, okMsg: string) => {
     setFlag(true);
     try {
       await fn();
-      await refresh();
+      refresh();
       toast.success(okMsg);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');

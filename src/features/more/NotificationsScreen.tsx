@@ -14,6 +14,7 @@ import { formatRelativeTime } from '@/lib/formatters';
 import { status as statusHues } from '@/theme/tokens';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Notifications'>;
@@ -33,16 +34,12 @@ export function NotificationsScreen({ navigation }: Props) {
   const { colors } = useTheme();
   const hasUnread = !!data?.some((n) => !n.read);
 
-  const invalidate = () =>
-    Promise.all([
-      qc.invalidateQueries({ queryKey: ['notifications'] }),
-      qc.invalidateQueries({ queryKey: ['notifications-unread'] }),
-    ]);
+  const invalidate = () => invalidateFor(qc, 'notification');
 
   const onRead = async (id: string) => {
     try {
       await markNotificationRead(id);
-      await invalidate();
+      invalidate();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not mark read');
     }
@@ -51,7 +48,7 @@ export function NotificationsScreen({ navigation }: Props) {
   const readAll = async () => {
     try {
       await markAllNotificationsRead();
-      await invalidate();
+      invalidate();
       toast.success('All marked read');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not mark read');

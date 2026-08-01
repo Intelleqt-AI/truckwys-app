@@ -20,6 +20,7 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CustomerDetail'>;
@@ -53,10 +54,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
     setBusy(true);
     try {
       await updateCustomer(id, { status: active ? 'INACTIVE' : 'ACTIVE', is_active: !active });
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['customer', id] }),
-        qc.invalidateQueries({ queryKey: ['customers'] }),
-      ]);
+      invalidateFor(qc, 'customer');
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
@@ -74,7 +72,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
         onPress: async () => {
           try {
             await deleteCustomer(id);
-            await qc.invalidateQueries({ queryKey: ['customers'] });
+            invalidateFor(qc, 'customer');
             toast.success();
             navigation.goBack();
           } catch (e) {

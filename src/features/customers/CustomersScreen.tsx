@@ -20,6 +20,7 @@ import { useCustomers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { AppStackParamList } from '@/navigation/types';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Customers'>;
 
@@ -27,6 +28,7 @@ export function CustomersScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { data, isLoading, isError, refetch } = useCustomers();
+  useRefetchOnFocus(refetch);
   const { openCustomer } = useAppNavigation();
   const [q, setQ] = useState('');
 

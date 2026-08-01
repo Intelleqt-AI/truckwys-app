@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { setAuthToken } from '@/lib/api/client';
 import { storage } from '@/lib/storage';
+import { queryClient } from '@/lib/queryClient';
 import { authApi } from '@/features/auth/api';
 import { unregisterPush } from '@/lib/push';
 import type { AuthUser } from '@/types/auth';
@@ -72,6 +73,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     setAuthToken(null);
     await storage.clear();
+    // Wipe every cached server response. Without this the next user to sign in
+    // on this handset sees the previous user's quotes/invoices/customers until
+    // each key refetches — gcTime is 30 minutes.
+    queryClient.clear();
     set({ token: null, user: null, status: 'guest' });
   },
 }));
@@ -83,5 +88,6 @@ export const forceSignOut = () => {
   setAuthToken(null);
   void unregisterPush().catch(() => {});
   void storage.clear();
+  queryClient.clear();
   useAuthStore.setState({ token: null, user: null, status: 'guest' });
 };

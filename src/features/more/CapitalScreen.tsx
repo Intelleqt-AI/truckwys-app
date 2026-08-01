@@ -18,6 +18,7 @@ import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useCapital, requestAdvance } from './api';
 import { formatCurrency } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
 import type { AppStackParamList } from '@/navigation/types';
@@ -39,7 +40,7 @@ export function CapitalScreen({ navigation }: Props) {
     setBusy(invoiceId);
     try {
       await requestAdvance(invoiceId);
-      await qc.invalidateQueries({ queryKey: ['capital'] });
+      invalidateFor(qc, 'advance');
       toast.success('Advance requested');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not request advance');

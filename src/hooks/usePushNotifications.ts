@@ -11,6 +11,7 @@ import {
 import notifee, { EventType } from '@notifee/react-native';
 import { registerForPush, presentForeground, syncBadge } from '@/lib/push';
 import { resolveNotificationLink } from '@/lib/notificationLink';
+import { invalidateForServerEvent } from '@/lib/queryInvalidation';
 import { useUnreadCount } from '@/features/more/api';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -29,11 +30,12 @@ export function usePushNotifications() {
   // Registration is once per mount; a re-render must not re-POST.
   const registered = useRef(false);
 
-  const refreshLists = () =>
-    Promise.all([
-      qc.invalidateQueries({ queryKey: ['notifications'] }),
-      qc.invalidateQueries({ queryKey: ['notifications-unread'] }),
-    ]);
+  // The backend puts the event name (quote.accepted, invoice.paid, …) in the
+  // FCM data payload as `event_id`. It used to be ignored and only the bell was
+  // refreshed; routing it through the shared map means a push also updates the
+  // screens the change actually affects — which matters when the WebSocket is
+  // down or the app was killed.
+  const refreshLists = (event?: string) => invalidateForServerEvent(qc, event ?? '');
 
   // Ask for permission and register the device.
   useEffect(() => {
@@ -68,16 +70,16 @@ export function usePushNotifications() {
     // Foreground: FCM does NOT display these itself, so present them and
     // refresh the list behind them.
     const unsubMessage = onMessage(fcm, async (msg: RemoteMessage) => {
-      await refreshLists();
+      const data = (msg.data ?? {}) as Record<string, string>;
+      refreshLists(data.event_id);
       const title = msg.notification?.title ?? 'Truckwys';
       const body = msg.notification?.body ?? '';
-      const data = (msg.data ?? {}) as Record<string, string>;
       await presentForeground(title, body, data, data.channel);
     });
 
     // Tapping a notification the OS displayed while the app was backgrounded.
     const unsubOpened = onNotificationOpenedApp(fcm, (msg: RemoteMessage) => {
-      void refreshLists();
+      refreshLists((msg.data?.event_id as string | undefined) ?? '');
       open(msg.data);
     });
 
@@ -90,7 +92,7 @@ export function usePushNotifications() {
     // the tap happened, so the intent is only readable once, here.
     void getInitialNotification(fcm).then((msg) => {
       if (!msg) return;
-      void refreshLists();
+      refreshLists((msg.data?.event_id as string | undefined) ?? '');
       open(msg.data);
     });
 

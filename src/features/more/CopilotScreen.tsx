@@ -9,6 +9,7 @@ import { copilotChat, useProposals, executeProposal, dismissProposal } from './a
 import { str, pick } from '@/lib/api/list';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Copilot'>;
@@ -36,7 +37,9 @@ export function CopilotScreen({ navigation }: Props) {
   const actProposal = async (id: string, execute: boolean) => {
     try {
       await (execute ? executeProposal(id) : dismissProposal(id));
-      await qc.invalidateQueries({ queryKey: ['agent-proposals'] });
+      // An executed proposal mutates real quotes/loads/invoices server-side
+      // and doesn't report which, so refresh broadly.
+      invalidateFor(qc, 'copilot');
       toast.success(execute ? 'Proposal executed' : 'Dismissed');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Action failed');

@@ -9,6 +9,7 @@ import { SheetScreen, TextField, SelectField, Button, type IconName } from '@/co
 import { createCustomer, updateCustomer } from './api';
 import { str, num, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddCustomer'>;
@@ -94,10 +95,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
     try {
       if (editing) await updateCustomer(editId, payload);
       else await createCustomer(payload);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ['customers'] }),
-        editing ? qc.invalidateQueries({ queryKey: ['customer', editId] }) : Promise.resolve(),
-      ]);
+      invalidateFor(qc, 'customer');
       toast.success(editing ? 'Customer updated' : 'Customer created');
       navigation.goBack();
     } catch (e) {

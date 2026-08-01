@@ -9,7 +9,7 @@ import { RootNavigator } from '@/navigation/RootNavigator';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemedStatusBar } from '@/components/ThemedStatusBar';
 import { ToastHost } from '@/lib/toast';
-import { queryClient } from '@/lib/queryClient';
+import { queryClient, startAppStateFocusBridge, startNetworkBridge } from '@/lib/queryClient';
 import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebase/messaging';
 
 // Keep the splash up until auth state is hydrated (RootNavigator hides it).
@@ -32,6 +32,14 @@ export default function App() {
     // Safety net: never let the splash hang if hydration errors out.
     const t = setTimeout(() => void SplashScreen.hideAsync(), 4000);
     return () => clearTimeout(t);
+  }, []);
+
+  // Teach React Query what "focused" and "online" mean on a phone — without
+  // these its refetch-on-focus and refetch-on-reconnect never fire at all.
+  // Both replace the manager's single listener, so there's nothing to unwind.
+  useEffect(() => {
+    startAppStateFocusBridge();
+    startNetworkBridge();
   }, []);
 
   return (

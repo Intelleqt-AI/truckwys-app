@@ -6,6 +6,7 @@ import { SheetScreen, SelectField, TextField, DateField, Button, Label } from '@
 import { createVehicle, updateVehicle, useVehicleTypesList, useDrivers } from './api';
 import { str, num, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddVehicle'>;
@@ -91,7 +92,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
     try {
       if (editing) await updateVehicle(editId, payload);
       else await createVehicle(payload);
-      await qc.invalidateQueries({ queryKey: ['vehicles'] });
+      invalidateFor(qc, 'vehicle');
       toast.success(editing ? 'Vehicle updated' : 'Vehicle added');
       navigation.goBack();
     } catch (e) {

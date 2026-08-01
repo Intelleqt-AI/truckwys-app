@@ -38,9 +38,11 @@ import {
 import type { ExpenseLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatCurrency, formatCurrencyCompact, formatDate } from '@/lib/formatters';
 import type { TabParamList, FinanceTab } from '@/navigation/types';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 
 type Props = BottomTabScreenProps<TabParamList, 'Finance'>;
 
@@ -86,6 +88,7 @@ export function FinanceScreen({ route }: Props) {
 
 function InvoicesTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useInvoices();
+  useRefetchOnFocus(refetch);
   const { openInvoice } = useAppNavigation();
 
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
@@ -141,16 +144,17 @@ const EXPENSE_STATUS_FILTERS = [
 
 function ExpensesTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useExpenses();
+  useRefetchOnFocus(refetch);
   const { nav } = useAppNavigation();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [statusF, setStatusF] = useState('ALL');
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['expenses'] });
+  const refresh = () => invalidateFor(qc, 'expense');
   const act = async (fn: () => Promise<unknown>, errMsg: string) => {
     try {
       await fn();
-      await refresh();
+      refresh();
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : errMsg);
@@ -267,6 +271,7 @@ function ExpensesTab() {
 
 function ReportsTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useFinanceReports();
+  useRefetchOnFocus(refetch);
   const { colors } = useTheme();
   if (isLoading) return <View className="p-screen"><ListSkeleton rows={4} /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load reports." />;

@@ -33,6 +33,7 @@ import { SettingsScreen } from '@/features/more/SettingsScreen';
 import { SupportScreen } from '@/features/more/SupportScreen';
 import { MoreScreen } from '@/features/more/MoreScreen';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { useLiveEvents } from '@/hooks/useLiveEvents';
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
@@ -41,6 +42,9 @@ export function AppNavigator() {
   // Only mounted for a signed-in user, so registration always has an auth
   // header and a notification tap always has somewhere to navigate.
   usePushNotifications();
+  // Live company events — keeps every open screen current without the user
+  // pulling to refresh, including changes made on the web or by a teammate.
+  useLiveEvents();
 
   // Native iOS large-title header with a Liquid Glass blur bar and the system
   // back button (chevron + previous screen name + interactive swipe-back).

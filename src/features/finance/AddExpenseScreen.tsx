@@ -7,6 +7,7 @@ import { createExpense, updateExpense, EXPENSE_CATEGORIES } from './api';
 import { useVehicles } from '@/features/fleet/api';
 import { num, str, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddExpense'>;
@@ -78,7 +79,7 @@ export function AddExpenseScreen({ route, navigation }: Props) {
       };
       if (editing) await updateExpense(editId, payload);
       else await createExpense(payload);
-      await qc.invalidateQueries({ queryKey: ['expenses'] });
+      invalidateFor(qc, 'expense');
       toast.success();
       navigation.goBack();
     } catch (e) {

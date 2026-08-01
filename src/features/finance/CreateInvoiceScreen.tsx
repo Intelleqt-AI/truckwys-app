@@ -7,6 +7,7 @@ import { createInvoice } from './api';
 import { useCustomers } from '@/features/customers/api';
 import { formatCurrency } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateInvoice'>;
@@ -55,7 +56,7 @@ export function CreateInvoiceScreen({ navigation }: Props) {
         // (InvoiceSerializer.create / model defaults). 'UNPAID' isn't even a
         // valid status choice — sending it was what 400'd every create.
       });
-      await qc.invalidateQueries({ queryKey: ['invoices'] });
+      invalidateFor(qc, 'invoice');
       toast.success('Invoice created');
       navigation.goBack();
     } catch (e) {

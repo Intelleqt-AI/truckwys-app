@@ -22,6 +22,7 @@ import { useLoad, updateLoadStatus, convertLoadToInvoice, uploadLoadPod, assignL
 import { AssignSheet, assignedIds } from './AssignSheet';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL } from './constants';
 import { num, str, pick } from '@/lib/api/list';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
@@ -54,17 +55,13 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const current = assignedIds(l);
   const hasAssignment = !!(current.driverId || current.vehicleId);
 
-  const refresh = () =>
-    Promise.all([
-      qc.invalidateQueries({ queryKey: ['load', id] }),
-      qc.invalidateQueries({ queryKey: ['loads'] }),
-    ]);
+  const refresh = () => invalidateFor(qc, 'load');
 
   const doStatus = async (next: string) => {
     setBusy(true);
     try {
       await updateLoadStatus(id, next);
-      await refresh();
+      refresh();
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
@@ -90,7 +87,9 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     setBusy(true);
     try {
       await convertLoadToInvoice(id);
-      await refresh();
+      // Creates an invoice, so the invoice list/finance totals move too —
+      // 'load' already covers invoices in the map.
+      refresh();
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not create invoice');
@@ -103,12 +102,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     setAssignBusy(true);
     try {
       await assignLoadDriver(id, driverId ? Number(driverId) : null, vehicleId ? Number(vehicleId) : null);
-      await Promise.all([
-        refresh(),
-        // Availability changed for whoever was picked up or released.
-        qc.invalidateQueries({ queryKey: ['drivers-available-for-assign'] }),
-        qc.invalidateQueries({ queryKey: ['vehicles-available-for-assign'] }),
-      ]);
+      // Availability changed for whoever was picked up or released.
+      refresh();
       setShowAssign(false);
       toast.success(driverId && vehicleId ? 'Assigned' : 'Unassigned');
     } catch (e) {
@@ -127,7 +122,9 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       const name = asset.fileName ?? `pod-${id}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
       await uploadLoadPod(id, { uri: asset.uri, name, type });
-      await refresh();
+      // A POD is what makes an invoice Fast Pay-eligible, so this moves the
+      // capital lists too ('load' covers them).
+      refresh();
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload POD');

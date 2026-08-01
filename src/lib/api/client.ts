@@ -25,8 +25,11 @@ function normalizeBase(raw: string): string {
 const baseURL = normalizeBase(RAW_BASE ?? 'https://api.truckwys.com');
 
 // Host origin (baseURL minus the /api/vN/ suffix) — media files (avatars,
-// logos) are served from the host root, not under /api/v1.
+// logos) are served from the host root, not under /api/v1. The WebSocket
+// endpoint (/ws/events/) is off the same root, so it reuses this.
 const mediaOrigin = baseURL.replace(/\/api\/v\d+\/?$/, '');
+
+export const apiOrigin = mediaOrigin.replace(/\/$/, '');
 
 // Resolve a possibly-relative media path (e.g. "/media/avatars/x.jpg") to an
 // absolute URL so RN's <Image> can load it. Absolute URLs pass through.

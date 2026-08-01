@@ -31,6 +31,7 @@ import {
 } from './api';
 import { AssignSheet } from './AssignSheet';
 import { num, str, pick } from '@/lib/api/list';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import { quoteShareUrl } from '@/lib/legal';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
@@ -135,11 +136,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   // Web only offers won/lost capture while the quote is still open.
   const canRecordOutcome = !outcome && ['SENT', 'DRAFT'].includes(status);
 
-  const refresh = () =>
-    Promise.all([
-      qc.invalidateQueries({ queryKey: ['quote', id] }),
-      qc.invalidateQueries({ queryKey: ['quotes'] }),
-    ]);
+  const refresh = () => invalidateFor(qc, 'quote');
 
   // Each action drives its own spinner so buttons never co-load.
   const run = async (
@@ -151,7 +148,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     setFlag(true);
     try {
       await fn();
-      await refresh();
+      refresh();
       toast.success(okMsg);
       if (back) navigation.goBack();
     } catch (e) {
@@ -169,12 +166,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       const created = await convertQuoteToLoad(id, { driver_id: driverId, vehicle_id: vehicleId });
       // The new load lands in Orders, and the chosen vehicle/driver are no
       // longer "available".
-      await Promise.all([
-        refresh(),
-        qc.invalidateQueries({ queryKey: ['loads'] }),
-        qc.invalidateQueries({ queryKey: ['drivers-available-for-assign'] }),
-        qc.invalidateQueries({ queryKey: ['vehicles-available-for-assign'] }),
-      ]);
+      invalidateFor(qc, 'quote', 'load');
       setShowAssign(false);
       toast.success(driverId && vehicleId ? 'Converted and assigned' : 'Converted to booking');
       // The quote is now a booking — replace rather than stack, matching web.

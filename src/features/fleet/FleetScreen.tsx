@@ -22,6 +22,7 @@ import { useVehicles, useDrivers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { TabParamList, FleetTab } from '@/navigation/types';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 
 type Props = BottomTabScreenProps<TabParamList, 'Fleet'>;
 
@@ -77,6 +78,7 @@ export function FleetScreen({ route }: Props) {
 
 function VehiclesTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useVehicles();
+  useRefetchOnFocus(refetch);
   const { openVehicle } = useAppNavigation();
   const { colors } = useTheme();
   const [q, setQ] = useState('');
@@ -146,6 +148,7 @@ function VehiclesTab() {
 
 function DriversTab() {
   const { data, isLoading, isError, refetch, isRefetching } = useDrivers();
+  useRefetchOnFocus(refetch);
   const { openDriver } = useAppNavigation();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('ALL');

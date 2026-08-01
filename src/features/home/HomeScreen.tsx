@@ -25,9 +25,11 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useRole, visibleTabs } from '@/lib/access';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 
 export function HomeScreen() {
   const { data, isLoading, isError, refetch, isRefetching } = useOverview();
+  useRefetchOnFocus(refetch);
   const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } =
     useAppNavigation();
   const { data: unread } = useUnreadCount();

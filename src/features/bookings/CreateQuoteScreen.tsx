@@ -44,6 +44,7 @@ import { num, str, pick, asArray } from '@/lib/api/list';
 import { formatCurrency, formatCurrencyCompact, formatDuration } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
+import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
@@ -504,7 +505,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       } else {
         toast.success('Draft saved');
       }
-      await qc.invalidateQueries({ queryKey: ['quotes'] });
+      // Also refreshes this quote's own detail cache, which the old
+      // quotes-only invalidation missed — reopening an edited quote showed
+      // the pre-edit values.
+      invalidateFor(qc, 'quote');
       navigation.goBack();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save quote');

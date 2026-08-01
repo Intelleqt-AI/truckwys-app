@@ -18,7 +18,6 @@ import {
   Txt,
   Mono,
   ListRow,
-  Button,
   Fab,
   EmptyState,
 } from '@/components/ui';
@@ -32,7 +31,7 @@ import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
-import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useManualRefresh } from '@/hooks/useManualRefresh';
 
 type Props = BottomTabScreenProps<TabParamList, 'Bookings'>;
 
@@ -41,21 +40,14 @@ const DONE = ['DELIVERED', 'INVOICED', 'CANCELLED'];
 
 export function BookingsScreen({ route }: Props) {
   const [tab, setTab] = useState<BookingsTab>(route.params?.tab ?? 'quotes');
-  const { createQuote, aiQuote } = useAppNavigation();
+  const { createQuote } = useAppNavigation();
   const insets = useSafeAreaInsets();
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
       <AmbientGlow />
       <View className="px-screen">
-        <AppHeader
-          eyebrow="Operations"
-          title="Bookings"
-          live
-          right={
-            <Button label="AI quote" icon="sparkle" variant="ghost" onPress={aiQuote} />
-          }
-        />
+        <AppHeader eyebrow="Operations" title="Bookings" live />
       </View>
       <SwipeTabs
         tabs={[
@@ -86,8 +78,8 @@ const QUOTE_FILTERS = [
 ];
 
 function QuotesTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useQuotes();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useQuotes();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const [filter, setFilter] = useState('ALL');
   // One sheet instance serves the whole list — the card only sets the target.
   const [convertQuote, setConvertQuote] = useState<QuoteLite | null>(null);
@@ -125,8 +117,8 @@ function QuotesTab() {
       <FlashList
         data={list}
         keyExtractor={(q) => String(q.id)}
-        onRefresh={refetch}
-        refreshing={isRefetching}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
         ItemSeparatorComponent={() => <View className="h-2.5" />}
         ListHeaderComponent={
@@ -204,8 +196,8 @@ function QuoteCard({
 
 // ── Orders / History (loads) ───────────────────────────────────────────────
 function OrdersTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useLoads();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useLoads();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const [filter, setFilter] = useState('ALL');
   const { openLoad } = useAppNavigation();
 
@@ -220,8 +212,8 @@ function OrdersTab() {
     <LoadList
       list={list}
       onOpen={openLoad}
-      onRefresh={refetch}
-      refreshing={isRefetching}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       stats={[
         { label: 'Active orders', value: String(active.length) },
         { label: 'In transit', value: String(active.filter((l) => l.status === 'IN_TRANSIT').length) },
@@ -242,8 +234,8 @@ function OrdersTab() {
 }
 
 function HistoryTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useLoads();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useLoads();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const [filter, setFilter] = useState('ALL');
   const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();
@@ -263,8 +255,8 @@ function HistoryTab() {
     <LoadList
       list={list}
       onOpen={openLoad}
-      onRefresh={refetch}
-      refreshing={isRefetching}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       search={{ value: q, onChange: setQ }}
       stats={[
         { label: 'Completed', value: String(done.filter((l) => l.status !== 'CANCELLED').length) },

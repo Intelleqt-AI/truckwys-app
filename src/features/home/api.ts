@@ -25,18 +25,31 @@ export interface OverviewData {
 
 const DAY = 24 * 60 * 60 * 1000;
 
+// Sentinel for a sub-request that failed, so we can tell "the server said zero"
+// apart from "we never got an answer".
+const FAILED = Symbol('failed');
+
 async function loadOverview(): Promise<OverviewData> {
   const [finance, quotesData, loadsData, vehiclesData, fleet, advancesData] = await Promise.all([
-    fetchData('dashboard/finance/').catch(() => null),
-    fetchData('quotes/?limit=20').catch(() => []),
-    fetchData('loads/').catch(() => []),
+    fetchData('dashboard/finance/').catch(() => FAILED),
+    fetchData('quotes/?limit=20').catch(() => FAILED),
+    fetchData('loads/').catch(() => FAILED),
     fetchData('vehicles/').catch(() => []),
     fetchData('fleet/overview/').catch(() => null),
     fetchData('advances/').catch(() => []),
   ]);
 
-  const quotes = asArray(quotesData).map(normalizeQuote);
-  const loads = asArray(loadsData).map(normalizeLoad);
+  // These three are the whole dashboard: revenue/outstanding, recent quotes,
+  // and active loads. Rendering them as zeros because a request blipped makes
+  // the app look like the business has no data — which is exactly what "the
+  // overview sometimes looks empty" was. Throwing instead means React Query
+  // keeps showing the last good numbers and retries in the background.
+  if (finance === FAILED && quotesData === FAILED && loadsData === FAILED) {
+    throw new Error('Could not load your overview');
+  }
+
+  const quotes = quotesData === FAILED ? [] : asArray(quotesData).map(normalizeQuote);
+  const loads = loadsData === FAILED ? [] : asArray(loadsData).map(normalizeLoad);
   const vehicles = asArray(vehiclesData);
   const advances = asArray(advancesData);
 
@@ -63,7 +76,7 @@ async function loadOverview(): Promise<OverviewData> {
   const heat = counts.map((c) => (c === 0 ? 0 : Math.min(3, Math.ceil((c / max) * 3))));
 
   return {
-    finance: normalizeFinance(finance as Record<string, unknown> | null),
+    finance: normalizeFinance(finance === FAILED ? null : (finance as Record<string, unknown> | null)),
     quotes,
     loads,
     activeLoads,
@@ -77,5 +90,11 @@ async function loadOverview(): Promise<OverviewData> {
 }
 
 export function useOverview() {
-  return useQuery({ queryKey: ['overview'], queryFn: loadOverview });
+  return useQuery({
+    queryKey: ['overview'],
+    queryFn: loadOverview,
+    // A failed background refresh must never blank a dashboard that was
+    // already showing good numbers.
+    placeholderData: (prev) => prev,
+  });
 }

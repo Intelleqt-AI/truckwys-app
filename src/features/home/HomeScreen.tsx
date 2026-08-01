@@ -25,11 +25,11 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useRole, visibleTabs } from '@/lib/access';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
-import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useManualRefresh } from '@/hooks/useManualRefresh';
 
 export function HomeScreen() {
-  const { data, isLoading, isError, refetch, isRefetching } = useOverview();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useOverview();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } =
     useAppNavigation();
   const { data: unread } = useUnreadCount();
@@ -55,7 +55,7 @@ export function HomeScreen() {
 
   return (
     <View className="flex-1">
-      <Screen onRefresh={refetch} refreshing={isRefetching}>
+      <Screen onRefresh={onRefresh} refreshing={refreshing}>
         <AppHeader
           eyebrow={format(new Date(), 'EEE · d MMM · yyyy')}
           title="Overview"

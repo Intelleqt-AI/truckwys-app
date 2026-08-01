@@ -23,7 +23,11 @@ export function useQuote(id: string | number, preview?: Record<string, unknown>)
   return useQuery<Record<string, unknown>>({
     queryKey: ['quote', id],
     queryFn: () => fetchData(`quotes/${id}/`),
-    initialData: preview,
+    // placeholderData, NOT initialData: the preview is the list row, which has
+    // fewer fields and may be minutes old. initialData is written to the cache
+    // and counts as a fresh fetch, so with the global 5-minute staleTime the
+    // screen would show the stale row and never request the real record.
+    placeholderData: preview,
   });
 }
 
@@ -31,7 +35,8 @@ export function useLoad(id: string | number, preview?: Record<string, unknown>) 
   return useQuery<Record<string, unknown>>({
     queryKey: ['load', id],
     queryFn: () => fetchData(`loads/${id}/`),
-    initialData: preview,
+    // See useQuote — placeholderData so the real record is always fetched.
+    placeholderData: preview,
   });
 }
 

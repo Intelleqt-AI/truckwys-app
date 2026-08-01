@@ -1,5 +1,5 @@
 import { useState, useLayoutEffect, useCallback } from 'react';
-import { View } from 'react-native';
+import { View, RefreshControl } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +20,7 @@ import { useCustomers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { AppStackParamList } from '@/navigation/types';
-import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useManualRefresh } from '@/hooks/useManualRefresh';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Customers'>;
 
@@ -28,7 +28,7 @@ export function CustomersScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { data, isLoading, isError, refetch } = useCustomers();
-  useRefetchOnFocus(refetch);
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { openCustomer } = useAppNavigation();
   const [q, setQ] = useState('');
 
@@ -81,6 +81,9 @@ export function CustomersScreen({ navigation }: Props) {
           data={data.filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()))}
           keyExtractor={(c) => String(c.id)}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
+          }
           ListEmptyComponent={
             <EmptyState
               icon="users"

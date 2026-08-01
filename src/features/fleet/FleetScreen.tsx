@@ -22,7 +22,7 @@ import { useVehicles, useDrivers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { TabParamList, FleetTab } from '@/navigation/types';
-import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useManualRefresh } from '@/hooks/useManualRefresh';
 
 type Props = BottomTabScreenProps<TabParamList, 'Fleet'>;
 
@@ -77,8 +77,8 @@ export function FleetScreen({ route }: Props) {
 }
 
 function VehiclesTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useVehicles();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useVehicles();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { openVehicle } = useAppNavigation();
   const { colors } = useTheme();
   const [q, setQ] = useState('');
@@ -104,8 +104,8 @@ function VehiclesTab() {
     <FlashList
       data={list}
       keyExtractor={(v) => String(v.id)}
-      onRefresh={refetch}
-      refreshing={isRefetching}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
@@ -147,8 +147,8 @@ function VehiclesTab() {
 }
 
 function DriversTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useDrivers();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useDrivers();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { openDriver } = useAppNavigation();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('ALL');
@@ -170,8 +170,8 @@ function DriversTab() {
     <FlashList
       data={list}
       keyExtractor={(d) => String(d.id)}
-      onRefresh={refetch}
-      refreshing={isRefetching}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">

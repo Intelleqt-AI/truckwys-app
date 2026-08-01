@@ -42,7 +42,7 @@ import { invalidateFor } from '@/lib/queryInvalidation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatCurrency, formatCurrencyCompact, formatDate } from '@/lib/formatters';
 import type { TabParamList, FinanceTab } from '@/navigation/types';
-import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useManualRefresh } from '@/hooks/useManualRefresh';
 
 type Props = BottomTabScreenProps<TabParamList, 'Finance'>;
 
@@ -87,8 +87,8 @@ export function FinanceScreen({ route }: Props) {
 }
 
 function InvoicesTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useInvoices();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useInvoices();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { openInvoice } = useAppNavigation();
 
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
@@ -101,8 +101,8 @@ function InvoicesTab() {
     <FlashList
       data={data}
       keyExtractor={(i) => String(i.id)}
-      onRefresh={refetch}
-      refreshing={isRefetching}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3 flex-row gap-3">
@@ -143,8 +143,8 @@ const EXPENSE_STATUS_FILTERS = [
 ];
 
 function ExpensesTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useExpenses();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useExpenses();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { nav } = useAppNavigation();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
@@ -214,8 +214,8 @@ function ExpensesTab() {
     <FlashList
       data={list}
       keyExtractor={(e) => String(e.id)}
-      onRefresh={refetch}
-      refreshing={isRefetching}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
@@ -270,8 +270,8 @@ function ExpensesTab() {
 }
 
 function ReportsTab() {
-  const { data, isLoading, isError, refetch, isRefetching } = useFinanceReports();
-  useRefetchOnFocus(refetch);
+  const { data, isLoading, isError, refetch } = useFinanceReports();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { colors } = useTheme();
   if (isLoading) return <View className="p-screen"><ListSkeleton rows={4} /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load reports." />;
@@ -284,8 +284,8 @@ function ReportsTab() {
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       refreshControl={
         <RefreshControl
-          refreshing={isRefetching}
-          onRefresh={refetch}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
           tintColor={colors.accent}
           colors={[colors.accent]}
           progressBackgroundColor={colors.surface}

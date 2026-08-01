@@ -33,6 +33,7 @@ import { AssignSheet } from './AssignSheet';
 import { num, str, pick } from '@/lib/api/list';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { quoteShareUrl } from '@/lib/legal';
+import { openWhatsApp } from '@/lib/whatsapp';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -65,6 +66,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const { data, isError, refetch } = useQuote(id, preview);
   const qc = useQueryClient();
   const [sendBusy, setSendBusy] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
   const [convertBusy, setConvertBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
@@ -158,7 +160,49 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     }
   };
 
-  const doSend = () => run(setSendBusy, () => sendQuote(id), 'Quote sent to client');
+  // Send offers Email or WhatsApp rather than emailing immediately. WhatsApp
+  // needs the public link, which send_to_customer is what mints — so an unsent
+  // quote is sent first, then handed off.
+  const sendViaEmail = () => {
+    setSendOpen(false);
+    void run(setSendBusy, () => sendQuote(id), 'Quote emailed to client');
+  };
+
+  const sendViaWhatsApp = async () => {
+    setSendOpen(false);
+    setSendBusy(true);
+    try {
+      let link = shareUrl;
+      if (!link) {
+        const res = await sendQuote(id);
+        refresh();
+        // send_to_customer returns share_url; rewrite it onto our own host so
+        // the link always points at this environment (the backend's
+        // FRONTEND_URL may be pinned to production), mirroring the web app.
+        const returned = str(pick(res, ['share_url', 'url']));
+        const tok = str(pick(res, ['token', 'view_token']));
+        if (tok) link = quoteShareUrl(id, tok);
+        else if (returned) {
+          const tail = returned.split('/quotes/view/')[1];
+          link = tail ? quoteShareUrl(id, tail.split('/').pop() ?? '') : returned;
+        }
+      }
+      const ref = str(pick(q, ['quote_number']));
+      const name = str(pick(q, ['customer_name', 'customer']));
+      const message = [
+        `Hi${name ? ` ${name}` : ''}, here's your freight quote${ref ? ` (${ref})` : ''} from Truckwys`,
+        total > 0 ? formatCurrency(total) : '',
+        link ?? '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      await openWhatsApp(str(pick(q, ['customer_phone'])), message);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open WhatsApp');
+    } finally {
+      setSendBusy(false);
+    }
+  };
 
   const convert = async (driverId: string, vehicleId: string) => {
     setConvertBusy(true);
@@ -254,7 +298,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           <Button label="Edit quote" icon="edit" variant="secondary" onPress={editQuote} fullWidth />
         </View>
         <View className="flex-1">
-          <Button label="Send" icon="send" loading={sendBusy} onPress={doSend} fullWidth />
+          <Button label="Send" icon="send" loading={sendBusy} onPress={() => setSendOpen(true)} fullWidth />
         </View>
       </View>
       {canRecordOutcome && (
@@ -414,6 +458,41 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           onConfirm={convert}
           onCancel={() => setShowAssign(false)}
         />
+      )}
+
+      {sendOpen && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setSendOpen(false)}>
+          <Pressable
+            onPress={() => setSendOpen(false)}
+            className="flex-1 items-center justify-center bg-black/65 px-6"
+          >
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+            >
+              <Txt className="text-heading font-semibold text-fg">Send quote</Txt>
+              <Txt className="mb-4 mt-1.5 text-sub text-muted">
+                {str(pick(q, ['customer_name', 'customer']), 'the customer')}
+              </Txt>
+              <View className="gap-2.5">
+                <Button label="Email" icon="send" onPress={sendViaEmail} fullWidth />
+                <Button
+                  label="WhatsApp"
+                  icon="share"
+                  variant="secondary"
+                  onPress={sendViaWhatsApp}
+                  fullWidth
+                />
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  onPress={() => setSendOpen(false)}
+                  fullWidth
+                />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       )}
 
       {outcomeType && (

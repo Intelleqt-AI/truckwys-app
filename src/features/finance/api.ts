@@ -28,7 +28,8 @@ export function useInvoice(id: string | number, preview?: Record<string, unknown
   return useQuery<Record<string, unknown>>({
     queryKey: ['invoice', id],
     queryFn: () => fetchData(`invoices/${id}/`),
-    initialData: preview,
+    // See bookings/api.ts useQuote — placeholderData, not initialData.
+    placeholderData: preview,
   });
 }
 

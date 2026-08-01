@@ -15,6 +15,7 @@ import { status as statusHues } from '@/theme/tokens';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useManualRefresh } from '@/hooks/useManualRefresh';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Notifications'>;
@@ -29,7 +30,8 @@ const DOT_COLOR: Record<string, string> = {
 };
 
 export function NotificationsScreen({ navigation }: Props) {
-  const { data, isLoading, isError, refetch, isRefetching } = useNotifications();
+  const { data, isLoading, isError, refetch } = useNotifications();
+  const { refreshing, onRefresh } = useManualRefresh(refetch);
   const qc = useQueryClient();
   const { colors } = useTheme();
   const hasUnread = !!data?.some((n) => !n.read);
@@ -78,8 +80,8 @@ export function NotificationsScreen({ navigation }: Props) {
       actionLabel={hasUnread ? 'Mark all read' : undefined}
       actionIcon={hasUnread ? 'checkCircle' : undefined}
       onAction={hasUnread ? readAll : undefined}
-      onRefresh={refetch}
-      refreshing={isRefetching}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
     >
       {isLoading ? (
         <ListSkeleton />

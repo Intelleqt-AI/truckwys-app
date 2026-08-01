@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Share, Linking } from 'react-native';
+import { View, Share, Linking, Modal, Pressable } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -7,6 +7,8 @@ import { SheetScreen, StatCard, StatusPill, Group, DetailRow, Button, Badge, Txt
 import { ErrorState } from '@/components/feedback';
 import {
   useInvoice,
+  useInvoicePayments,
+  paymentMethodLabel,
   generateInvoicePdf,
   sendInvoice,
   sendInvoiceReminder,
@@ -24,6 +26,7 @@ import {
 import { RecordPaymentSheet, type PaymentDraft } from './RecordPaymentSheet';
 import { num, str, pick } from '@/lib/api/list';
 import { invoiceShareUrl } from '@/lib/legal';
+import { openWhatsApp } from '@/lib/whatsapp';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -43,11 +46,13 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
   const { data, isError, refetch } = useInvoice(id, preview);
   const { data: capital } = useCapitalEligible();
+  const { data: payments } = useInvoicePayments(id);
   const qc = useQueryClient();
   const [pdfBusy, setPdfBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [payBusy, setPayBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
   const [applied, setApplied] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -119,6 +124,47 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     });
   };
 
+  // Send offers Email (the backend's own send_invoice) or WhatsApp. WhatsApp
+  // needs the public link, and view_token is only minted when the invoice is
+  // first sent — so send it first if it hasn't been, then hand off.
+  const sendViaEmail = () => {
+    setSendOpen(false);
+    void run(setSendBusy, () => sendInvoice(id), 'Invoice emailed');
+  };
+
+  const sendViaWhatsApp = async () => {
+    setSendOpen(false);
+    setSendBusy(true);
+    try {
+      let link = token;
+      if (!link) {
+        const res = (await sendInvoice(id)) as Record<string, unknown>;
+        refresh();
+        // send_email returns view_url; fall back to re-reading the invoice.
+        link = str(pick(res, ['view_token', 'token']));
+        if (!link) {
+          const fresh = (await refetch()).data as Record<string, unknown> | undefined;
+          link = str(pick(fresh ?? {}, ['view_token', 'token']));
+        }
+      }
+      const number = str(pick(inv, ['invoice_number']), `#${id}`);
+      const url = link ? invoiceShareUrl(id, link) : '';
+      const name = str(pick(inv, ['customer_name', 'customer']));
+      const message = [
+        `Hi${name ? ` ${name}` : ''}, here's your invoice${number ? ` (${number})` : ''} from Truckwys`,
+        formatCurrency(balance > 0 ? balance : total),
+        url,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      await openWhatsApp(str(pick(inv, ['customer_phone'])), message);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open WhatsApp');
+    } finally {
+      setSendBusy(false);
+    }
+  };
+
   // payment_date and payment_method are required by the API and were never
   // sent by the old one-tap confirm, so every payment 400'd. The sheet collects
   // them (plus a partial amount and an optional reference).
@@ -151,7 +197,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
                   label={status === 'VIEWED' ? 'Resend' : 'Send'}
                   icon="send"
                   loading={sendBusy}
-                  onPress={() => run(setSendBusy, () => sendInvoice(id), 'Invoice sent')}
+                  onPress={() => setSendOpen(true)}
                   fullWidth
                 />
               </View>
@@ -231,6 +277,19 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
         </View>
       </Group>
 
+      {payments && payments.length > 0 && (
+        <Group label="Payment history">
+          {payments.map((p, i) => (
+            <DetailRow
+              key={p.id}
+              label={`${formatDate(p.date)} · ${paymentMethodLabel(p.method)}${p.reference ? ` · ${p.reference}` : ''}`}
+              value={formatCurrency(p.amount)}
+              last={i === payments.length - 1}
+            />
+          ))}
+        </Group>
+      )}
+
       {payOpen && (
         <RecordPaymentSheet
           balance={balance}
@@ -238,6 +297,41 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
           onConfirm={submitPayment}
           onCancel={() => setPayOpen(false)}
         />
+      )}
+
+      {sendOpen && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setSendOpen(false)}>
+          <Pressable
+            onPress={() => setSendOpen(false)}
+            className="flex-1 items-center justify-center bg-black/65 px-6"
+          >
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+            >
+              <Txt className="text-heading font-semibold text-fg">Send invoice</Txt>
+              <Txt className="mb-4 mt-1.5 text-sub text-muted">
+                {str(pick(inv, ['customer_name', 'customer']), 'the customer')}
+              </Txt>
+              <View className="gap-2.5">
+                <Button label="Email" icon="send" onPress={sendViaEmail} fullWidth />
+                <Button
+                  label="WhatsApp"
+                  icon="share"
+                  variant="secondary"
+                  onPress={sendViaWhatsApp}
+                  fullWidth
+                />
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  onPress={() => setSendOpen(false)}
+                  fullWidth
+                />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       )}
     </SheetScreen>
   );

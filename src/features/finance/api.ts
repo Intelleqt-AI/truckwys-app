@@ -32,6 +32,47 @@ export function useInvoice(id: string | number, preview?: Record<string, unknown
   });
 }
 
+export interface InvoicePayment {
+  id: string;
+  date: string;
+  method: string;
+  reference: string;
+  amount: number;
+}
+
+/** Payments recorded against one invoice — the web invoice page shows these. */
+export function useInvoicePayments(id: string | number) {
+  return useQuery<InvoicePayment[]>({
+    queryKey: ['invoice-payments', id],
+    queryFn: async () =>
+      asArray(await fetchData(`payments/?invoice=${id}`)).map((p) => {
+        const r = p as Record<string, unknown>;
+        return {
+          id: String(r.id ?? ''),
+          date: String(r.payment_date ?? r.date ?? ''),
+          method: String(r.payment_method ?? r.method ?? ''),
+          reference: String(r.reference_number ?? r.reference ?? ''),
+          amount: Number(r.amount ?? 0),
+        };
+      }),
+  });
+}
+
+// Label for a Payment.PAYMENT_METHOD_CHOICES value.
+export const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  EFT: 'EFT',
+  CASH: 'Cash',
+  CREDIT_CARD: 'Card',
+  CHEQUE: 'Cheque',
+  BANK_TRANSFER: 'Bank transfer',
+  ACH: 'ACH',
+  EARLY_PAY: 'Fast Pay advance',
+};
+
+export const paymentMethodLabel = (v: string) =>
+  PAYMENT_METHOD_LABELS[v] ??
+  (v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase().replace(/_/g, ' ') : '—');
+
 export interface FinanceReports {
   summary: FinanceSummary;
   marginByLane: { lane: string; margin: number }[];

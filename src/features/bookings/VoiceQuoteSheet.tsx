@@ -1,31 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Modal, Pressable, Platform } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
   type SharedValue,
 } from 'react-native-reanimated';
-import {
-  useAudioRecorder,
-  RecordingPresets,
-  AudioModule,
-  setAudioModeAsync,
-} from 'expo-audio';
+import { useAudioRecorder, RecordingPresets, AudioModule, setAudioModeAsync } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Button, Icon } from '@/components/ui';
-import { aiVoiceQuote } from './api';
-import { str, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// Full-screen voice capture, in the shape people already know from ChatGPT and
-// Claude: one clear state at a time, a waveform that actually reacts to the
-// voice, and an obvious way out.
+// Voice capture, and nothing else: record, Submit, gone.
 //
-// The bar this replaced showed a bare "Transcribing…" with a fake sine-wave
-// animation, which left no way to tell "we're listening" from "we're thinking"
-// from "we're filling the form".
+// Everything after Submit — upload, transcription, field extraction — happens
+// behind an overlay on the quote form itself, because that's what's about to
+// change and that's where the user is looking. This sheet used to narrate
+// "Transcribing…" and "Building your quote" while holding itself open, which
+// read like debug output and kept the user away from the form.
 
 const BAR_COUNT = 32;
 // Poll rate for the input meter. getStatus() is a synchronous bridge call, so
@@ -36,14 +29,6 @@ const METER_MS = 80;
 // squashing every voice into the top few percent.
 const DB_FLOOR = -60;
 
-type Stage = 'listening' | 'transcribing' | 'thinking';
-
-const STAGE_COPY: Record<Stage, { title: string; sub: string }> = {
-  listening: { title: 'Listening', sub: 'Describe the job — route, load, when' },
-  transcribing: { title: 'Transcribing', sub: 'Turning your words into text' },
-  thinking: { title: 'Building your quote', sub: 'Filling in the details' },
-};
-
 function Bar({ heights, index }: { heights: SharedValue<number[]>; index: number }) {
   const { colors } = useTheme();
   const style = useAnimatedStyle(() => {
@@ -52,9 +37,7 @@ function Bar({ heights, index }: { heights: SharedValue<number[]>; index: number
     return { height: 4 + v * 56 };
   });
   return (
-    <Animated.View
-      style={[{ width: 4, borderRadius: 2, backgroundColor: colors.accent }, style]}
-    />
+    <Animated.View style={[{ width: 4, borderRadius: 2, backgroundColor: colors.accent }, style]} />
   );
 }
 
@@ -75,25 +58,20 @@ const mmss = (ms: number) => {
 };
 
 export function VoiceQuoteSheet({
-  onTranscribed,
+  onCaptured,
   onClose,
-  /** True while the caller is running the AI extraction, so we can hold the
-      sheet open on "Building your quote" instead of dumping the user back on
-      the form next to a bare spinner. */
-  thinking,
 }: {
-  onTranscribed: (text: string) => void;
+  /** Fires with the recorded file's URI. The caller owns transcription. */
+  onCaptured: (uri: string) => void;
   onClose: () => void;
-  thinking?: boolean;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   // HIGH_QUALITY alone does NOT enable metering — it has to be spread and the
   // flag added, or getStatus().metering stays undefined forever.
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
-  const [stage, setStage] = useState<Stage>('listening');
   const [elapsed, setElapsed] = useState(0);
-  const [transcript, setTranscript] = useState('');
+  const [stopping, setStopping] = useState(false);
   const startedAt = useRef(Date.now());
 
   const heights = useSharedValue<number[]>(new Array(BAR_COUNT).fill(0));
@@ -133,7 +111,7 @@ export function VoiceQuoteSheet({
 
   // Drive the bars off the real input level, and keep the elapsed timer.
   useEffect(() => {
-    if (stage !== 'listening') return;
+    if (stopping) return;
     const id = setInterval(() => {
       const db = recorder.getStatus().metering;
       // metering is legitimately undefined until the first sample arrives.
@@ -147,54 +125,34 @@ export function VoiceQuoteSheet({
     }, METER_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, recorder]);
+  }, [stopping, recorder]);
 
-  const finish = useCallback(async () => {
+  const submit = async () => {
+    if (stopping) return;
+    setStopping(true);
     haptic(Haptics.ImpactFeedbackStyle.Light);
-    setStage('transcribing');
     try {
       await recorder.stop();
       const uri = recorder.uri;
       if (!uri) throw new Error('No audio captured');
-      const res = await aiVoiceQuote({ uri, name: 'quote.m4a', type: 'audio/m4a' });
-      const text = str(pick(res, ['text', 'transcription'])).trim();
-      if (!text) {
-        toast.error("Didn't catch that — try again");
-        onClose();
-        return;
-      }
-      // Show what was heard before the form changes under them.
-      setTranscript(text);
-      setStage('thinking');
-      onTranscribed(text);
+      // Hand off and get out of the way — the form takes it from here.
+      onCaptured(uri);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not transcribe audio');
+      toast.error(e instanceof Error ? e.message : 'Could not finish recording');
       onClose();
     }
-  }, [recorder, onTranscribed, onClose]);
-
-  // Once the caller's AI step finishes, the sheet's work is done. Wait until
-  // we've actually seen `thinking` go true first — otherwise a render in which
-  // the stage has advanced but the parent hasn't flipped its busy flag yet
-  // would close the sheet immediately.
-  const sawThinking = useRef(false);
-  if (thinking) sawThinking.current = true;
-  useEffect(() => {
-    if (stage === 'thinking' && sawThinking.current && !thinking) onClose();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, thinking]);
+  };
 
   const cancel = async () => {
+    setStopping(true);
     try {
       // Discard the audio — a cancelled recording is never uploaded.
-      if (stage === 'listening') await recorder.stop();
+      await recorder.stop();
     } catch {
       /* nothing useful to do if it was never started */
     }
     onClose();
   };
-
-  const copy = STAGE_COPY[stage];
 
   return (
     <Modal visible transparent={false} animationType="slide" onRequestClose={cancel}>
@@ -209,35 +167,19 @@ export function VoiceQuoteSheet({
         </View>
 
         <View className="flex-1 items-center justify-center">
-          {stage === 'listening' ? (
-            <>
-              <LiveWaveform heights={heights} />
-              <Mono className="mt-6 text-callout text-accent" style={{ fontVariant: ['tabular-nums'] }}>
-                {mmss(elapsed)}
-              </Mono>
-            </>
-          ) : (
-            <View className="h-[64px] items-center justify-center">
-              <Icon name="sparkle" size={34} color={colors.accent} />
-            </View>
-          )}
+          <LiveWaveform heights={heights} />
+          <Mono className="mt-6 text-callout text-accent" style={{ fontVariant: ['tabular-nums'] }}>
+            {mmss(elapsed)}
+          </Mono>
 
-          <Txt className="mt-8 text-heading font-semibold text-fg">{copy.title}</Txt>
-          <Txt className="mt-2 text-center text-sub text-muted">{copy.sub}</Txt>
-
-          {!!transcript && (
-            <View className="mt-7 w-full rounded-xs border border-line bg-surface p-4">
-              <Mono className="mb-1.5 text-micro tracking-wide uppercase text-faint">Heard</Mono>
-              <Txt className="text-callout text-fg">{transcript}</Txt>
-            </View>
-          )}
+          <Txt className="mt-8 text-heading font-semibold text-fg">Listening</Txt>
+          <Txt className="mt-2 text-center text-sub text-muted">
+            Describe the job — route, load, when
+          </Txt>
         </View>
 
-        {stage === 'listening' ? (
-          <Button label="Stop" icon="check" onPress={finish} fullWidth />
-        ) : (
-          <Button label="Cancel" variant="secondary" onPress={cancel} fullWidth />
-        )}
+        {/* Says what it does: ends the recording and sends it. */}
+        <Button label="Submit" icon="check" loading={stopping} onPress={submit} fullWidth />
       </View>
     </Modal>
   );

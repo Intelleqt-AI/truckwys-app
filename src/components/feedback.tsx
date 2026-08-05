@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
-import { View } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming } from 'react-native-reanimated';
-import { Screen, EmptyState, Button } from '@/components/ui';
+import { View, Modal } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+import { Screen, EmptyState, Button, Txt, Icon } from '@/components/ui';
+import { useTheme } from '@/theme/ThemeProvider';
 
 // ── Shimmer block ──────────────────────────────────────────────────────────
 export function Skeleton({
@@ -79,5 +80,49 @@ export function HomeSkeleton() {
       <Skeleton height={180} className="mb-5" />
       <ListSkeleton rows={3} />
     </Screen>
+  );
+}
+
+// ── Working overlay ────────────────────────────────────────────────────────
+/**
+ * Blocking overlay for a multi-second action the user has to wait out — the AI
+ * quote build, mainly.
+ *
+ * A transparent Modal rather than an absolutely-positioned View: the form it
+ * covers lives inside SheetScreen's ScrollView, so an in-tree overlay would
+ * scroll with the content and wouldn't cover the native header. A Modal also
+ * blocks touches underneath for free, which is what we want while fields are
+ * about to change out from under the user.
+ */
+export function WorkingOverlay({ visible, title }: { visible: boolean; title: string }) {
+  if (!visible) return null;
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent>
+      <View className="flex-1 items-center justify-center bg-black/70 px-10">
+        <View className="w-full max-w-[300px] items-center rounded-sm border border-line bg-surface px-6 py-8">
+          <BreathingSparkle />
+          <Txt className="mt-5 text-center text-callout font-medium text-fg">{title}</Txt>
+          <Txt className="mt-1.5 text-center text-caption text-faint">This takes a few seconds</Txt>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** Slow opacity+scale loop. Reads as "thinking" without implying progress. */
+function BreathingSparkle() {
+  const { colors } = useTheme();
+  const t = useSharedValue(0);
+  useEffect(() => {
+    t.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
+  }, [t]);
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.45 + t.value * 0.55,
+    transform: [{ scale: 0.88 + t.value * 0.24 }],
+  }));
+  return (
+    <Animated.View style={style}>
+      <Icon name="sparkle" size={34} color={colors.accent} />
+    </Animated.View>
   );
 }

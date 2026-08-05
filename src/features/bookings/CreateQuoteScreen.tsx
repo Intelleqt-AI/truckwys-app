@@ -32,6 +32,7 @@ import {
   guardQuote,
   benchmarkQuote,
   aiChatQuote,
+  aiVoiceQuote,
   createQuote,
   patchQuote,
   sendQuote,
@@ -41,7 +42,7 @@ import { useCustomers } from '@/features/customers/api';
 import { RouteMap, type GeoPoint } from '@/components/RouteMap';
 import { VoiceQuoteBar } from './VoiceQuoteBar';
 import { VoiceQuoteSheet } from './VoiceQuoteSheet';
-import { Skeleton } from '@/components/feedback';
+import { Skeleton, WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { formatCurrency, formatCurrencyCompact, formatDuration } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -125,6 +126,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [pendingEntity, setPendingEntity] = useState<unknown>(null);
   const [declinedEntities, setDeclinedEntities] = useState<string[]>([]);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  // Covers the transcription step. submitNL sets nlBusy for the extraction that
+  // follows, and without this flag there's a visible gap between the sheet
+  // closing and that starting.
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const [benchmark, setBenchmark] = useState<Record<string, unknown> | null>(null);
   const [tollOverride, setTollOverride] = useState('');
   const [tollEdited, setTollEdited] = useState(false);
@@ -479,6 +484,27 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       toast.error(e instanceof Error ? e.message : 'Could not parse');
     } finally {
       setNlBusy(false);
+    }
+  };
+
+  // The voice sheet only records. Transcription and extraction happen here,
+  // behind the overlay, so the sheet can close the moment the user submits.
+  const onVoiceCaptured = async (uri: string) => {
+    setVoiceOpen(false);
+    setVoiceBusy(true);
+    try {
+      const res = await aiVoiceQuote({ uri, name: 'quote.m4a', type: 'audio/m4a' });
+      const text = str(pick(res, ['text', 'transcription'])).trim();
+      if (!text) {
+        toast.error("Didn't catch that — try again");
+        return;
+      }
+      setNlText(text);
+      await submitNL(text);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not transcribe audio');
+    } finally {
+      setVoiceBusy(false);
     }
   };
 
@@ -872,15 +898,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       {/* Stays open through the AI step, so the user sees "Building your
           quote" rather than being dropped back on a form that's mid-change. */}
       {voiceOpen && (
-        <VoiceQuoteSheet
-          thinking={nlBusy}
-          onTranscribed={(t) => {
-            setNlText(t);
-            void submitNL(t);
-          }}
-          onClose={() => setVoiceOpen(false)}
-        />
+        <VoiceQuoteSheet onCaptured={onVoiceCaptured} onClose={() => setVoiceOpen(false)} />
       )}
+
+      {/* Both entry points get this — the voice sheet and the typed
+          "Fill from description" button, which previously only spun a small
+          button through a multi-second AI call. */}
+      <WorkingOverlay visible={voiceBusy || nlBusy} title="Building your quote" />
     </SheetScreen>
   );
 }

@@ -1,10 +1,18 @@
 import { useState } from 'react';
-import { View, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
+import { View, Pressable } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Screen, Logo, Txt, Mono, Button, TextField } from '@/components/ui';
+import { Screen, Logo, Txt, Mono } from '@/components/ui';
+import {
+  AuthLayout,
+  AuthGroup,
+  AuthField,
+  AuthButton,
+  AuthError,
+  AuthLink,
+} from '../components';
 import { loginSchema, type LoginValues } from '../schemas';
 import { authApi } from '../api';
 import { isOtpRequired } from '@/types/auth';
@@ -39,93 +47,87 @@ export function LoginScreen({ navigation }: Props) {
     }
   };
 
+  const firstError = formState.errors.username?.message ?? formState.errors.password?.message;
+
   return (
     <Screen scroll={false} padded={false}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        className="flex-1 justify-center px-screen"
-      >
-        <View className="mb-10 items-start">
-          <Logo width={160} />
-          <Mono className="mt-6 text-micro tracking-label uppercase text-faint">
-            Operations terminal
-          </Mono>
-          <Txt className="mt-1 text-title font-semibold text-fg">Sign in</Txt>
+      <AuthLayout>
+        <View className="mb-9 items-center">
+          <Logo width={172} />
+          <Txt className="mt-9 text-title font-semibold text-fg">Sign in</Txt>
+          <Txt className="mt-1.5 text-center text-body text-muted">
+            Use your Truckwys account to continue
+          </Txt>
         </View>
 
-        <Controller
-          control={control}
-          name="username"
-          render={({ field: { onChange, onBlur, value }, fieldState }) => (
-            <TextField
-              label="Email or username"
-              placeholder="you@company.co.za"
-              icon="user"
-              autoCapitalize="none"
-              autoComplete="username"
-              keyboardType="email-address"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={fieldState.error?.message}
-              className="mb-4"
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="password"
-          render={({ field: { onChange, onBlur, value }, fieldState }) => (
-            <TextField
-              label="Password"
-              placeholder="Enter your password"
-              icon="lock"
-              secureTextEntry
-              autoComplete="password"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={fieldState.error?.message}
-              className="mb-2"
-            />
-          )}
-        />
+        <AuthGroup>
+          <Controller
+            control={control}
+            name="username"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <AuthField
+                placeholder="Email or username"
+                accessibilityLabel="Email or username"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                textContentType="username"
+                autoComplete="username"
+                returnKeyType="next"
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="password"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <AuthField
+                placeholder="Password"
+                accessibilityLabel="Password"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                secure
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="password"
+                autoComplete="current-password"
+                returnKeyType="go"
+                onSubmitEditing={handleSubmit(onSubmit)}
+                last
+              />
+            )}
+          />
+        </AuthGroup>
 
-        <Pressable
-          onPress={() => navigation.navigate('ForgotPassword')}
-          hitSlop={8}
-          className="mb-6 self-end"
-        >
-          <Mono className="text-caption text-accent">Forgot password?</Mono>
-        </Pressable>
+        <AuthError message={firstError} />
 
-        <Button
-          label="Sign in"
-          onPress={handleSubmit(onSubmit)}
-          loading={submitting}
-          disabled={!formState.isValid && formState.isSubmitted}
-          fullWidth
-        />
+        <AuthButton label="Sign in" onPress={handleSubmit(onSubmit)} loading={submitting} />
+
+        <AuthLink label="Forgot password?" onPress={() => navigation.navigate('ForgotPassword')} />
 
         {/* Accounts are created on the web dashboard only — deliberately plain
             text with no link or browser hand-off. */}
-        <Txt className="mt-8 text-center text-callout text-muted">
+        <Txt className="mt-12 text-center text-sub text-muted">
           New to Truckwys? Create your account at{' '}
-          <Mono className="text-callout text-fg">truckwys.com</Mono>, then sign in here.
+          <Mono className="text-sub text-fg">truckwys.com</Mono>, then sign in here.
         </Txt>
 
         {/* Reachable without an account, so the policy is available even to
             someone who can't sign in (App Store Review 5.1.1). */}
-        <View className="mt-8 flex-row justify-center gap-4">
-          <Pressable onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL)} hitSlop={8}>
-            <Mono className="text-caption text-muted">Privacy</Mono>
+        <View className="mb-2 mt-7 flex-row items-center justify-center gap-3">
+          <Pressable onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL)} hitSlop={10}>
+            <Txt className="text-caption text-faint">Privacy Policy</Txt>
           </Pressable>
           <Txt className="text-caption text-faint">·</Txt>
-          <Pressable onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)} hitSlop={8}>
-            <Mono className="text-caption text-muted">Terms</Mono>
+          <Pressable onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)} hitSlop={10}>
+            <Txt className="text-caption text-faint">Terms of Service</Txt>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </AuthLayout>
     </Screen>
   );
 }

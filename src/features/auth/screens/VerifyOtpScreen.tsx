@@ -1,9 +1,18 @@
 import { useState } from 'react';
-import { View, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
+import { View } from 'react-native';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Screen, Txt, Mono, Label, Button, TextField, IconButton } from '@/components/ui';
+import { Screen, Txt, Mono, IconButton } from '@/components/ui';
+import {
+  AuthLayout,
+  AuthGroup,
+  AuthField,
+  AuthButton,
+  AuthError,
+  AuthLink,
+  AuthHeading,
+} from '../components';
 import { otpSchema, type OtpValues } from '../schemas';
 import { authApi } from '../api';
 import { useAuthStore } from '@/stores/authStore';
@@ -17,7 +26,7 @@ export function VerifyOtpScreen({ route, navigation }: Props) {
   const setSession = useAuthStore((s) => s.setSession);
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
-  const { control, handleSubmit } = useForm<OtpValues>({
+  const { control, handleSubmit, formState } = useForm<OtpValues>({
     resolver: zodResolver(otpSchema),
     defaultValues: { code: '' },
   });
@@ -51,51 +60,45 @@ export function VerifyOtpScreen({ route, navigation }: Props) {
       <View className="px-2 pt-1">
         <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
       </View>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        className="flex-1 justify-center px-screen"
-      >
-        <Label className="mb-2">Two-factor verification</Label>
-        <Txt className="text-title font-semibold text-fg">Enter your code</Txt>
-        <Txt className="mt-2 text-callout text-muted">
-          We sent a 6-digit code to <Mono className="text-callout text-fg">{email}</Mono>
+      <AuthLayout>
+        <AuthHeading title="Enter your code" />
+        <Txt className="-mt-7 mb-9 text-center text-body text-muted">
+          We sent a 6-digit code to{'\n'}
+          <Mono className="text-body text-fg">{email}</Mono>
         </Txt>
 
-        <View className="mt-8">
+        <AuthGroup>
           <Controller
             control={control}
             name="code"
-            render={({ field: { onChange, onBlur, value }, fieldState }) => (
-              <TextField
-                label="Verification code"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <AuthField
                 placeholder="6-digit code"
-                icon="shield"
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                maxLength={8}
+                accessibilityLabel="Verification code"
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
-                error={fieldState.error?.message}
+                keyboardType="number-pad"
+                // Lets iOS offer the code straight from the Messages/mail
+                // notification instead of making the user go and read it.
+                textContentType="oneTimeCode"
+                autoComplete="one-time-code"
+                maxLength={8}
+                returnKeyType="go"
+                onSubmitEditing={handleSubmit(onSubmit)}
+                style={{ paddingVertical: 15, letterSpacing: 4 }}
+                last
               />
             )}
           />
-        </View>
+        </AuthGroup>
 
-        <Button
-          label="Verify"
-          onPress={handleSubmit(onSubmit)}
-          loading={submitting}
-          fullWidth
-          className="mt-6"
-        />
+        <AuthError message={formState.errors.code?.message} />
 
-        <Pressable onPress={resend} disabled={resending} hitSlop={8} className="mt-6 self-center">
-          <Mono className="text-caption text-accent">
-            {resending ? 'Sending…' : 'Resend code'}
-          </Mono>
-        </Pressable>
-      </KeyboardAvoidingView>
+        <AuthButton label="Verify" onPress={handleSubmit(onSubmit)} loading={submitting} />
+
+        <AuthLink label={resending ? 'Sending…' : 'Resend code'} onPress={resend} disabled={resending} />
+      </AuthLayout>
     </Screen>
   );
 }

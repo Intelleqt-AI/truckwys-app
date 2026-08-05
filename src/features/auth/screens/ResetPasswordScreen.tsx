@@ -1,9 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, KeyboardAvoidingView, Platform, Pressable } from 'react-native';
+import { View } from 'react-native';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Screen, Txt, Mono, Label, Button, TextField, IconButton } from '@/components/ui';
+import { Screen, Txt, Mono, IconButton } from '@/components/ui';
+import {
+  AuthLayout,
+  AuthGroup,
+  AuthField,
+  AuthButton,
+  AuthError,
+  AuthLink,
+  AuthHeading,
+} from '../components';
 import { resetPasswordSchema, type ResetPasswordValues } from '../schemas';
 import { authApi } from '../api';
 import { toast } from '@/lib/toast';
@@ -47,7 +56,7 @@ export function ResetPasswordScreen({ route, navigation }: Props) {
     };
   }, []);
 
-  const { control, handleSubmit } = useForm<ResetPasswordValues>({
+  const { control, handleSubmit, formState } = useForm<ResetPasswordValues>({
     resolver: zodResolver(resetPasswordSchema),
     defaultValues: { code: '', password: '', confirm: '' },
   });
@@ -81,85 +90,89 @@ export function ResetPasswordScreen({ route, navigation }: Props) {
       <View className="px-2 pt-1">
         <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
       </View>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        className="flex-1 justify-center px-screen"
-      >
-        <Label className="mb-2">Password reset</Label>
-        <Txt className="text-title font-semibold text-fg">Enter reset code</Txt>
-        <Txt className="mb-7 mt-2 text-callout text-muted">
-          Reset code sent to <Mono className="text-callout text-fg">{email}</Mono>
+      <AuthLayout>
+        <AuthHeading title="Enter reset code" />
+        <Txt className="-mt-7 mb-9 text-center text-body text-muted">
+          Reset code sent to{'\n'}
+          <Mono className="text-body text-fg">{email}</Mono>
         </Txt>
 
-        <Controller
-          control={control}
-          name="code"
-          render={({ field: { onChange, onBlur, value }, fieldState }) => (
-            <TextField
-              label="Reset code"
-              placeholder="6-digit code from email"
-              icon="shield"
-              keyboardType="number-pad"
-              textContentType="oneTimeCode"
-              maxLength={6}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={fieldState.error?.message}
-              className="mb-4"
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="password"
-          render={({ field: { onChange, onBlur, value }, fieldState }) => (
-            <TextField
-              label="New password"
-              placeholder="At least 8 characters"
-              icon="lock"
-              secureTextEntry
-              autoComplete="new-password"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={fieldState.error?.message}
-              className="mb-4"
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="confirm"
-          render={({ field: { onChange, onBlur, value }, fieldState }) => (
-            <TextField
-              label="Confirm password"
-              placeholder="Repeat new password"
-              icon="lock"
-              secureTextEntry
-              autoComplete="new-password"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={fieldState.error?.message}
-              className="mb-6"
-            />
-          )}
+        <AuthGroup>
+          <Controller
+            control={control}
+            name="code"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <AuthField
+                placeholder="6-digit code from email"
+                accessibilityLabel="Reset code"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                keyboardType="number-pad"
+                textContentType="oneTimeCode"
+                autoComplete="one-time-code"
+                maxLength={6}
+                style={{ paddingVertical: 15, letterSpacing: 4 }}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="password"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <AuthField
+                placeholder="New password (at least 8 characters)"
+                accessibilityLabel="New password"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                secure
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="newPassword"
+                autoComplete="new-password"
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="confirm"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <AuthField
+                placeholder="Repeat new password"
+                accessibilityLabel="Confirm new password"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                secure
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="newPassword"
+                autoComplete="new-password"
+                returnKeyType="go"
+                onSubmitEditing={handleSubmit(onSubmit)}
+                last
+              />
+            )}
+          />
+        </AuthGroup>
+
+        <AuthError
+          message={
+            formState.errors.code?.message ??
+            formState.errors.password?.message ??
+            formState.errors.confirm?.message
+          }
         />
 
-        <Button label="Set new password" onPress={handleSubmit(onSubmit)} loading={submitting} fullWidth />
+        <AuthButton label="Set new password" onPress={handleSubmit(onSubmit)} loading={submitting} />
 
-        <Pressable
+        <AuthLink
+          label={countdown > 0 ? `Resend in ${formatCountdown(countdown)}` : 'Resend code'}
           onPress={resend}
           disabled={countdown > 0}
-          hitSlop={8}
-          className="mt-6 self-center"
-        >
-          <Mono className={`text-caption ${countdown > 0 ? 'text-faint' : 'text-accent'}`}>
-            {countdown > 0 ? `Resend in ${formatCountdown(countdown)}` : 'Resend code'}
-          </Mono>
-        </Pressable>
-      </KeyboardAvoidingView>
+        />
+      </AuthLayout>
     </Screen>
   );
 }

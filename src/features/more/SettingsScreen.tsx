@@ -24,6 +24,7 @@ import {
 } from '@/components/ui';
 import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
+import { status as statusHues } from '@/theme/tokens';
 import { useAuthStore } from '@/stores/authStore';
 import { useRole, canAccessSettingsSection } from '@/lib/access';
 import { WEB_APP_URL } from '@/lib/legal';
@@ -39,7 +40,11 @@ import {
   deleteVehicleType,
   useSessions,
   revokeSession,
-  setTwoFactor,
+  useSecuritySettings,
+  updateSecuritySettings,
+  useLoginActivity,
+  revokeSessions,
+  type SecuritySettings,
   deleteAccount,
   useUsers,
   inviteUser,
@@ -48,11 +53,13 @@ import {
   useNotificationPrefs,
   updateNotificationPrefs,
   useBillingStatus,
+  useBillingHistory,
+  type BillingCharge,
   NOTIFICATION_DEFAULTS,
   type NotificationChannel,
   type NotificationPrefs,
 } from './api';
-import { formatCurrency, formatDate } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatRelativeTime } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
@@ -71,7 +78,6 @@ const SECTIONS: { key: string; label: string; icon: IconName }[] = [
   { key: 'users', label: 'Users & permissions', icon: 'users' },
   { key: 'billing', label: 'Billing', icon: 'card' },
   { key: 'integrations', label: 'Integrations', icon: 'plug' },
-  { key: 'directory', label: 'Directory', icon: 'grid' },
   { key: 'risk', label: 'Risk-Scoring API', icon: 'shield' },
 ];
 
@@ -103,9 +109,9 @@ export function SettingsScreen({ route, navigation }: Props) {
       {section === 'company' && <CompanySection />}
       {section === 'vehicle-types' && <VehicleTypesSection />}
       {section === 'users' && <UsersSection />}
-      {section === 'billing' && <BillingSection />}
+      {section === 'billing' && <BillingSection navigation={navigation} />}
       {section === 'integrations' && <IntegrationsSection />}
-      {(section === 'directory' || section === 'risk') && (
+      {section === 'risk' && (
         <Txt className="text-callout text-muted">
           {current?.label} is managed on the web dashboard. Configuration here is read-only on mobile.
         </Txt>
@@ -141,6 +147,24 @@ function SettingsMenu({
   );
 }
 
+// Same short lists the web profile offers — deliberately not the full IANA set.
+const TIMEZONES = [
+  { label: 'South Africa (UTC+2)', value: 'Africa/Johannesburg' },
+  { label: 'UTC', value: 'UTC' },
+  { label: 'London (UTC+0)', value: 'Europe/London' },
+  { label: 'New York (UTC-5)', value: 'America/New_York' },
+];
+const LANGUAGES = [
+  { label: 'English', value: 'en' },
+  { label: 'Afrikaans', value: 'af' },
+  { label: 'Zulu', value: 'zu' },
+];
+const DATE_FORMATS = [
+  { label: 'DD/MM/YYYY', value: 'DD/MM/YYYY' },
+  { label: 'MM/DD/YYYY', value: 'MM/DD/YYYY' },
+  { label: 'YYYY-MM-DD', value: 'YYYY-MM-DD' },
+];
+
 function ProfileSection() {
   const { data: me } = useMe();
   const user = useAuthStore((s) => s.user);
@@ -153,6 +177,9 @@ function ProfileSection() {
   const [jobTitle, setJobTitle] = useState('');
   const [phone, setPhone] = useState('');
   const [avatar, setAvatar] = useState('');
+  const [timezone, setTimezone] = useState('Africa/Johannesburg');
+  const [language, setLanguage] = useState('en');
+  const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
   const [busy, setBusy] = useState(false);
 
   // Seed once from auth/me (falls back to the store user).
@@ -166,6 +193,10 @@ function ProfileSection() {
     setJobTitle(str(pick(src, ['job_title'])));
     setPhone(str(pick(src, ['phone'])) || str(user?.phone));
     setAvatar(str(pick(src, ['avatar'])));
+    // Same client-side defaults the web profile applies.
+    setTimezone(str(pick(src, ['timezone'])) || 'Africa/Johannesburg');
+    setLanguage(str(pick(src, ['language'])) || 'en');
+    setDateFormat(str(pick(src, ['date_format'])) || 'DD/MM/YYYY');
     if (me) setSeeded(true);
   }, [me, user, seeded]);
 
@@ -178,6 +209,9 @@ function ProfileSection() {
         email: email.trim(),
         job_title: jobTitle.trim(),
         phone: phone.trim(),
+        timezone,
+        language,
+        date_format: dateFormat,
       });
       await Promise.all([Promise.resolve(invalidateFor(qc, 'user')), refreshUser()]);
       toast.success();
@@ -224,6 +258,12 @@ function ProfileSection() {
       <TextField label="Job title" placeholder="e.g. Operations Manager" value={jobTitle} onChangeText={setJobTitle} />
       <TextField label="Phone" placeholder="+27 82 123 4567" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
       {user?.role ? <DetailRow label="Role" value={user.role} /> : null}
+
+      <Label className="mt-1 text-muted">Preferences</Label>
+      <SelectField label="Time zone" icon="clock" options={TIMEZONES} value={timezone} onSelect={setTimezone} />
+      <SelectField label="Language" icon="user" options={LANGUAGES} value={language} onSelect={setLanguage} />
+      <SelectField label="Date format" icon="calendar" options={DATE_FORMATS} value={dateFormat} onSelect={setDateFormat} />
+
       <Button label="Save profile" loading={busy} onPress={save} fullWidth />
     </View>
   );
@@ -507,14 +547,18 @@ function NotificationsSection() {
 function SecuritySection() {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     if (next.length < 8) return toast.error('New password must be at least 8 characters');
+    // Confirm is client-side only — the endpoint takes current + new.
+    if (next !== confirmPw) return toast.error('New passwords do not match');
     setBusy(true);
     try {
       await changePassword(current, next);
       setCurrent('');
       setNext('');
+      setConfirmPw('');
       toast.success('Password updated');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not change password');
@@ -522,9 +566,8 @@ function SecuritySection() {
       setBusy(false);
     }
   };
-  const user = useAuthStore((s) => s.user);
   const signOutStore = useAuthStore((s) => s.signOut);
-  const [twoFa, setTwoFa] = useState(Boolean(user?.two_factor_enabled));
+  const { data: security } = useSecuritySettings();
   const [showDelete, setShowDelete] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -552,16 +595,34 @@ function SecuritySection() {
     }
   };
   const { data: sessions } = useSessions();
+  const { data: activity } = useLoginActivity();
+  const otherCount = (sessions ?? []).filter((x) => !x.current).length;
   const qc = useQueryClient();
 
-  const toggle2fa = async (v: boolean) => {
-    setTwoFa(v);
+  // One handler for all three preferences. They live in
+  // User.security_settings behind auth/security-settings/ — the old code
+  // PATCHed auth/me/ with a field that doesn't exist, so nothing persisted.
+  const setPref = async (key: keyof SecuritySettings, v: boolean) => {
     try {
-      await setTwoFactor(v);
-      toast.success(v ? 'Two-factor enabled' : 'Two-factor disabled');
+      await updateSecuritySettings({ [key]: v });
+      invalidateFor(qc, 'security');
     } catch (e) {
-      setTwoFa(!v);
-      toast.error(e instanceof Error ? e.message : 'Could not update 2FA');
+      toast.error(e instanceof Error ? e.message : 'Could not update setting');
+    }
+  };
+
+  const revokeMany = async (scope: 'others' | 'all') => {
+    try {
+      await revokeSessions(scope);
+      if (scope === 'all') {
+        // This device's own token is gone — stay signed in and it 401s.
+        await signOutStore();
+        return;
+      }
+      invalidateFor(qc, 'security');
+      toast.success('Other sessions signed out');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not sign out sessions');
     }
   };
 
@@ -580,17 +641,30 @@ function SecuritySection() {
       <View className="gap-4">
         <TextField label="Current password" placeholder="Current password" secureTextEntry icon="lock" value={current} onChangeText={setCurrent} />
         <TextField label="New password" placeholder="At least 8 characters" secureTextEntry icon="lock" value={next} onChangeText={setNext} />
+        <TextField label="Confirm new password" placeholder="Re-enter the new password" secureTextEntry icon="lock" value={confirmPw} onChangeText={setConfirmPw} />
         <Button label="Update password" loading={busy} onPress={submit} fullWidth />
       </View>
 
-      <Group label="Two-factor authentication">
-        <View className="flex-row items-center justify-between px-4 py-3.5">
-          <View className="flex-1 pr-3">
-            <Txt className="text-callout text-fg">Require a login code</Txt>
-            <Txt className="mt-0.5 text-caption text-faint">Email OTP on every sign-in</Txt>
-          </View>
-          <Toggle value={twoFa} onValueChange={toggle2fa} />
-        </View>
+      <Group label="Security options">
+        <SecurityToggle
+          title="Two-factor authentication"
+          sub="Require an emailed code on every sign-in"
+          value={security?.two_factor ?? true}
+          onChange={(v) => setPref('two_factor', v)}
+        />
+        <SecurityToggle
+          title="Session timeout"
+          sub="Sign out automatically after 30 minutes of inactivity"
+          value={security?.session_timeout ?? true}
+          onChange={(v) => setPref('session_timeout', v)}
+        />
+        <SecurityToggle
+          title="Login alerts"
+          sub="Email me when a new device signs in"
+          value={security?.login_alerts ?? true}
+          onChange={(v) => setPref('login_alerts', v)}
+          last
+        />
       </Group>
 
       <Group label="Danger zone">
@@ -671,11 +745,112 @@ function SecuritySection() {
               )}
             </View>
           ))}
+          <Pressable
+            onPress={() =>
+              otherCount > 0
+                ? Alert.alert(
+                    'Sign out other sessions',
+                    `Sign out ${otherCount} other device${otherCount === 1 ? '' : 's'}? They'll need to log in again.`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Sign out', style: 'destructive', onPress: () => revokeMany('others') },
+                    ],
+                  )
+                : Alert.alert(
+                    'Sign out all sessions',
+                    'This signs out every device, including this one.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Sign out', style: 'destructive', onPress: () => revokeMany('all') },
+                    ],
+                  )
+            }
+            className="border-t border-line-row px-4 py-3.5 active:bg-surface-hover"
+          >
+            <Mono className="text-micro uppercase text-danger">
+              {otherCount > 0 ? 'Log out other sessions' : 'Log out all sessions'}
+            </Mono>
+          </Pressable>
+        </Group>
+      )}
+
+      {!!activity?.length && (
+        <Group label="Login activity">
+          {activity.map((a, i) => (
+            <View
+              key={a.id}
+              className={`flex-row items-center gap-3 px-4 py-3 ${i === activity.length - 1 ? '' : 'border-b border-line-row'}`}
+            >
+              <View
+                className="h-2 w-2 rounded-pill"
+                style={{ backgroundColor: ACTIVITY_TONE[a.event] ?? statusHues.info }}
+              />
+              <View className="flex-1">
+                <Txt className="text-caption text-fg">{ACTIVITY_LABEL[a.event] ?? (a.action === 'LOGIN' ? 'Signed in' : 'Signed out')}</Txt>
+                <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                  {[a.device, a.ip, formatRelativeTime(a.time)].filter(Boolean).join(' · ')}
+                </Mono>
+              </View>
+            </View>
+          ))}
         </Group>
       )}
     </View>
   );
 }
+
+/** One row of the Security options group. */
+function SecurityToggle({
+  title,
+  sub,
+  value,
+  onChange,
+  last,
+}: {
+  title: string;
+  sub: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+  last?: boolean;
+}) {
+  // Optimistic: the switch should move under the finger, and the shared
+  // security-settings query is the source of truth once it refetches.
+  const [local, setLocal] = useState(value);
+  useEffect(() => setLocal(value), [value]);
+  return (
+    <View
+      className={`flex-row items-center justify-between px-4 py-3.5 ${last ? '' : 'border-b border-line-row'}`}
+    >
+      <View className="flex-1 pr-3">
+        <Txt className="text-callout text-fg">{title}</Txt>
+        <Txt className="mt-0.5 text-caption text-faint">{sub}</Txt>
+      </View>
+      <Toggle
+        value={local}
+        onValueChange={(v) => {
+          setLocal(v);
+          onChange(v);
+        }}
+      />
+    </View>
+  );
+}
+
+// Same labels/tones the web security page uses for the activity feed.
+const ACTIVITY_LABEL: Record<string, string> = {
+  login: 'Signed in',
+  logout: 'Signed out',
+  revoked: 'Session revoked',
+  revoked_others: 'Other sessions revoked',
+  revoked_all: 'All sessions revoked',
+};
+const ACTIVITY_TONE: Record<string, string> = {
+  login: statusHues.success,
+  logout: statusHues.info,
+  revoked: statusHues.danger,
+  revoked_others: statusHues.danger,
+  revoked_all: statusHues.danger,
+};
 
 const INDUSTRY_OPTIONS = [
   { label: 'General freight', value: 'general_freight' },
@@ -893,10 +1068,16 @@ function CompanySection() {
   );
 }
 
-const ROLES = ['ADMIN', 'MANAGER', 'OPERATOR', 'DISPATCHER', 'VIEWER'].map((r) => ({ label: r, value: r }));
+// Web's six. CUSTOMER and PARTNER exist on the model but neither client
+// exposes them for staff invites.
+const ROLES = ['ADMIN', 'MANAGER', 'OPERATOR', 'DISPATCHER', 'VIEWER', 'DRIVER'].map((r) => ({
+  label: r,
+  value: r,
+}));
 
 function UsersSection() {
   const { data } = useUsers();
+  const meId = useAuthStore((st) => st.user?.id);
   const qc = useQueryClient();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('OPERATOR');
@@ -968,10 +1149,18 @@ function UsersSection() {
                 </Txt>
                 <Mono className="mt-0.5 text-caption text-faint">{u.role}</Mono>
               </View>
-              <View style={{ width: 120 }}>
-                <SelectField options={ROLES} value={u.role} onSelect={(r) => changeRole(u.id, r)} />
-              </View>
-              <IconButton name="x" size={16} accessibilityLabel="Remove user" onPress={() => remove(u.id, u.name)} />
+              {/* The backend refuses a self role-change ("You cannot change
+                  your own role"), so don't offer the control. */}
+              {String(u.id) === String(meId) ? (
+                <Mono className="text-micro uppercase text-faint">You</Mono>
+              ) : (
+                <>
+                  <View style={{ width: 120 }}>
+                    <SelectField options={ROLES} value={u.role} onSelect={(r) => changeRole(u.id, r)} />
+                  </View>
+                  <IconButton name="x" size={16} accessibilityLabel="Remove user" onPress={() => remove(u.id, u.name)} />
+                </>
+              )}
             </View>
           ))}
         </Group>
@@ -980,10 +1169,72 @@ function UsersSection() {
   );
 }
 
-// Read-only by design: no purchase, management or link-out path lives in the
-// app. Subscriptions are handled entirely on the web dashboard.
-function BillingSection() {
+// Live countdown to the next charge, mirroring the web billing page. Reads
+// next_billing_at (a datetime) rather than next_billing_date (a date), which is
+// why the API exposes both.
+function useNextPaymentLabel(nextBillingAt: string): string {
+  const [label, setLabel] = useState('');
+  useEffect(() => {
+    if (!nextBillingAt) {
+      setLabel('');
+      return;
+    }
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const tick = () => {
+      const diff = new Date(nextBillingAt).getTime() - Date.now();
+      if (Number.isNaN(diff)) return setLabel('');
+      if (diff <= 0) return setLabel('Payment processing…');
+      const s = Math.floor(diff / 1000);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      if (diff < 48 * 3600 * 1000) {
+        return setLabel(
+          h >= 1
+            ? `Next payment in ${h}:${pad(m)}:${pad(s % 60)}`
+            : `Next payment in ${pad(m)}:${pad(s % 60)}`,
+        );
+      }
+      setLabel(`Next payment in ${Math.ceil(diff / 86400000)} days`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [nextBillingAt]);
+  return label;
+}
+
+const CHARGE_TONE = (status: string) =>
+  status === 'complete' ? statusHues.success : status === 'pending' ? statusHues.warning : statusHues.danger;
+
+/** One charge row, shared by the preview and the full-history screen. */
+function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
+  return (
+    <View className={`px-4 py-3 ${last ? '' : 'border-b border-line-row'}`}>
+      <View className="flex-row items-center justify-between">
+        <Txt className="flex-1 pr-3 text-caption text-fg" numberOfLines={1}>
+          {c.label}
+        </Txt>
+        <Mono className="text-caption text-fg">{formatCurrency(c.amount)}</Mono>
+      </View>
+      <View className="mt-1 flex-row items-center gap-2">
+        <Mono className="text-micro text-faint">
+          {[c.createdAt ? formatDate(c.createdAt) : '', c.reference].filter(Boolean).join(' · ')}
+        </Mono>
+        <Mono className="text-micro uppercase" style={{ color: CHARGE_TONE(c.status) }}>
+          {c.status}
+        </Mono>
+      </View>
+    </View>
+  );
+}
+
+// Read-only by design: no purchase path lives in the app. Selling a
+// subscription outside Apple's in-app purchase system is guideline 3.1.1, and
+// it's the same reason there's no sign-up here — so this shows everything the
+// web page shows but sends people there to actually change the plan.
+function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   const { data } = useBillingStatus();
+  const { data: history } = useBillingHistory();
   const d = data ?? {};
   const flatPlan = (pick(d, ['flat_plan']) ?? {}) as Record<string, unknown>;
   const card = (pick(d, ['card']) ?? {}) as Record<string, unknown>;
@@ -998,6 +1249,9 @@ function BillingSection() {
   const suspended = Boolean(pick(d, ['suspended']));
   const graceDays = num(pick(grace, ['days_remaining']));
   const graceExpires = str(pick(grace, ['grace_period_expires_at']));
+  const nextBillingDate = str(pick(d, ['next_billing_date']));
+  const takeRate = num(pick(flatPlan, ['take_rate_pct']));
+  const countdown = useNextPaymentLabel(str(pick(d, ['next_billing_at'])));
 
   return (
     <View className="gap-4">
@@ -1027,15 +1281,43 @@ function BillingSection() {
         {last4 ? (
           <DetailRow label="Card" value={`${cardType || 'Card'} •••• ${last4}`} mono={false} />
         ) : null}
-        <DetailRow
-          label="Renews"
-          value={str(pick(d, ['renews_at', 'next_billing_date']), '—')}
-          last
-        />
+        {/* Was reading `renews_at`, which this endpoint never returns — the
+            row was permanently blank. */}
+        <DetailRow label="Renews" value={nextBillingDate ? formatDate(nextBillingDate) : '—'} last />
       </Group>
 
+      {!!countdown && (
+        <Mono className="text-caption text-accent" style={{ fontVariant: ['tabular-nums'] }}>
+          {countdown}
+        </Mono>
+      )}
+
+      {takeRate > 0 && (
+        <Txt className="text-caption text-muted">
+          Every delivered load is also charged {takeRate}% of its invoice value to this card, on top
+          of the monthly fee.
+        </Txt>
+      )}
+
+      {!!history?.length && (
+        <>
+          <Group label="Recent charges">
+            {history.slice(0, 5).map((c, i) => (
+              <ChargeRow key={c.id} c={c} last={i === Math.min(history.length, 5) - 1} />
+            ))}
+          </Group>
+          <Button
+            label="Full billing history"
+            variant="secondary"
+            icon="receipt"
+            onPress={() => navigation.navigate('BillingHistory')}
+            fullWidth
+          />
+        </>
+      )}
+
       <Txt className="text-caption text-faint">
-        Subscription and payment details are managed on the web dashboard.
+        Subscriptions and payment methods are managed on the web dashboard.
       </Txt>
     </View>
   );

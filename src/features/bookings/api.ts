@@ -105,10 +105,39 @@ export const benchmarkQuote = (origin: string, destination: string, vehicleType:
   );
 
 // ── AI quote (chat + voice) ─────────────────────────────────────────────────
-export const aiChatQuote = (message: string, history: unknown[], currentFields: unknown) =>
+
+/** One turn of the extraction conversation, as the backend expects it. */
+export interface AiChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * `history` and `currentFields` are what let the model refine an answer instead
+ * of re-reading each message cold — currentFields carries the form as it stands
+ * (including the already-picked customer_name), so a follow-up like "make it
+ * next Tuesday" keeps everything else.
+ *
+ * `pendingEntity` / `declinedEntities` drive the "that client doesn't exist —
+ * create it?" exchange. Without them the backend asks the question and can
+ * never receive the answer.
+ */
+export const aiChatQuote = (
+  message: string,
+  history: AiChatTurn[] = [],
+  currentFields: unknown = {},
+  pendingEntity: unknown = null,
+  declinedEntities: string[] = [],
+) =>
   postData<Record<string, unknown>>({
     url: 'ai/chat-quote/',
-    data: { message, history, current_fields: currentFields },
+    data: {
+      message,
+      history,
+      current_fields: currentFields,
+      pending_entity: pendingEntity,
+      declined_entities: declinedEntities,
+    },
   });
 
 export const aiVoiceQuote = (audio: { uri: string; name: string; type: string }) => {

@@ -29,6 +29,7 @@ export type DomainEvent =
   | 'advance'
   | 'notification'
   | 'user'
+  | 'security'
   | 'company'
   | 'vehicle-type'
   | 'copilot';
@@ -57,6 +58,9 @@ const MAP: Record<DomainEvent, string[]> = {
   advance: ['capital', 'capital-eligible', 'advance', 'invoices', 'invoice', ...DASHBOARD, ...FINANCE],
   notification: ['notifications', 'notifications-unread'],
   user: ['users', 'me', 'drivers'],
+  // The three security preferences, the device list and the activity feed all
+  // move together — revoking a session shows up in all three.
+  security: ['security-settings', 'sessions', 'login-activity'],
   company: ['company-profile', 'billing-status'],
   'vehicle-type': ['vehicle-types', ...ASSIGN],
   // The agent acts on real records on the server and doesn't report which, so

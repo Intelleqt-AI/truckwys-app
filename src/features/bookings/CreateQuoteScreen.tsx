@@ -35,10 +35,12 @@ import {
   createQuote,
   patchQuote,
   sendQuote,
+  type AiChatTurn,
 } from './api';
 import { useCustomers } from '@/features/customers/api';
 import { RouteMap, type GeoPoint } from '@/components/RouteMap';
 import { VoiceQuoteBar } from './VoiceQuoteBar';
+import { VoiceQuoteSheet } from './VoiceQuoteSheet';
 import { Skeleton } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { formatCurrency, formatCurrencyCompact, formatDuration } from '@/lib/formatters';
@@ -118,6 +120,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [nlReply, setNlReply] = useState('');
   const [nlText, setNlText] = useState('');
   const [nlBusy, setNlBusy] = useState(false);
+  // Conversation state for the extraction endpoint — see submitNL.
+  const [nlHistory, setNlHistory] = useState<AiChatTurn[]>([]);
+  const [pendingEntity, setPendingEntity] = useState<unknown>(null);
+  const [declinedEntities, setDeclinedEntities] = useState<string[]>([]);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [benchmark, setBenchmark] = useState<Record<string, unknown> | null>(null);
   const [tollOverride, setTollOverride] = useState('');
   const [tollEdited, setTollEdited] = useState(false);
@@ -401,8 +408,44 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!message || nlBusy) return;
     setNlBusy(true);
     try {
-      const res = await aiChatQuote(message, [], {});
+      // The form as it stands goes back with the message, so a follow-up
+      // refines this quote instead of starting over. customer_name in
+      // particular is how the model keeps hold of an already-picked client.
+      const currentFields = {
+        pickup_location: pickup?.label,
+        delivery_location: delivery?.label,
+        weight_kg: Number(weight) > 0 ? Number(weight) * 1000 : undefined,
+        vehicle_type: vehicleType || undefined,
+        customer_name: customerOptions.find((o) => o.value === customerId)?.label || '',
+        cargo_description: cargo || undefined,
+        pickup_date: pickupDate || undefined,
+        delivery_date: deliveryDate || undefined,
+        valid_until: validUntil || undefined,
+        trip_type: tripType,
+      };
+      const res = await aiChatQuote(message, nlHistory, currentFields, pendingEntity, declinedEntities);
+
+      // Carry the entity conversation forward: without this the backend's
+      // "that client doesn't exist — create it?" question can never be
+      // answered, and replying just sends a fresh contextless message.
+      setPendingEntity(pick(res, ['pending_entity']) ?? null);
+      const declined = str(pick(res, ['declined_entity']));
+      if (declined) setDeclinedEntities((prev) => [...prev, declined.toLowerCase()]);
+      setNlHistory((prev) => [
+        ...prev,
+        { role: 'user' as const, content: message },
+        { role: 'assistant' as const, content: str(pick(res, ['reply'])) },
+      ]);
+
       const ex = (pick(res, ['extracted_fields']) ?? {}) as Record<string, unknown>;
+      // The backend already fuzzy-matches a spoken name to a real customer and
+      // returns its id, so this is a straight assignment. Omitting this line
+      // was the bug: every other field filled and the client stayed empty.
+      if (pick(ex, ['customer_id'])) {
+        setCustomerId(String(pick(ex, ['customer_id'])));
+        // A client created mid-conversation isn't in the cached picker yet.
+        invalidateFor(qc, 'customer');
+      }
       if (pick(ex, ['cargo_description'])) setCargo(str(pick(ex, ['cargo_description'])));
       // Backend weight is in kg → the UI field is tons.
       if (pick(ex, ['weight'])) {
@@ -551,10 +594,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           }}
           onSubmit={() => submitNL()}
           busy={nlBusy}
-          onTranscribed={(t) => {
-            setNlText(t);
-            submitNL(t);
-          }}
+          onRecord={() => setVoiceOpen(true)}
           note={nlReply || undefined}
         />
 
@@ -828,6 +868,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Stays open through the AI step, so the user sees "Building your
+          quote" rather than being dropped back on a form that's mid-change. */}
+      {voiceOpen && (
+        <VoiceQuoteSheet
+          thinking={nlBusy}
+          onTranscribed={(t) => {
+            setNlText(t);
+            void submitNL(t);
+          }}
+          onClose={() => setVoiceOpen(false)}
+        />
+      )}
     </SheetScreen>
   );
 }

@@ -21,7 +21,6 @@ export type AppStackParamList = {
   LoadDetail: { id: Id; preview?: Record<string, unknown> };
   QuoteDetail: { id: Id; preview?: Record<string, unknown> };
   CreateQuote: { ai?: boolean; prefill?: Record<string, unknown>; quoteId?: Id } | undefined;
-  AIQuoteChat: undefined;
   VehicleDetail: { id: Id; preview?: Record<string, unknown> };
   DriverDetail: { id: Id; preview?: Record<string, unknown> };
   InvoiceDetail: { id: Id; preview?: Record<string, unknown> };
@@ -30,6 +29,7 @@ export type AppStackParamList = {
   CustomerRisk: { id: Id };
   AddCustomer: { id?: Id; preview?: Record<string, unknown> } | undefined;
   Settings: { section?: string } | undefined;
+  BillingHistory: undefined;
   CreateInvoice: undefined;
   AddExpense: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AddVehicle: { id?: Id; preview?: Record<string, unknown> } | undefined;

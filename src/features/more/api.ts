@@ -252,6 +252,38 @@ export const updateNotificationPrefs = (prefs: NotificationPrefs) =>
   patchData({ url: 'notifications/settings/', data: prefs });
 
 // ── Billing (read-only on mobile) ────────────────────────────────────────────
+/** One card charge — either the monthly plan or a per-delivery platform fee. */
+export interface BillingCharge {
+  id: string;
+  kind: 'subscription' | 'delivery_fee';
+  label: string;
+  amount: number;
+  status: string;
+  reference: string;
+  createdAt: string;
+}
+
+export function useBillingHistory() {
+  return useQuery<BillingCharge[]>({
+    queryKey: ['billing-history'],
+    queryFn: async () => {
+      const res = (await fetchData('billing/history/')) as Record<string, unknown>;
+      return asArray(pick(res, ['results']) ?? res).map((r) => {
+        const c = r as Record<string, unknown>;
+        return {
+          id: String(c.id ?? ''),
+          kind: (str(pick(c, ['kind'])) as BillingCharge['kind']) || 'subscription',
+          label: str(pick(c, ['label']), 'Charge'),
+          amount: num(pick(c, ['amount'])),
+          status: str(pick(c, ['status']), 'pending').toLowerCase(),
+          reference: str(pick(c, ['reference'])),
+          createdAt: str(pick(c, ['created_at'])),
+        };
+      });
+    },
+  });
+}
+
 export function useBillingStatus() {
   return useQuery<Record<string, unknown>>({
     queryKey: ['billing-status'],
@@ -338,8 +370,57 @@ export function useSessions() {
 
 export const revokeSession = (id: string | number) => deleteData({ url: `auth/sessions/${id}/` });
 
-export const setTwoFactor = (enabled: boolean) =>
-  patchData({ url: 'auth/me/', data: { two_factor_enabled: enabled } });
+// Security preferences live in User.security_settings behind their own
+// endpoint. This used to PATCH auth/me/ with `two_factor_enabled`, which is
+// not a field on the User serializer — DRF drops unknown keys silently, so the
+// toggle reported success and saved nothing.
+export interface SecuritySettings {
+  two_factor: boolean;
+  session_timeout: boolean;
+  login_alerts: boolean;
+}
+
+export function useSecuritySettings() {
+  return useQuery<SecuritySettings>({
+    queryKey: ['security-settings'],
+    queryFn: () => fetchData<SecuritySettings>('auth/security-settings/'),
+  });
+}
+
+export const updateSecuritySettings = (patch: Partial<SecuritySettings>) =>
+  patchData<SecuritySettings>({ url: 'auth/security-settings/', data: patch });
+
+/** Last 10 sign-in/sign-out/revoke events for this account. */
+export interface LoginActivityItem {
+  id: string;
+  action: string;
+  event: string;
+  device: string;
+  ip: string;
+  time: string;
+}
+
+export function useLoginActivity() {
+  return useQuery<LoginActivityItem[]>({
+    queryKey: ['login-activity'],
+    queryFn: async () =>
+      asArray(await fetchData('auth/sessions/activity/')).map((r) => {
+        const a = r as Record<string, unknown>;
+        return {
+          id: String(a.id ?? ''),
+          action: str(pick(a, ['action'])),
+          event: str(pick(a, ['event'])),
+          device: str(pick(a, ['device']), 'Unknown device'),
+          ip: str(pick(a, ['ip'])),
+          time: str(pick(a, ['time'])),
+        };
+      }),
+  });
+}
+
+/** Revoke every other device, or every device including this one. */
+export const revokeSessions = (scope: 'others' | 'all') =>
+  deleteData<{ revoked: number }>({ url: `auth/sessions/?scope=${scope}` });
 
 // Apple 5.1.1(v): in-app account deletion. The endpoint is auth/delete-account/
 // — auth/me/ implements only GET and PATCH and returns 405, which used to leave

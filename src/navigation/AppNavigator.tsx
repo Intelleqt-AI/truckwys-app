@@ -9,7 +9,6 @@ import { AppTabs } from './AppTabs';
 import { LoadDetailScreen } from '@/features/bookings/LoadDetailScreen';
 import { QuoteDetailScreen } from '@/features/bookings/QuoteDetailScreen';
 import { CreateQuoteScreen } from '@/features/bookings/CreateQuoteScreen';
-import { AIQuoteChatScreen } from '@/features/bookings/AIQuoteChatScreen';
 import { VehicleDetailScreen } from '@/features/fleet/VehicleDetailScreen';
 import { DriverDetailScreen } from '@/features/fleet/DriverDetailScreen';
 import { InvoiceDetailScreen } from '@/features/finance/InvoiceDetailScreen';
@@ -30,6 +29,7 @@ import { ActivityScreen } from '@/features/more/ActivityScreen';
 import { NotificationsScreen } from '@/features/more/NotificationsScreen';
 import { CopilotScreen } from '@/features/more/CopilotScreen';
 import { SettingsScreen } from '@/features/more/SettingsScreen';
+import { BillingHistoryScreen } from '@/features/more/BillingHistoryScreen';
 import { SupportScreen } from '@/features/more/SupportScreen';
 import { MoreScreen } from '@/features/more/MoreScreen';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
@@ -106,10 +106,10 @@ export function AppNavigator() {
         <Stack.Screen name="Activity" component={ActivityScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
         <Stack.Screen name="Copilot" component={CopilotScreen} />
-        <Stack.Screen name="AIQuoteChat" component={AIQuoteChatScreen} />
         <Stack.Screen name="AdvanceDetail" component={AdvanceDetailScreen} />
         <Stack.Screen name="RiskScores" component={RiskScoresScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="BillingHistory" component={BillingHistoryScreen} />
         <Stack.Screen name="Support" component={SupportScreen} />
       </Stack.Group>
 

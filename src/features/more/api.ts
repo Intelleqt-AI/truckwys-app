@@ -457,31 +457,6 @@ export const updateUserRole = (id: string | number, role: string) =>
 
 export const removeUser = (id: string | number) => deleteData({ url: `users/${id}/` });
 
-// ── Copilot ───────────────────────────────────────────────────────────────
-export function useProposals() {
-  return useQuery({
-    queryKey: ['agent-proposals'],
-    queryFn: async () =>
-      asArray(await fetchData('agent/proposals/')).map((p) => {
-        const o = p as Record<string, unknown>;
-        return {
-          id: str(pick(o, ['id']), ''),
-          title: str(pick(o, ['title', 'summary']), 'Proposal'),
-          body: str(pick(o, ['body', 'description', 'detail']), ''),
-        };
-      }),
-    retry: false,
-  });
-}
-
-export const executeProposal = (id: string | number) =>
-  postData({ url: `agent/proposals/${id}/execute/`, data: {} });
-
-export const dismissProposal = (id: string | number) =>
-  postData({ url: `agent/proposals/${id}/dismiss/`, data: {} });
-
-export const copilotChat = (message: string, conversationId?: string) =>
-  postData<Record<string, unknown>>({
-    url: conversationId ? `agent/conversations/${conversationId}/chat/` : 'agent/chat/',
-    data: { message },
-  });
+// Copilot lives in src/features/copilot/api.ts — it needs the conversation
+// endpoints, a longer timeout and the full reply envelope, none of which
+// belonged in this grab-bag module.

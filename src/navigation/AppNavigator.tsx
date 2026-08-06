@@ -27,7 +27,7 @@ import { InsightsScreen } from '@/features/more/InsightsScreen';
 import { CapitalScreen } from '@/features/more/CapitalScreen';
 import { ActivityScreen } from '@/features/more/ActivityScreen';
 import { NotificationsScreen } from '@/features/more/NotificationsScreen';
-import { CopilotScreen } from '@/features/more/CopilotScreen';
+import { CopilotScreen } from '@/features/copilot/CopilotScreen';
 import { SettingsScreen } from '@/features/more/SettingsScreen';
 import { BillingHistoryScreen } from '@/features/more/BillingHistoryScreen';
 import { SupportScreen } from '@/features/more/SupportScreen';

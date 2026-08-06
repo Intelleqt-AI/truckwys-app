@@ -27,7 +27,7 @@ import { AssignSheet } from './AssignSheet';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
-import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
+import { formatCurrency, formatCurrencyCompact, formatPercent } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
@@ -177,7 +177,7 @@ function QuoteCard({
         <View className="mt-3 flex-row items-center justify-between">
           <Mono className="text-body font-semibold text-fg">{formatCurrency(quote.amount)}</Mono>
           {quote.marginPct != null && (
-            <Mono className="text-micro text-faint">Margin {quote.marginPct}%</Mono>
+            <Mono className="text-micro text-faint">Margin {formatPercent(quote.marginPct)}</Mono>
           )}
         </View>
       </Pressable>

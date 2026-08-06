@@ -34,7 +34,13 @@ import { num, str, pick } from '@/lib/api/list';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { quoteShareUrl } from '@/lib/legal';
 import { openWhatsApp } from '@/lib/whatsapp';
-import { formatCurrency, formatDate } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatDate,
+  formatNumber,
+  formatPercent,
+  parseNum,
+} from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -74,6 +80,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const [outcomeType, setOutcomeType] = useState<'accepted' | 'rejected' | null>(null);
   const [outcomeBusy, setOutcomeBusy] = useState(false);
   const [finalPrice, setFinalPrice] = useState('');
+  const finalPriceNum = parseNum(finalPrice);
+  const finalPriceInvalid = finalPrice.trim() !== '' && finalPriceNum == null;
   const [rejectionReason, setRejectionReason] = useState('');
   const [customReason, setCustomReason] = useState('');
 
@@ -107,8 +115,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const cargo = [
     { label: 'Description', value: str(pick(q, ['cargo_description'])) },
     { label: 'Vehicle type', value: str(pick(q, ['vehicle_type'])) },
-    { label: 'Weight', value: weightKg > 0 ? `${weightKg.toLocaleString()} kg` : '' },
-    { label: 'Distance', value: distanceKm > 0 ? `${Math.round(distanceKm).toLocaleString()} km` : '' },
+    // formatNumber, not bare toLocaleString(): with no locale argument those
+    // two fell through to the DEVICE locale, so a handset set to German
+    // rendered 1234 kg as "1.234 kg".
+    { label: 'Weight', value: weightKg > 0 ? `${formatNumber(weightKg)} kg` : '' },
+    { label: 'Distance', value: distanceKm > 0 ? `${formatNumber(Math.round(distanceKm))} km` : '' },
     { label: 'Assigned vehicle', value: str(pick(q, ['vehicle_display'])) },
     { label: 'Assigned driver', value: str(pick(q, ['driver_display'])) },
   ].filter((r) => r.value);
@@ -232,13 +243,20 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   };
 
   const reasonText = rejectionReason === 'Other' ? customReason.trim() : rejectionReason;
-  const canSubmitOutcome = outcomeType === 'accepted' || !!reasonText;
+  const canSubmitOutcome =
+    outcomeType === 'accepted' ? !finalPriceInvalid : !!reasonText;
 
   const submitOutcome = () => {
     if (!outcomeType || !canSubmitOutcome) return;
     const payload =
       outcomeType === 'accepted'
-        ? { outcome: 'accepted' as const, ...(Number(finalPrice) > 0 ? { final_price: Number(finalPrice) } : {}) }
+        ? {
+            outcome: 'accepted' as const,
+            // Blank is legitimate here ("keep the quoted total"), but an
+            // unparseable value is not — Number() silently dropped it and closed
+            // the quote at the old total.
+            ...(finalPriceNum != null && finalPriceNum > 0 ? { final_price: finalPriceNum } : {}),
+          }
         : { outcome: 'rejected' as const, rejection_reason: reasonText };
     run(
       setOutcomeBusy,
@@ -358,7 +376,9 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         {outcome === 'accepted' && <Badge label="✓ Won" tone="success" />}
         {outcome === 'rejected' && <Badge label="✗ Lost" tone="danger" />}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
-        {marginPct > 0 && <Mono className="text-micro text-faint">Margin {marginPct}%</Mono>}
+        {marginPct > 0 && (
+          <Mono className="text-micro text-faint">Margin {formatPercent(marginPct)}</Mono>
+        )}
       </View>
 
       <View className="mb-5">
@@ -374,7 +394,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         <View className="mb-5 flex-row items-center gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
           <Icon name="alert" size={17} color="#F59E0B" />
           <Txt className="flex-1 text-sub text-muted">
-            Margin <Mono className="text-warning">{marginPct}%</Mono> is below your pricing guardrail — review
+            Margin <Mono className="text-warning">{formatPercent(marginPct)}</Mono> is below your pricing guardrail — review
             before sending.
           </Txt>
         </View>
@@ -436,7 +456,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           />
         </View>
         {confidence ? <DetailRow label="Confidence" value={titleCase(confidence)} mono={false} /> : null}
-        <DetailRow label="Margin" value={`${marginPct || 0}%`} />
+        <DetailRow label="Margin" value={formatPercent(marginPct || 0)} />
         {validUntil ? <DetailRow label="Valid until" value={formatDate(validUntil)} /> : null}
         {createdAt ? <DetailRow label="Created" value={formatDate(createdAt)} last /> : null}
       </Group>
@@ -513,9 +533,12 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
                 <View className="mt-4">
                   <TextField
                     label="Final agreed price (optional)"
-                    placeholder={formatCurrency(total)}
-                    icon="dollar"
-                    keyboardType="numeric"
+                    placeholder={formatNumber(total, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    prefix="R"
+                    keyboardType="decimal-pad"
+                    numeric
+                    decimals={2}
+                    error={finalPriceInvalid ? 'Enter a number, e.g. 12 500,00' : undefined}
                     value={finalPrice}
                     onChangeText={setFinalPrice}
                   />

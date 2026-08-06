@@ -44,7 +44,16 @@ import { VoiceQuoteBar } from './VoiceQuoteBar';
 import { VoiceQuoteSheet } from './VoiceQuoteSheet';
 import { Skeleton, WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
-import { formatCurrency, formatCurrencyCompact, formatDuration } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatCurrencyCompact,
+  formatConfidence,
+  formatDuration,
+  formatPlain,
+  formatNumber,
+  formatPercent,
+  parseNum,
+} from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -137,6 +146,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [baseRatePerKm, setBaseRatePerKm] = useState('');
   const [serviceCharge, setServiceCharge] = useState(0);
 
+  // Every typed number goes through parseNum once, here, and the rest of the
+  // screen reads these. Number() was used inline in eight places and is NaN for
+  // the comma decimal this keyboard produces — the worst of them was
+  // `Number(weight) * 1000 || 20000`, which quietly priced the load as 20 tons
+  // when the user had typed `1,5`. A null here is a validation error, never a
+  // substituted number.
+  const weightTons = parseNum(weight);
+  const weightKg = weightTons == null ? 0 : weightTons * 1000;
+  const weightInvalid = weight.trim() !== '' && weightTons == null;
+  const baseRateNum = parseNum(baseRatePerKm) ?? 0;
+  const driverNum = parseNum(driverAllowance) ?? 0;
+  const tollOverrideNum = parseNum(tollOverride) ?? 0;
+
   const [routeData, setRouteData] = useState<Record<string, unknown> | null>(null);
   const [routeBlockedMessage, setRouteBlockedMessage] = useState('');
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
@@ -195,7 +217,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       const baseRate = num(pick(q, ['base_rate']));
       if (dist && baseRate) {
         const legs = trip === 'ROUND_TRIP' ? 2 : 1;
-        setBaseRatePerKm(String(Math.round((baseRate / (dist * legs)) * 100) / 100));
+        setBaseRatePerKm(formatPlain(Math.round((baseRate / (dist * legs)) * 100) / 100));
       }
       setValidUntil(str(pick(q, ['valid_until'])) || plusDays(7));
       setPickupDate(str(pick(q, ['pickup_date'])));
@@ -242,7 +264,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           dest_lon: delivery.lon,
           dest_country: delivery.cc,
           vehicle_type: vehicleType || 'Flatbed',
-          weight_kg: Number(weight) * 1000 || 20000,
+          // Default only for an empty field. It used to also catch a failed
+          // parse, so a comma weight estimated tolls for a 20-ton load.
+          weight_kg: weightKg || 20000,
         });
         if (id === routeReq.current && (res as { success?: boolean }).success !== false) {
           setRouteBlockedMessage('');
@@ -264,7 +288,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, vehicleType, weight]);
+  }, [ready, pickup, delivery, vehicleType, weightKg]);
 
   const routes = useMemo(
     () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
@@ -291,7 +315,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
     const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
     const routeTollOneWay = num(pick(currentRoute, ['toll_cost_zar'])) || num(pick(routeData ?? {}, ['toll_cost_zar'])) || distance * tollRate;
-    const tollCost = tollEdited ? Number(tollOverride) || 0 : Math.round(routeTollOneWay * legs);
+    const tollCost = tollEdited ? tollOverrideNum : Math.round(routeTollOneWay * legs);
     const tollBreakdown = (asArray(pick(currentRoute, ['toll_breakdown'])).length
       ? asArray(pick(currentRoute, ['toll_breakdown']))
       : asArray(pick(routeData ?? {}, ['toll_breakdown']))) as Record<string, unknown>[];
@@ -301,11 +325,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       (num(pick(add, ['border_fees'])) + num(pick(add, ['weighbridge_fees'])) + num(pick(add, ['non_sa_tolls']))) * legs,
     );
 
-    const weightKg = Number(weight) * 1000 || 0;
     const threshold = num(pick(company ?? {}, ['weight_surcharge_threshold_kg'])) || 5000;
-    const baseCost = Math.round(chargeDistance * (Number(baseRatePerKm) || 0));
+    const baseCost = Math.round(chargeDistance * baseRateNum);
     const weightSurcharge = weightKg > threshold ? Math.round((baseCost * surchargePctBase) / 100) : 0;
-    const driver = Number(driverAllowance) || 0;
+    const driver = driverNum;
 
     const total = baseCost + fuelCost + tollCost + crossBorderCost + driver + weightSurcharge + serviceCharge;
     const directCost = total - serviceCharge;
@@ -333,7 +356,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       fuelUsage: Math.round((chargeDistance * consumption) / 100),
       fuelPrice,
     };
-  }, [currentRoute, routeData, tripType, vtypes, vehicleType, fuel, company, weight, baseRatePerKm, tollEdited, tollOverride, driverAllowance, serviceCharge]);
+  }, [currentRoute, routeData, tripType, vtypes, vehicleType, fuel, company, weightKg, baseRateNum, tollEdited, tollOverrideNum, driverNum, serviceCharge]);
 
   // AI analyze + guard (debounced 700ms, stale-guarded).
   useEffect(() => {
@@ -349,7 +372,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           origin: extractCode(pickup.label),
           destination: extractCode(delivery.label),
           vehicle_type: vehicleType,
-          weight: Number(weight) * 1000,
+          weight: weightKg,
           fuel_cost: costs.fuelCost,
           toll_cost: costs.tollCost,
           driver_cost: costs.driver,
@@ -419,7 +442,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       const currentFields = {
         pickup_location: pickup?.label,
         delivery_location: delivery?.label,
-        weight_kg: Number(weight) > 0 ? Number(weight) * 1000 : undefined,
+        weight_kg: weightKg > 0 ? weightKg : undefined,
         vehicle_type: vehicleType || undefined,
         customer_name: customerOptions.find((o) => o.value === customerId)?.label || '',
         cargo_description: cargo || undefined,
@@ -455,7 +478,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       // Backend weight is in kg → the UI field is tons.
       if (pick(ex, ['weight'])) {
         const kg = num(pick(ex, ['weight']));
-        if (kg > 0) setWeight(String(Math.round((kg / 1000) * 100) / 100));
+        if (kg > 0) setWeight(formatPlain(Math.round((kg / 1000) * 100) / 100));
       }
       if (pick(ex, ['vehicle_type'])) setVehicleType(str(pick(ex, ['vehicle_type'])));
       if (pick(ex, ['pickup_date'])) setPickupDate(str(pick(ex, ['pickup_date'])));
@@ -526,7 +549,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     delivery_lat: delivery?.lat,
     delivery_lng: delivery?.lon,
     cargo_description: cargo || `${weight}t ${vehicleType}`,
-    weight: Number(weight) * 1000,
+    weight: weightKg,
     distance: costs.distance,
     estimated_duration_minutes: costs.duration,
     vehicle_type: vehicleType,
@@ -553,7 +576,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (send) {
       if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
       const missing: string[] = [];
-      if (!(Number(weight) > 0)) missing.push('weight');
+      if (weightInvalid) return toast.error('Weight is not a number');
+      if (!(weightKg > 0)) missing.push('weight');
       if (!pickupDate) missing.push('pickup date');
       if (!deliveryDate) missing.push('delivery date');
       if (missing.length) return toast.error(`Add ${missing.join(', ')} before sending`);
@@ -657,7 +681,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
         {/* R/km lives in the overrides section further down, next to the other
             cost levers — it isn't repeated here. */}
-        <TextField label="Weight (tons) *" placeholder="e.g. 20" keyboardType="numeric" value={weight} onChangeText={setWeight} />
+        <TextField
+          label="Weight (tons) *"
+          placeholder="e.g. 20"
+          keyboardType="decimal-pad"
+          error={weightInvalid ? 'Enter a number, e.g. 1,5' : undefined}
+          value={weight}
+          onChangeText={setWeight}
+        />
         <TextField label="Cargo" placeholder="e.g. Steel coils" value={cargo} onChangeText={setCargo} />
         <View className="flex-row gap-3">
           <View className="flex-1">
@@ -762,14 +793,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     <View className="flex-1">
                       <Label className="text-faint">Margin</Label>
                       <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
-                        {Math.round(optMargin)}%
+                        {formatPercent(optMargin, 0)}
                       </Mono>
                       <Mono className="text-micro text-success">{formatCurrencyCompact(expProfit)} profit</Mono>
                     </View>
                     <View className="flex-1">
                       <Label className="text-faint">Win probability</Label>
                       <Mono className="mt-1 text-fg" style={{ fontSize: 15, fontWeight: '600' }}>
-                        {winProb > 0 ? `${Math.round(winProb * 100)}%` : '—'}
+                        {winProb > 0 ? formatConfidence(winProb) : '—'}
                       </Mono>
                       <View className="mt-1.5 h-1 overflow-hidden rounded-pill bg-surface-hover">
                         <View style={{ width: `${Math.min(100, Math.round(winProb * 100))}%`, height: '100%' }} className="bg-accent" />
@@ -813,7 +844,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
               {/* Cost breakdown */}
               <Group label={`Cost breakdown · ${vehicleType || '—'}`}>
-                <DetailRow label={`Fuel — ${costs.consumption} L/100km @ R${costs.fuelPrice}`} value={formatCurrency(costs.fuelCost)} />
+                <DetailRow
+                  label={`Fuel — ${costs.consumption} L/100km @ ${formatCurrency(costs.fuelPrice)}`}
+                  value={formatCurrency(costs.fuelCost)}
+                />
                 <Pressable onPress={() => setTollModal(true)} className="flex-row items-center justify-between border-b border-line-row px-3.5 py-3">
                   <View className="flex-row items-center gap-1.5">
                     <Txt className="text-callout text-muted">Tolls (SA plazas)</Txt>
@@ -823,8 +857,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 </Pressable>
                 {costs.crossBorderCost > 0 && <DetailRow label="Cross-border / weighbridge" value={formatCurrency(costs.crossBorderCost)} />}
                 <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} />
-                {costs.weightSurcharge > 0 && <DetailRow label={`Weight surcharge (${costs.surchargePct}%)`} value={formatCurrency(costs.weightSurcharge)} />}
-                <DetailRow label={`Base rate (${vehicleType || '—'} · R${baseRatePerKm || 0}/km)`} value={formatCurrency(costs.baseCost)} />
+                {costs.weightSurcharge > 0 && <DetailRow label={`Weight surcharge (${formatPercent(costs.surchargePct)})`} value={formatCurrency(costs.weightSurcharge)} />}
+                <DetailRow
+                  label={`Base rate (${vehicleType || '—'} · ${formatCurrency(baseRateNum)}/km)`}
+                  value={formatCurrency(costs.baseCost)}
+                />
                 {serviceCharge !== 0 && <DetailRow label="Service adjustment" value={formatCurrency(serviceCharge)} />}
                 <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
                   <Txt className="text-callout font-semibold text-fg">Quote total · {costs.marginPct}% margin</Txt>
@@ -832,7 +869,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 </View>
                 <View className="px-3.5 py-2">
                   <Mono className="text-micro text-faint">
-                    {Math.round(costs.distance)} km one way · {Math.round(costs.chargeDistance)} km {tripType === 'ROUND_TRIP' ? 'round trip' : 'total'}
+                    {formatNumber(Math.round(costs.distance))} km one way ·{' '}
+                    {formatNumber(Math.round(costs.chargeDistance))} km{' '}
+                    {tripType === 'ROUND_TRIP' ? 'round trip' : 'total'}
                   </Mono>
                 </View>
               </Group>
@@ -841,10 +880,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               <View className="flex-row gap-3">
                 <View className="flex-1">
                   <TextField
-                    label="Tolls (R)"
+                    label="Tolls"
+                    prefix="R"
                     placeholder="0"
-                    keyboardType="numeric"
-                    value={tollEdited ? tollOverride : String(costs.tollCost)}
+                    keyboardType="decimal-pad"
+                    value={tollEdited ? tollOverride : formatPlain(costs.tollCost)}
                     onChangeText={(v) => {
                       setTollEdited(true);
                       setTollOverride(v);
@@ -852,10 +892,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   />
                 </View>
                 <View className="flex-1">
-                  <TextField label="Driver (R)" placeholder="0" keyboardType="numeric" value={driverAllowance} onChangeText={setDriverAllowance} />
+                  <TextField label="Driver" prefix="R" placeholder="0" keyboardType="decimal-pad" numeric decimals={2} value={driverAllowance} onChangeText={setDriverAllowance} />
                 </View>
                 <View className="flex-1">
-                  <TextField label="R / km" placeholder="e.g. 25" keyboardType="numeric" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
+                  <TextField label="Rate / km" prefix="R" placeholder="e.g. 25" keyboardType="decimal-pad" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
                 </View>
               </View>
             </>

@@ -8,6 +8,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, TextField, SelectField, Button, type IconName } from '@/components/ui';
 import { createCustomer, updateCustomer } from './api';
 import { str, num, pick } from '@/lib/api/list';
+import { parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -34,7 +35,13 @@ const schema = z.object({
   zip_code: z.string().trim().optional(),
   address: z.string().trim().optional(),
   billing_address: z.string().trim().optional(),
-  credit_limit: z.string().trim().optional(),
+  credit_limit: z
+    .string()
+    .trim()
+    .optional()
+    // Validated here rather than at submit so the message lands on the field.
+    // parseNum accepts `50 000` and `50000,50` as well as a plain integer.
+    .refine((v) => !v || parseNum(v) != null, 'Enter a number, e.g. 50 000'),
 });
 type Values = z.infer<typeof schema>;
 
@@ -91,7 +98,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
       payment_terms_default: paymentTerms,
       status,
     };
-    if (v.credit_limit) payload.credit_limit = Number(v.credit_limit);
+    if (v.credit_limit) payload.credit_limit = parseNum(v.credit_limit) ?? undefined;
     try {
       if (editing) await updateCustomer(editId, payload);
       else await createCustomer(payload);
@@ -129,7 +136,17 @@ export function AddCustomerScreen({ route, navigation }: Props) {
           control={control}
           name="credit_limit"
           render={({ field: { onChange, onBlur, value }, fieldState }) => (
-            <TextField label="Credit limit (R)" placeholder="e.g. 50000" icon="dollar" keyboardType="numeric" value={value ?? ''} onChangeText={onChange} onBlur={onBlur} error={fieldState.error?.message} />
+            <TextField
+              label="Credit limit"
+              prefix="R"
+              placeholder="e.g. 50 000"
+              keyboardType="decimal-pad"
+              numeric
+              value={value ?? ''}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              error={fieldState.error?.message}
+            />
           )}
         />
         <SelectField label="Status" icon="user" options={STATUS} value={status} onSelect={setStatus} />

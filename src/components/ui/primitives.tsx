@@ -18,6 +18,7 @@ import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
+import { formatConfidence } from '@/lib/formatters';
 
 // ── Card: surface fill, hairline border, 2px radius, no shadow (dark) ──────
 export function Card({
@@ -342,7 +343,7 @@ export function ConfidenceTag({ value }: { value: number }) {
     <View className="flex-row items-center gap-1">
       <Icon name="gauge" size={12} color={hue} strokeWidth={2} />
       <Mono className="text-micro" style={{ color: hue }}>
-        {Math.round(value * 100)}%
+        {formatConfidence(value)}
       </Mono>
     </View>
   );

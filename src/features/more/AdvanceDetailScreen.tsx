@@ -4,7 +4,7 @@ import { View } from 'react-native';
 import { ErrorState } from '@/components/feedback';
 import { useAdvance } from './api';
 import { num, str, pick } from '@/lib/api/list';
-import { formatCurrency, formatDate } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AdvanceDetail'>;
@@ -36,7 +36,7 @@ export function AdvanceDetailScreen({ route, navigation }: Props) {
             and puts the tier under risk_score_detail — the old fee_pct / tier /
             repayment_date keys don't exist on it, so Fee read 0% and Tier and
             Repay-by both read "—" on every advance. */}
-        <StatCard label="Fee" value={`${num(pick(a, ['fee_percent', 'fee_pct']))}%`} />
+        <StatCard label="Fee" value={formatPercent(num(pick(a, ['fee_percent', 'fee_pct'])), 2)} />
       </View>
 
       <Group label="Details">

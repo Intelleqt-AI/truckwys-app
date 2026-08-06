@@ -1,14 +1,60 @@
-import { useState } from 'react';
-import { View, TextInput, Pressable, type TextInputProps } from 'react-native';
+import { useId, useState } from 'react';
+import {
+  View,
+  TextInput,
+  Pressable,
+  Platform,
+  Keyboard,
+  InputAccessoryView,
+  type TextInputProps,
+} from 'react-native';
 import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
+import { parseNum, formatNumber, formatPlain } from '@/lib/formatters';
+
+/**
+ * A Done bar over the keyboard.
+ *
+ * iOS-only — InputAccessoryView renders nothing on Android and console.warns on
+ * every render there, so it has to be gated by us rather than by the component.
+ * Android keeps its system back gesture to dismiss, so it needs no equivalent.
+ *
+ * Rendered next to its own input rather than once at the app root, because a
+ * TextInput inside a Modal (Record Payment, the quote's final price) lives in a
+ * separate native window and cannot resolve a nativeID registered outside it.
+ * The native view is position:absolute, so it costs nothing in layout.
+ */
+export function KeyboardDoneBar({ nativeID }: { nativeID: string }) {
+  const { colors } = useTheme();
+  if (Platform.OS !== 'ios') return null;
+  return (
+    <InputAccessoryView nativeID={nativeID} backgroundColor={colors.surface}>
+      <View
+        className="flex-row items-center justify-end border-t border-line px-4"
+        style={{ height: 44 }}
+      >
+        <Pressable
+          onPress={() => Keyboard.dismiss()}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss keyboard"
+        >
+          <Txt className="text-callout font-semibold text-accent">Done</Txt>
+        </Pressable>
+      </View>
+    </InputAccessoryView>
+  );
+}
 
 // ── TextField: label + input + error, 2px radius, 44px min height ──────────
 export function TextField({
   label,
   error,
   icon,
+  prefix,
+  numeric,
+  decimals,
   secureTextEntry,
   className = '',
   ...props
@@ -16,11 +62,49 @@ export function TextField({
   label?: string;
   error?: string;
   icon?: IconName;
+  /** Leading unit, e.g. `R` for money. Rendered in Mono so it lines up with the digits. */
+  prefix?: string;
+  /** Group thousands on blur (en-ZA) and strip the grouping again on focus. */
+  numeric?: boolean;
+  /** Fixed decimal places for `numeric` — 2 for money. Omit to keep what was typed. */
+  decimals?: number;
   className?: string;
 }) {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(!!secureTextEntry);
+  // One accessory view per field, so the id has to be unique per instance.
+  const accessoryID = useId();
+
+  // Reformat between raw and grouped, but only ever through parseNum — never
+  // Number(), which is NaN for the comma decimal a South African keyboard types.
+  const reformat = (grouped: boolean) => {
+    if (!numeric || typeof props.value !== 'string' || !props.onChangeText) return;
+    const n = parseNum(props.value);
+    if (n == null) return; // leave bad input alone; the caller validates it
+    props.onChangeText(
+      grouped
+        ? formatNumber(n, {
+            minimumFractionDigits: decimals ?? 0,
+            maximumFractionDigits: decimals ?? 4,
+          })
+        : formatPlain(n, decimals),
+    );
+  };
+
+  // These compose with the caller's handlers instead of replacing them: props
+  // are spread last, so a bare onFocus/onBlur here would be silently overridden
+  // by every react-hook-form Controller call site.
+  const onFocus: NonNullable<TextInputProps['onFocus']> = (e) => {
+    setFocused(true);
+    reformat(false);
+    props.onFocus?.(e);
+  };
+  const onBlur: NonNullable<TextInputProps['onBlur']> = (e) => {
+    setFocused(false);
+    reformat(true);
+    props.onBlur?.(e);
+  };
 
   return (
     <View className={className}>
@@ -31,14 +115,16 @@ export function TextField({
         }`}
       >
         {icon && <Icon name={icon} size={17} color={colors.faint} />}
+        {prefix && <Mono className="text-body text-muted">{prefix}</Mono>}
         <TextInput
           className="flex-1 text-body text-fg"
           placeholderTextColor={colors.faint}
           secureTextEntry={hidden}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           style={{ paddingVertical: 12 }}
           {...props}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          inputAccessoryViewID={props.inputAccessoryViewID ?? accessoryID}
         />
         {secureTextEntry && (
           <Pressable
@@ -52,6 +138,7 @@ export function TextField({
         )}
       </View>
       {error && <Mono className="mt-1 text-micro text-danger">{error}</Mono>}
+      <KeyboardDoneBar nativeID={accessoryID} />
     </View>
   );
 }

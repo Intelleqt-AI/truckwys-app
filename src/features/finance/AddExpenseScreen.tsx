@@ -6,6 +6,7 @@ import { SheetScreen, SelectField, TextField, DateField, Button } from '@/compon
 import { createExpense, updateExpense, EXPENSE_CATEGORIES } from './api';
 import { useVehicles } from '@/features/fleet/api';
 import { num, str, pick } from '@/lib/api/list';
+import { parseNum, formatPlain } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -14,7 +15,19 @@ type Props = NativeStackScreenProps<AppStackParamList, 'AddExpense'>;
 
 const today = () => new Date().toISOString().slice(0, 10);
 // Web embeds fuel litres/price into `notes` as "Fuel: {L}L @ R{price}/L".
-const FUEL_NOTE = /Fuel:\s*([\d.]+)L\s*@\s*R?([\d.]+)\/L\s*\n?/i;
+//
+// The character class has to allow a comma and a grouping space, not just
+// [\d.]: a South African keyboard types `23,40`, and once the field grouped its
+// value on blur it can also be `1 350`. With the old dot-only pattern neither
+// re-populated on edit — the fields just came back empty. We still WRITE a
+// canonical dot-decimal, so the round-trip matches what web produces.
+const FUEL_NOTE = /Fuel:\s*([\d.,  ]+?)L\s*@\s*R?\s*([\d.,  ]+?)\/L\s*\n?/i;
+
+/** Field text for a parsed number: comma decimal, no grouping. */
+const asFieldValue = (v: string | null | undefined): string => {
+  const n = parseNum(v);
+  return n == null ? '' : formatPlain(n);
+};
 
 export function AddExpenseScreen({ route, navigation }: Props) {
   const editId = route.params?.id;
@@ -28,11 +41,14 @@ export function AddExpenseScreen({ route, navigation }: Props) {
 
   const [category, setCategory] = useState(str(pick(preview, ['category']), 'FUEL').toUpperCase());
   const [description, setDescription] = useState(str(pick(preview, ['description'])));
-  const [litres, setLitres] = useState(fuelMatch?.[1] ?? '');
-  const [pricePerLitre, setPricePerLitre] = useState(fuelMatch?.[2] ?? '');
+  const [litres, setLitres] = useState(asFieldValue(fuelMatch?.[1]));
+  const [pricePerLitre, setPricePerLitre] = useState(asFieldValue(fuelMatch?.[2]));
   const [amount, setAmount] = useState(
-    pick(preview, ['amount']) != null ? String(num(pick(preview, ['amount']))) : '',
+    pick(preview, ['amount']) != null
+      ? formatPlain(num(pick(preview, ['amount'])), 2)
+      : '',
   );
+  const [amountError, setAmountError] = useState<string>();
   const [date, setDate] = useState(str(pick(preview, ['expense_date', 'date'])) || today());
   const [vehicle, setVehicle] = useState(str(pick(preview, ['vehicle'])));
   const [vendor, setVendor] = useState(str(pick(preview, ['vendor'])));
@@ -42,10 +58,15 @@ export function AddExpenseScreen({ route, navigation }: Props) {
 
   const isFuel = category === 'FUEL';
   // Auto-calc amount for fuel when litres × price are both present (readonly then).
-  const litresN = Number(litres);
-  const priceN = Number(pricePerLitre);
+  //
+  // parseNum, not Number: Number('23,40') is NaN, which is why entering a price
+  // with the comma this keyboard produces left Amount empty and — if the user
+  // typed the total by hand to get past it — wrote the literal string 'RNaN'
+  // into the saved note below.
+  const litresN = parseNum(litres) ?? 0;
+  const priceN = parseNum(pricePerLitre) ?? 0;
   const autoAmount = isFuel && litresN > 0 && priceN > 0;
-  const effectiveAmount = autoAmount ? (litresN * priceN).toFixed(2) : amount;
+  const effectiveAmount = autoAmount ? formatPlain(litresN * priceN, 2) : amount;
 
   const vehicleOptions = [
     { label: 'None', value: '' },
@@ -54,17 +75,28 @@ export function AddExpenseScreen({ route, navigation }: Props) {
 
   const submit = async () => {
     if (!description.trim()) return toast.error('Enter a description');
-    if (!(Number(effectiveAmount) > 0)) return toast.error('Enter an amount');
+    const amountN = parseNum(effectiveAmount);
+    if (amountN == null) {
+      setAmountError('Enter a number, e.g. 1 250,00');
+      return toast.error('Amount is not a number');
+    }
+    if (!(amountN > 0)) {
+      setAmountError('Must be more than 0');
+      return toast.error('Enter an amount');
+    }
+    setAmountError(undefined);
     setBusy(true);
     try {
       let outNotes = notes.trim();
-      if (isFuel && litres && pricePerLitre) {
-        outNotes = `Fuel: ${litres}L @ R${Number(pricePerLitre).toFixed(2)}/L${outNotes ? `\n${outNotes}` : ''}`;
+      if (isFuel && litresN > 0 && priceN > 0) {
+        // Written with plain dot decimals and no grouping — this string is data
+        // the FUEL_NOTE regex has to read back, and web writes the same shape.
+        outNotes = `Fuel: ${litresN}L @ R${priceN.toFixed(2)}/L${outNotes ? `\n${outNotes}` : ''}`;
       }
       const payload = {
         category,
         description: description.trim(),
-        amount: Number(effectiveAmount),
+        amount: amountN,
         expense_date: date,
         // vehicle is a nullable FK, so null is right for "no vehicle".
         vehicle: vehicle || null,
@@ -106,21 +138,29 @@ export function AddExpenseScreen({ route, navigation }: Props) {
         {isFuel && (
           <View className="flex-row gap-3">
             <View className="flex-1">
-              <TextField label="Litres" placeholder="e.g. 350" keyboardType="numeric" value={litres} onChangeText={setLitres} />
+              <TextField label="Litres" placeholder="e.g. 350" keyboardType="decimal-pad" numeric value={litres} onChangeText={setLitres} />
             </View>
             <View className="flex-1">
-              <TextField label="Price / litre" placeholder="e.g. 23.40" keyboardType="numeric" value={pricePerLitre} onChangeText={setPricePerLitre} />
+              <TextField label="Price / litre" placeholder="e.g. 23,40" prefix="R" keyboardType="decimal-pad" value={pricePerLitre} onChangeText={setPricePerLitre} />
             </View>
           </View>
         )}
 
         <TextField
           label="Amount (ZAR)"
-          placeholder="0.00"
-          icon="dollar"
-          keyboardType="numeric"
+          placeholder="0,00"
+          prefix="R"
+          // decimal-pad, not numeric: on Android `numeric` offers a minus sign,
+          // which is meaningless for an expense amount.
+          keyboardType="decimal-pad"
+          numeric
+          decimals={2}
+          error={amountError}
           value={effectiveAmount}
-          onChangeText={setAmount}
+          onChangeText={(t) => {
+            setAmount(t);
+            setAmountError(undefined);
+          }}
           editable={!autoAmount}
         />
         <DateField label="Date" value={date} onChange={setDate} />

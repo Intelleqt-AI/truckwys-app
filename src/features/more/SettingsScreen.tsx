@@ -59,7 +59,7 @@ import {
   type NotificationChannel,
   type NotificationPrefs,
 } from './api';
-import { formatCurrency, formatDate, formatRelativeTime } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatRelativeTime, parseNum } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
@@ -929,27 +929,40 @@ function CompanySection() {
   }, [data, seeded]);
 
   const save = async () => {
-    // Same bounds the web company page enforces.
-    if (validityDays && (Number(validityDays) < 1 || Number(validityDays) > 365)) {
-      return toast.error('Quote validity must be between 1 and 365 days');
-    }
-    if (surchargePct && (Number(surchargePct) < 0 || Number(surchargePct) > 100)) {
-      return toast.error('Weight surcharge must be between 0 and 100%');
-    }
-    const nonNegative: [string, string][] = [
+    // Every numeric box is validated through parseNum first. The old guards
+    // compared Number(v) against bounds, and BOTH sides of a comparison are
+    // false for NaN — so a comma value passed every check and NaN went to the
+    // API, which is not a JSON number at all.
+    const numericFields: [string, string][] = [
+      ['Quote validity', validityDays],
+      ['Weight surcharge', surchargePct],
       ['Weight surcharge threshold', surchargeThreshold],
       ['Base rate / km', baseRate],
       ['Toll rate / km', tollRate],
       ['Fuel price', fuelPrice],
       ['SLA hours', slaHours],
     ];
-    for (const [label, v] of nonNegative) {
-      if (v && Number(v) < 0) return toast.error(`${label} can't be negative`);
+    for (const [label, v] of numericFields) {
+      if (v.trim() && parseNum(v) == null) return toast.error(`${label} is not a number`);
+    }
+
+    // Same bounds the web company page enforces.
+    const validityNum = parseNum(validityDays);
+    if (validityNum != null && (validityNum < 1 || validityNum > 365)) {
+      return toast.error('Quote validity must be between 1 and 365 days');
+    }
+    const surchargeNum = parseNum(surchargePct);
+    if (surchargeNum != null && (surchargeNum < 0 || surchargeNum > 100)) {
+      return toast.error('Weight surcharge must be between 0 and 100%');
+    }
+    for (const [label, v] of numericFields) {
+      const n = parseNum(v);
+      if (n != null && n < 0) return toast.error(`${label} can't be negative`);
     }
 
     // Only send a numeric field when it has a value — an empty box must leave
     // the stored default alone rather than zeroing it.
-    const optionalNum = (v: string) => (v.trim() ? Number(v) : undefined);
+    const optionalNum = (v: string) => (v.trim() ? (parseNum(v) ?? undefined) : undefined);
 
     setBusy(true);
     try {
@@ -1022,7 +1035,7 @@ function CompanySection() {
           <SelectField label="Province" options={PROVINCE_OPTIONS} value={province} onSelect={setProvince} />
         </View>
       </View>
-      <TextField label="Postal code" keyboardType="numeric" value={postalCode} onChangeText={setPostalCode} />
+      <TextField label="Postal code" keyboardType="number-pad" value={postalCode} onChangeText={setPostalCode} />
 
       <Label className="mt-1 text-muted">Contact</Label>
       <TextField label="Phone" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
@@ -1043,23 +1056,23 @@ function CompanySection() {
         Whether your fleet is set up to run loads that cross into neighbouring countries. Set to
         &quot;No&quot; and any quote whose route actually crosses a border is refused rather than priced.
       </Txt>
-      <TextField label="Quote validity (days)" placeholder="e.g. 7" keyboardType="numeric" value={validityDays} onChangeText={setValidityDays} />
-      <TextField label="Base rate / km (ZAR)" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
-      <TextField label="Toll rate / km (ZAR)" placeholder="e.g. 0.95" icon="dollar" keyboardType="numeric" value={tollRate} onChangeText={setTollRate} />
+      <TextField label="Quote validity (days)" placeholder="e.g. 7" keyboardType="number-pad" value={validityDays} onChangeText={setValidityDays} />
+      <TextField label="Base rate / km" prefix="R" placeholder="e.g. 25" keyboardType="decimal-pad" value={baseRate} onChangeText={setBaseRate} />
+      <TextField label="Toll rate / km" prefix="R" placeholder="e.g. 0,95" keyboardType="decimal-pad" value={tollRate} onChangeText={setTollRate} />
       <Txt className="-mt-1 text-caption text-faint">
         Fallback only — used when the routing service can&apos;t itemise toll plazas.
       </Txt>
-      <TextField label="Diesel price / litre (ZAR)" placeholder="e.g. 21.70" icon="fuel" keyboardType="numeric" value={fuelPrice} onChangeText={setFuelPrice} />
+      <TextField label="Diesel price / litre" prefix="R" placeholder="e.g. 21,70" keyboardType="decimal-pad" value={fuelPrice} onChangeText={setFuelPrice} />
       <Txt className="-mt-1 text-caption text-faint">
         Fallback only — the live national diesel price is used when available.
       </Txt>
-      <TextField label="Default SLA (hours)" placeholder="e.g. 48" icon="clock" keyboardType="numeric" value={slaHours} onChangeText={setSlaHours} />
+      <TextField label="Default SLA (hours)" placeholder="e.g. 48" icon="clock" keyboardType="number-pad" value={slaHours} onChangeText={setSlaHours} />
       <View className="flex-row gap-3">
         <View className="flex-1">
-          <TextField label="Surcharge over (kg)" placeholder="e.g. 5000" keyboardType="numeric" value={surchargeThreshold} onChangeText={setSurchargeThreshold} />
+          <TextField label="Surcharge over (kg)" placeholder="e.g. 5 000" keyboardType="number-pad" numeric value={surchargeThreshold} onChangeText={setSurchargeThreshold} />
         </View>
         <View className="flex-1">
-          <TextField label="Surcharge (%)" placeholder="e.g. 15" keyboardType="numeric" value={surchargePct} onChangeText={setSurchargePct} />
+          <TextField label="Surcharge (%)" placeholder="e.g. 15" keyboardType="decimal-pad" value={surchargePct} onChangeText={setSurchargePct} />
         </View>
       </View>
 

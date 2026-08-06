@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, TextField, SelectField, Button } from '@/components/ui';
 import { createVehicleType, updateVehicleType } from './api';
 import { num, str, pick } from '@/lib/api/list';
+import { parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -31,13 +32,15 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
 
   const submit = async () => {
     if (!name.trim()) return toast.error('Name is required');
+    if (capacity.trim() && parseNum(capacity) == null) return toast.error('Capacity is not a number');
+    if (baseRate.trim() && parseNum(baseRate) == null) return toast.error('Base rate is not a number');
     setBusy(true);
     // capacity is in tons (web stores vehicle-type capacity as tons directly).
     const payload = {
       name: name.trim(),
       description: description.trim(),
-      capacity: capacity ? Number(capacity) : 0,
-      base_rate: baseRate ? Number(baseRate) : 0,
+      capacity: parseNum(capacity) ?? 0,
+      base_rate: parseNum(baseRate) ?? 0,
       active: activeStr === 'true',
     };
     try {
@@ -66,10 +69,10 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
         <TextField label="Description" placeholder="Optional" value={description} onChangeText={setDescription} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Capacity (tons)" placeholder="e.g. 30" icon="box" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
+            <TextField label="Capacity (tons)" placeholder="e.g. 30" icon="box" keyboardType="decimal-pad" value={capacity} onChangeText={setCapacity} />
           </View>
           <View className="flex-1">
-            <TextField label="Base rate / km" placeholder="e.g. 25" icon="dollar" keyboardType="numeric" value={baseRate} onChangeText={setBaseRate} />
+            <TextField label="Base rate / km" prefix="R" placeholder="e.g. 25" keyboardType="decimal-pad" value={baseRate} onChangeText={setBaseRate} />
           </View>
         </View>
         {editing && <SelectField label="Status" options={ACTIVE_OPTIONS} value={activeStr} onSelect={setActiveStr} />}

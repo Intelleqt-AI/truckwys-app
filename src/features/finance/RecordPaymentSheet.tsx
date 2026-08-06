@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Modal, Pressable, ScrollView } from 'react-native';
 import { Txt, Mono, Button, TextField, DateField, SelectField, type Option } from '@/components/ui';
-import { formatCurrency } from '@/lib/formatters';
+import { formatCurrency, formatPlain, parseNum } from '@/lib/formatters';
 
 // Records a payment against an invoice — the mobile counterpart of the web
 // invoice page's inline payment form.
@@ -58,7 +58,11 @@ export function RecordPaymentSheet({
   const [method, setMethod] = useState('EFT');
   const [reference, setReference] = useState('');
 
-  const amountNum = Number(amount) || 0;
+  // parseNum, not Number: with `|| 0` a comma amount left RECORD permanently
+  // disabled and told the user nothing about why.
+  const parsed = parseNum(amount);
+  const invalid = amount.trim() !== '' && parsed == null;
+  const amountNum = parsed ?? 0;
   // The backend rejects an overpayment (payments.py: amount > invoice.balance),
   // so catch it here rather than letting the user submit into a 400.
   const overpaying = amountNum > balance;
@@ -81,15 +85,18 @@ export function RecordPaymentSheet({
               <View>
                 <TextField
                   label="Amount"
-                  placeholder="0.00"
-                  icon="dollar"
-                  keyboardType="numeric"
+                  placeholder="0,00"
+                  prefix="R"
+                  keyboardType="decimal-pad"
+                  numeric
+                  decimals={2}
+                  error={invalid ? 'Enter a number, e.g. 12 500,00' : undefined}
                   value={amount}
                   onChangeText={setAmount}
                 />
                 <Pressable
                   hitSlop={8}
-                  onPress={() => setAmount(String(balance))}
+                  onPress={() => setAmount(formatPlain(balance, 2))}
                   className="mt-1.5 self-start"
                 >
                   <Mono className="text-caption text-accent">

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import {
   View,
   Pressable,
@@ -9,7 +9,7 @@ import {
   ScrollView,
   type TextInputProps,
 } from 'react-native';
-import { Txt, Icon } from '@/components/ui';
+import { Txt, Icon, KeyboardDoneBar } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // Shared shell for the sign-in flow. These screens deliberately follow the
@@ -68,6 +68,7 @@ export function AuthField({
 }) {
   const { colors } = useTheme();
   const [hidden, setHidden] = useState(!!secure);
+  const accessoryID = useId();
 
   return (
     <View
@@ -81,6 +82,7 @@ export function AuthField({
         accessibilityLabel={accessibilityLabel}
         style={{ paddingVertical: 15 }}
         {...rest}
+        inputAccessoryViewID={rest.inputAccessoryViewID ?? accessoryID}
       />
       {secure && (
         <Pressable
@@ -92,6 +94,8 @@ export function AuthField({
           <Icon name="eye" size={18} color={colors.faint} />
         </Pressable>
       )}
+      {/* The OTP screen's number-pad has no return key to dismiss with. */}
+      <KeyboardDoneBar nativeID={accessoryID} />
     </View>
   );
 }

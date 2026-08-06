@@ -1,17 +1,26 @@
-// UK-English / South-African formatting — ported verbatim from the web app's
-// src/lib/formatters.ts. Money is ZAR (en-ZA), never abbreviated. Dates/numbers
-// use en-GB. Relies on Hermes Intl (enabled in Expo SDK 57).
+// South-African formatting. Money is ZAR, never abbreviated outside KPI tiles.
+//
+// ONE locale for every number: en-ZA. That means a comma decimal mark and a
+// non-breaking space for thousands — `R 1 234,56`, `50 000`, `60,6%`. This file
+// used to format money as en-ZA and everything else as en-GB, which put
+// `R 1 234,56` and `123,456 km` on the same screen with the comma meaning two
+// different things. Dates stay en-GB because `d MMM yyyy` is right for SA; only
+// the numeric locale was wrong.
+//
+// Relies on Hermes Intl, enabled in this project's RN 0.81 build (Expo SDK 54).
+// Hermes' ICU is partial, though: `notation: 'compact'` is unreliable, which is
+// why formatCurrencyCompact below is hand-rolled.
 
 export const formatCurrency = (
   amount: number | null | undefined,
   options: Intl.NumberFormatOptions = {},
 ): string => {
-  if (amount == null || isNaN(Number(amount))) return 'R0.00';
+  const n = Number(amount);
   return new Intl.NumberFormat('en-ZA', {
     style: 'currency',
     currency: 'ZAR',
     ...options,
-  }).format(Number(amount));
+  }).format(amount == null || isNaN(n) ? 0 : n);
 };
 
 export const formatNumber = (
@@ -19,16 +28,71 @@ export const formatNumber = (
   options: Intl.NumberFormatOptions = {},
 ): string => {
   if (value == null || isNaN(Number(value))) return '0';
-  return new Intl.NumberFormat('en-GB', options).format(Number(value));
+  return new Intl.NumberFormat('en-ZA', options).format(Number(value));
 };
 
+/** Takes a fraction (0..1). For a 0..100 value use formatPercent instead. */
 export const formatPercentage = (value: number | null | undefined, decimals = 1): string => {
-  if (value == null || isNaN(Number(value))) return '0.0%';
-  return new Intl.NumberFormat('en-GB', {
+  if (value == null || isNaN(Number(value))) return formatPercent(0, decimals);
+  return new Intl.NumberFormat('en-ZA', {
     style: 'percent',
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(Number(value));
+};
+
+/**
+ * A number as bare editable text: comma decimal, no grouping — `23,4`, `1500`.
+ *
+ * Deliberately not Intl with `useGrouping: false`. This is what goes into a text
+ * field the moment it gains focus, so it's the one conversion that must not
+ * depend on how complete Hermes' ICU happens to be; a stray grouping space would
+ * land in the middle of what someone is typing.
+ */
+export const formatPlain = (value: number, decimals?: number): string =>
+  (decimals == null ? String(value) : value.toFixed(decimals)).replace('.', ',');
+
+/**
+ * Read a number a human typed.
+ *
+ * Returns `null` — not NaN, not 0 — when the input isn't a number, so callers
+ * have to decide what to do about it. That's the point: `Number("23,40")` is
+ * NaN and `parseFloat("23,40")` is 23, and both of those silently became a
+ * wrong price. A null forces a validation error instead.
+ *
+ * Accepts what the app itself renders (`R 1 234,56`) as well as what a South
+ * African keyboard produces (`23,40`) and a dot-decimal habit (`23.40`).
+ */
+export const parseNum = (input: string | number | null | undefined): number | null => {
+  if (typeof input === 'number') return Number.isFinite(input) ? input : null;
+  if (input == null) return null;
+
+  // Drop every space-like grouping char Intl may have emitted, plus the rand
+  // symbol / currency code if the value was round-tripped from a display string.
+  let s = input.replace(/\s/g, '').replace(/ZAR|R/gi, '');
+  if (!s) return null;
+
+  const negative = s.startsWith('-');
+  if (negative || s.startsWith('+')) s = s.slice(1);
+
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+  if (lastComma !== -1 && lastDot !== -1) {
+    // Both marks present, so the rightmost is the decimal one and the other is
+    // grouping — handles `1.234,56` and `1,234.56` without guessing a locale.
+    const groupChar = lastComma > lastDot ? '.' : ',';
+    s = s.split(groupChar).join('').replace(',', '.');
+  } else if (lastComma !== -1) {
+    // A single comma is a decimal mark (en-ZA). Several can only be grouping.
+    s = s.split(',').length - 1 > 1 ? s.split(',').join('') : s.replace(',', '.');
+  } else if (s.split('.').length - 1 > 1) {
+    s = s.split('.').join('');
+  }
+
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  return negative ? -n : n;
 };
 
 export const formatDistance = (kilometres: number): string => `${formatNumber(kilometres)} km`;
@@ -83,19 +147,30 @@ export const formatCompactNumber = (value: number): string => {
   return formatNumber(value);
 };
 
-// Compact ZAR for KPI tiles: R 507k, R 1.1M — never long. Full amounts still use
+// Compact ZAR for KPI tiles: R 507k, R 1,1M — never long. Full amounts still use
 // formatCurrency in detail views.
+//
+// Hand-rolled rather than Intl `notation: 'compact'`, which Hermes' partial ICU
+// does not implement reliably. formatNumber does the fraction digit so the
+// decimal mark is a comma like everywhere else — toFixed() always emits a dot.
 export const formatCurrencyCompact = (amount: number | null | undefined): string => {
   const n = Number(amount);
-  if (amount == null || isNaN(n)) return 'R0';
+  if (amount == null || isNaN(n)) return 'R 0';
   const sign = n < 0 ? '-' : '';
   const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${sign}R ${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1000) return `${sign}R ${Math.round(abs / 1000)}k`;
-  return `${sign}R ${Math.round(abs)}`;
+  if (abs >= 1_000_000) {
+    const m = formatNumber(abs / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return `${sign}R ${m}M`;
+  }
+  if (abs >= 1000) return `${sign}R ${formatNumber(Math.round(abs / 1000))}k`;
+  return `${sign}R ${formatNumber(Math.round(abs))}`;
 };
 
+/** Takes a 0..100 value. For a 0..1 fraction use formatPercentage instead. */
 export const formatPercent = (value: number | null | undefined, decimals = 1): string => {
-  if (value == null || isNaN(Number(value))) return '0.0%';
-  return `${Number(value).toFixed(decimals)}%`;
+  const n = Number(value);
+  return `${formatNumber(value == null || isNaN(n) ? 0 : n, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })}%`;
 };

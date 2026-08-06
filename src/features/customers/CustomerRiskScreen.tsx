@@ -14,7 +14,7 @@ import type { BadgeTone } from '@/components/ui/primitives';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useCustomerRisk } from './api';
 import { asArray, num, str, pick } from '@/lib/api/list';
-import { formatCurrency, formatDate } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -62,13 +62,13 @@ export function CustomerRiskScreen({ route, navigation }: Props) {
 
           <View className="mb-5 flex-row flex-wrap gap-3">
             <View style={{ width: '47.5%' }}>
-              <StatCard label="AI risk" value={`${riskPct}%`} />
+              <StatCard label="AI risk" value={formatPercent(riskPct, 0)} />
             </View>
             <View style={{ width: '47.5%' }}>
               <StatCard label="Avg days to pay" value={`${num(pick(stats, ['avg_days_to_pay']))}d`} />
             </View>
             <View style={{ width: '47.5%' }}>
-              <StatCard label="On-time rate" value={`${num(pick(stats, ['on_time_pct']))}%`} />
+              <StatCard label="On-time rate" value={formatPercent(num(pick(stats, ['on_time_pct'])))} />
             </View>
             <View style={{ width: '47.5%' }}>
               <StatCard label="Overdue >30d" value={formatCurrency(num(pick(stats, ['overdue_30_total'])), { maximumFractionDigits: 0 })} />
@@ -155,7 +155,7 @@ function RiskBadge({ band, riskPct }: { band: string; riskPct: number }) {
   const tone = BAND_TONE[band] ?? 'neutral';
   return (
     <View className="mb-5 items-center rounded-xs border border-line bg-surface py-6">
-      <Mono style={{ fontSize: 44, fontWeight: '700', color }}>{riskPct}%</Mono>
+      <Mono style={{ fontSize: 44, fontWeight: '700', color }}>{formatPercent(riskPct, 0)}</Mono>
       <View className="mt-2">
         <Badge label={`${band} risk`} tone={tone} />
       </View>

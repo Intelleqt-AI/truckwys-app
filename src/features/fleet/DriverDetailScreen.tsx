@@ -5,7 +5,7 @@ import { SheetScreen, StatCard, StatusPill, Group, DetailRow, Avatar, Button } f
 import { ErrorState } from '@/components/feedback';
 import { useDriver, deleteDriver } from './api';
 import { num, str, pick } from '@/lib/api/list';
-import { formatCurrency } from '@/lib/formatters';
+import { formatCurrency, formatPercent } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -58,10 +58,10 @@ export function DriverDetailScreen({ route, navigation }: Props) {
           <StatCard label="Safety" value={`${num(pick(d, ['safety_score']))}/100`} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="On-time" value={`${num(pick(d, ['on_time_score', 'on_time']))}%`} />
+          <StatCard label="On-time" value={formatPercent(num(pick(d, ['on_time_score', 'on_time'])))} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Efficiency" value={`${num(pick(d, ['efficiency_score', 'efficiency']))}%`} />
+          <StatCard label="Efficiency" value={formatPercent(num(pick(d, ['efficiency_score', 'efficiency'])))} />
         </View>
         <View style={{ width: '47.5%' }}>
           <StatCard

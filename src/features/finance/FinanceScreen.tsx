@@ -40,7 +40,13 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useTheme } from '@/theme/ThemeProvider';
-import { formatCurrency, formatCurrencyCompact, formatDate } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatCurrencyCompact,
+  formatDate,
+  formatNumber,
+  formatPercent,
+} from '@/lib/formatters';
 import type { TabParamList, FinanceTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 
@@ -297,13 +303,13 @@ function ReportsTab() {
           <StatCard label="Total revenue" value={formatCurrencyCompact(f.totalRevenue)} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Net margin" value={`${f.netMarginPct}%`} />
+          <StatCard label="Net margin" value={formatPercent(f.netMarginPct)} />
         </View>
         <View style={{ width: '47.5%' }}>
           <StatCard label="Outstanding" value={formatCurrencyCompact(f.outstanding)} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="DSO" value={`${f.dso}d`} />
+          <StatCard label="DSO" value={`${formatNumber(f.dso, { maximumFractionDigits: 1 })}d`} />
         </View>
       </View>
 
@@ -329,7 +335,7 @@ function ReportsTab() {
       {marginByLane.length > 0 && (
         <Group label="Margin by lane">
           {marginByLane.slice(0, 8).map((l) => (
-            <DetailRow key={l.lane} label={l.lane} value={`${l.margin}%`} mono={false} />
+            <DetailRow key={l.lane} label={l.lane} value={formatPercent(l.margin)} mono={false} />
           ))}
         </Group>
       )}

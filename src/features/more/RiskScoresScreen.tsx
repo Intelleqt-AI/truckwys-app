@@ -3,6 +3,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, Group, ListRow, Badge, Mono, EmptyState, type Tone } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useRiskScores } from './api';
+import { formatPercent } from '@/lib/formatters';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'RiskScores'>;
@@ -32,7 +33,7 @@ export function RiskScoresScreen({ navigation }: Props) {
             <ListRow
               key={r.id || i}
               title={r.customer}
-              subtitle={r.fee ? `Fast Pay fee ${r.fee}%` : undefined}
+              subtitle={r.fee ? `Fast Pay fee ${formatPercent(r.fee, 2)}` : undefined}
               trailing={
                 <View className="items-end gap-1">
                   {r.score ? <Mono className="text-caption text-muted">{r.score}/100</Mono> : null}

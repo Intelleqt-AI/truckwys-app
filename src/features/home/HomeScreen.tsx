@@ -24,7 +24,12 @@ import { useUnreadCount } from '@/features/more/api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useRole, visibleTabs } from '@/lib/access';
 import { useTheme } from '@/theme/ThemeProvider';
-import { formatCurrency, formatCurrencyCompact } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatCurrencyCompact,
+  formatNumber,
+  formatPercent,
+} from '@/lib/formatters';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 
 export function HomeScreen() {
@@ -141,7 +146,7 @@ export function HomeScreen() {
             value={formatCurrencyCompact(f.totalRevenue)}
             delta={
               f.revenueChangePct
-                ? `${f.revenueChangePct > 0 ? '+' : ''}${f.revenueChangePct}%`
+                ? `${f.revenueChangePct > 0 ? '+' : ''}${formatPercent(f.revenueChangePct)}`
                 : undefined
             }
             deltaTone={f.revenueChangePct >= 0 ? 'up' : 'down'}
@@ -149,10 +154,12 @@ export function HomeScreen() {
           <View className="flex-row gap-3">
             <StatCard
               label="Net margin"
-              value={`${f.netMarginPct}%`}
+              // The API sends this unrounded (views_finance.py has no round()),
+              // so interpolating it read "60.604509130638846%".
+              value={formatPercent(f.netMarginPct)}
               delta={
                 f.marginChangePts
-                  ? `${f.marginChangePts > 0 ? '+' : ''}${f.marginChangePts} pts`
+                  ? `${f.marginChangePts > 0 ? '+' : ''}${formatNumber(f.marginChangePts, { maximumFractionDigits: 1 })} pts`
                   : undefined
               }
               deltaTone={f.marginChangePts >= 0 ? 'up' : 'down'}
@@ -160,7 +167,7 @@ export function HomeScreen() {
             <StatCard
               label="Outstanding"
               value={formatCurrencyCompact(f.outstanding)}
-              sub={f.dso ? `DSO ${f.dso}d` : undefined}
+              sub={f.dso ? `DSO ${formatNumber(f.dso, { maximumFractionDigits: 1 })}d` : undefined}
             />
           </View>
         </View>

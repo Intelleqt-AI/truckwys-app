@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, SelectField, TextField, DateField, Button, Label } from '@/components/ui';
 import { createVehicle, updateVehicle, useVehicleTypesList, useDrivers } from './api';
 import { str, num, pick } from '@/lib/api/list';
+import { parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -68,8 +69,25 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   const [status, setStatus] = useState(str(pick(preview, ['status'])).toUpperCase() || 'AVAILABLE');
   const [driver, setDriver] = useState(pick(preview, ['driver']) != null ? String(pick(preview, ['driver'])) : '');
 
+  // Number() was NaN for anything with a comma or a grouping space, and these
+  // went straight into the payload — DRF then 400s on "a valid number is
+  // required", which read as the whole form being broken.
+  const numOrUndef = (v: string) => (v.trim() ? (parseNum(v) ?? undefined) : undefined);
+  const numOrNull = (v: string) => (v.trim() ? parseNum(v) : null);
+  const capacityTons = capacity.trim() ? parseNum(capacity) : undefined;
+
   const submit = async () => {
     if (!plate.trim()) return toast.error('Registration plate is required');
+    const badField = (
+      [
+        ['Year', year],
+        ['Capacity', capacity],
+        ['Mileage', mileage],
+        ['Service interval', serviceInterval],
+        ['Last service', lastServiceMileage],
+      ] as [string, string][]
+    ).find(([, v]) => v.trim() && parseNum(v) == null);
+    if (badField) return toast.error(`${badField[0]} is not a number`);
     setBusy(true);
     const typeId = (types ?? []).find((t) => t.name === type)?.id;
     const payload = {
@@ -81,11 +99,11 @@ export function AddVehicleScreen({ route, navigation }: Props) {
       status,
       registration_expiry: regExpiry || undefined,
       last_maintenance_date: lastMaint || undefined,
-      year: year ? Number(year) : undefined,
-      capacity: capacity ? Number(capacity) * 1000 : undefined,
-      mileage: mileage ? Number(mileage) : undefined,
-      service_interval_km: serviceInterval ? Number(serviceInterval) : null,
-      last_service_mileage: lastServiceMileage ? Number(lastServiceMileage) : null,
+      year: numOrUndef(year),
+      capacity: capacityTons != null ? capacityTons * 1000 : undefined,
+      mileage: numOrUndef(mileage),
+      service_interval_km: numOrNull(serviceInterval),
+      last_service_mileage: numOrNull(lastServiceMileage),
       driver: driver ? Number(driver) : null,
       ...(typeId ? { vehicle_type: typeId } : {}),
     };
@@ -122,7 +140,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
         </View>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Year" placeholder="e.g. 2022" keyboardType="numeric" value={year} onChangeText={setYear} />
+            <TextField label="Year" placeholder="e.g. 2022" keyboardType="number-pad" value={year} onChangeText={setYear} />
           </View>
           <View className="flex-1">
             <TextField label="VIN" placeholder="17-character VIN" autoCapitalize="characters" value={vin} onChangeText={setVin} />
@@ -139,10 +157,10 @@ export function AddVehicleScreen({ route, navigation }: Props) {
         </View>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Capacity (tons)" placeholder="e.g. 30" keyboardType="numeric" value={capacity} onChangeText={setCapacity} />
+            <TextField label="Capacity (tons)" placeholder="e.g. 30" keyboardType="decimal-pad" value={capacity} onChangeText={setCapacity} />
           </View>
           <View className="flex-1">
-            <TextField label="Mileage (km)" placeholder="e.g. 120000" keyboardType="numeric" value={mileage} onChangeText={setMileage} />
+            <TextField label="Mileage (km)" placeholder="e.g. 120 000" keyboardType="number-pad" numeric value={mileage} onChangeText={setMileage} />
           </View>
         </View>
         <SelectField label="Assigned driver" icon="user" options={driverOptions} value={driver} onSelect={setDriver} />
@@ -152,10 +170,10 @@ export function AddVehicleScreen({ route, navigation }: Props) {
         <DateField label="Last maintenance date" value={lastMaint} onChange={setLastMaint} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Service interval (km)" placeholder="e.g. 15000" keyboardType="numeric" value={serviceInterval} onChangeText={setServiceInterval} />
+            <TextField label="Service interval (km)" placeholder="e.g. 15 000" keyboardType="number-pad" numeric value={serviceInterval} onChangeText={setServiceInterval} />
           </View>
           <View className="flex-1">
-            <TextField label="Last service (km)" placeholder="e.g. 110000" keyboardType="numeric" value={lastServiceMileage} onChangeText={setLastServiceMileage} />
+            <TextField label="Last service (km)" placeholder="e.g. 110 000" keyboardType="number-pad" numeric value={lastServiceMileage} onChangeText={setLastServiceMileage} />
           </View>
         </View>
       </View>

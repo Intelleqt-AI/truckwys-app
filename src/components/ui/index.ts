@@ -13,7 +13,14 @@ export {
   toneForStatus,
   type Tone,
 } from './primitives';
-export { TextField, SearchField, SegmentedControl, Toggle, RadioRows } from './forms';
+export {
+  TextField,
+  SearchField,
+  SegmentedControl,
+  Toggle,
+  RadioRows,
+  KeyboardDoneBar,
+} from './forms';
 export { SelectField, type Option } from './SelectField';
 export { DateField } from './DateField';
 export { ProfitCurve, type CurvePoint } from './ProfitCurve';

@@ -23,7 +23,7 @@ import { AssignSheet, assignedIds } from './AssignSheet';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL } from './constants';
 import { num, str, pick } from '@/lib/api/list';
 import { invalidateFor } from '@/lib/queryInvalidation';
-import { formatCurrency, formatDate } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -49,7 +49,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const rate = num(pick(l, ['rate']));
   const distance = num(pick(l, ['distance']));
   const total = num(pick(l, ['total_amount']));
-  const ratePerKm = distance ? (rate / distance).toFixed(2) : '0.00';
+  const ratePerKm = distance ? rate / distance : 0;
   const invoiced = status === 'INVOICED' || !!pick(l, ['invoice_id', 'invoice']);
   const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
   const current = assignedIds(l);
@@ -238,13 +238,16 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           <StatCard label="Total amount" value={formatCurrency(total, { maximumFractionDigits: 0 })} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Distance" value={`${distance} km`} />
+          <StatCard label="Distance" value={`${formatNumber(distance)} km`} />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Weight" value={`${(num(pick(l, ['weight'])) / 1000).toFixed(0)} t`} />
+          <StatCard
+            label="Weight"
+            value={`${formatNumber(num(pick(l, ['weight'])) / 1000, { maximumFractionDigits: 0 })} t`}
+          />
         </View>
         <View style={{ width: '47.5%' }}>
-          <StatCard label="Rate / km" value={`R ${ratePerKm}`} />
+          <StatCard label="Rate / km" value={formatCurrency(ratePerKm)} />
         </View>
       </View>
 

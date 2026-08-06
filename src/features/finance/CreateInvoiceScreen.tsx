@@ -5,7 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, SelectField, TextField, DateField, Button, DetailRow, Group } from '@/components/ui';
 import { createInvoice } from './api';
 import { useCustomers } from '@/features/customers/api';
-import { formatCurrency } from '@/lib/formatters';
+import { formatCurrency, parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -33,12 +33,17 @@ export function CreateInvoiceScreen({ navigation }: Props) {
     () => (customers ?? []).map((c) => ({ label: c.name, value: String(c.id) })),
     [customers],
   );
-  const sub = Number(subtotal) || 0;
+  // parseNum, not Number: `|| 0` on a NaN turned a comma amount into a
+  // zero-value invoice whose VAT and total both rendered R 0,00.
+  const subParsed = parseNum(subtotal);
+  const subInvalid = subtotal.trim() !== '' && subParsed == null;
+  const sub = subParsed ?? 0;
   const vat = Math.round(sub * 0.15 * 100) / 100;
   const total = sub + vat;
 
   const submit = async () => {
     if (!customerId) return toast.error('Select a customer');
+    if (subInvalid) return toast.error('Amount is not a number');
     if (sub <= 0) return toast.error('Enter an amount');
     if (dueDate < today()) return toast.error('Due date cannot be in the past');
     setBusy(true);
@@ -76,7 +81,17 @@ export function CreateInvoiceScreen({ navigation }: Props) {
     >
       <View className="gap-4">
         <SelectField label="Customer" icon="building" placeholder="Select customer" options={options} value={customerId} onSelect={setCustomerId} />
-        <TextField label="Amount (excl. VAT)" placeholder="0.00" icon="dollar" keyboardType="numeric" value={subtotal} onChangeText={setSubtotal} />
+        <TextField
+          label="Amount (excl. VAT)"
+          placeholder="0,00"
+          prefix="R"
+          keyboardType="decimal-pad"
+          numeric
+          decimals={2}
+          error={subInvalid ? 'Enter a number, e.g. 12 500,00' : undefined}
+          value={subtotal}
+          onChangeText={setSubtotal}
+        />
         <TextField label="Description" placeholder="What is this invoice for?" value={description} onChangeText={setDescription} />
         <DateField label="Due date" value={dueDate} onChange={setDueDate} />
 

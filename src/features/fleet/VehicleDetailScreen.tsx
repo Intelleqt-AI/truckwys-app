@@ -20,7 +20,13 @@ import { ErrorState } from '@/components/feedback';
 import { useVehicle, useVehicleLoads, updateVehicle, deleteVehicle, VEHICLE_STATUSES } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { num, str, pick, asArray } from '@/lib/api/list';
-import { formatCurrency, formatCurrencyCompact, formatDate, formatNumber } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatCurrencyCompact,
+  formatDate,
+  formatNumber,
+  formatPercent,
+} from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -152,7 +158,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
               <StatCard label="Fuel efficiency" value={`${num(pick(v, ['fuel_efficiency_score']))}/100`} />
             </View>
             <View style={{ width: '47.5%' }}>
-              <StatCard label="Uptime" value={`${num(pick(v, ['uptime_percentage'])).toFixed(1)}%`} />
+              <StatCard label="Uptime" value={formatPercent(num(pick(v, ['uptime_percentage'])))} />
             </View>
             <View style={{ width: '47.5%' }}>
               <StatCard label="Mileage" value={`${formatNumber(mileage)} km`} />
@@ -163,16 +169,23 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow label="VIN" value={str(pick(v, ['vin']), '—')} />
             <DetailRow label="Plate" value={str(pick(v, ['plate', 'registration']), '—')} />
             <DetailRow label="Type" value={str(pick(v, ['vehicle_type_name', 'vehicle_type']), '—')} mono={false} />
-            <DetailRow label="Capacity" value={`${(num(pick(v, ['capacity', 'capacity_kg'])) / 1000).toFixed(1)} t`} />
+            <DetailRow
+              label="Capacity"
+              value={`${formatNumber(num(pick(v, ['capacity', 'capacity_kg'])) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
+            />
             <DetailRow label="Fuel type" value={str(pick(v, ['fuel_type']), '—')} mono={false} />
             <DetailRow label="Year" value={str(pick(v, ['year']), '—')} />
             <DetailRow label="Driver" value={str(pick(v, ['driver_name']), 'Unassigned')} mono={false} last />
           </Group>
 
           <Group label="Economics">
-            <DetailRow label="Cost per km" value={`R ${num(pick(v, ['cost_per_km'])).toFixed(2)}`} />
+            <DetailRow label="Cost per km" value={formatCurrency(num(pick(v, ['cost_per_km'])))} />
             <DetailRow label="Margin per trip" value={formatCurrency(num(pick(v, ['margin_per_trip'])))} />
-            <DetailRow label="Fuel consumption" value={`${num(pick(v, ['fuel_consumption_per_km'])).toFixed(2)} L/km`} last />
+            <DetailRow
+              label="Fuel consumption"
+              value={`${formatNumber(num(pick(v, ['fuel_consumption_per_km'])), { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L/km`}
+              last
+            />
           </Group>
 
           <Group label="Maintenance">
@@ -202,7 +215,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
               <StatCard label="Avg / trip" value={formatCurrencyCompact(avgRevPerTrip)} />
             </View>
             <View style={{ width: '47.5%' }}>
-              <StatCard label="Revenue / km" value={`R ${revPerKm.toFixed(2)}`} />
+              <StatCard label="Revenue / km" value={formatCurrency(revPerKm)} />
             </View>
             <View style={{ width: '47.5%' }}>
               <StatCard label="AI health" value={`${num(pick(v, ['ai_health_score']))}/100`} />
@@ -218,10 +231,16 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
           </View>
 
           <Group label="Cost analysis">
-            <DetailRow label="Cost per km" value={`R ${num(pick(v, ['cost_per_km'])).toFixed(2)}`} />
+            <DetailRow label="Cost per km" value={formatCurrency(num(pick(v, ['cost_per_km'])))} />
             <DetailRow label="Margin per trip" value={formatCurrency(num(pick(v, ['margin_per_trip'])))} />
-            <DetailRow label="Fuel consumption" value={`${num(pick(v, ['fuel_consumption_per_km'])).toFixed(2)} L/km`} />
-            <DetailRow label="Capacity" value={`${(num(pick(v, ['capacity', 'capacity_kg'])) / 1000).toFixed(1)} t`} />
+            <DetailRow
+              label="Fuel consumption"
+              value={`${formatNumber(num(pick(v, ['fuel_consumption_per_km'])), { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L/km`}
+            />
+            <DetailRow
+              label="Capacity"
+              value={`${formatNumber(num(pick(v, ['capacity', 'capacity_kg'])) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
+            />
             <DetailRow label="Fuel type" value={str(pick(v, ['fuel_type']), '—')} mono={false} />
             <DetailRow label="Mileage" value={`${formatNumber(mileage)} km`} last />
           </Group>

@@ -1,7 +1,9 @@
-import { type ReactNode, useLayoutEffect, useCallback } from 'react';
+import { type ReactNode, useLayoutEffect, useCallback, useState } from 'react';
 import { View, ScrollView, Pressable, RefreshControl } from 'react-native';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { AmbientGlow } from './layout';
@@ -56,6 +58,14 @@ export function SheetScreen({
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const keyboardOverlap = useKeyboardOverlap();
+  const [footerHeight, setFooterHeight] = useState(0);
+  // Timed rather than a bare style change so the footer rides up with the
+  // keyboard instead of snapping ahead of it.
+  const footerLift = useAnimatedStyle(
+    () => ({ transform: [{ translateY: withTiming(-keyboardOverlap, { duration: 250 }) }] }),
+    [keyboardOverlap],
+  );
 
   const renderAction = useCallback(
     () =>
@@ -127,9 +137,15 @@ export function SheetScreen({
           paddingHorizontal: 16,
           // Breathing room below the header so content never butts against it.
           paddingTop: variant === 'modal' ? 16 : 12,
-          paddingBottom: insets.bottom + 24,
+          // While the footer is raised it sits over the bottom of the content,
+          // so reserve its height as well or the last field hides behind it.
+          paddingBottom: insets.bottom + 24 + (keyboardOverlap > 0 ? footerHeight : 0),
         }}
         keyboardShouldPersistTaps="handled"
+        // Swipe down over the keyboard to dismiss it, and let iOS inset the
+        // content so a focused field lower down still scrolls into view.
+        keyboardDismissMode="interactive"
+        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
         refreshControl={
           onRefresh ? (
@@ -145,13 +161,27 @@ export function SheetScreen({
         {children}
       </ScrollView>
 
+      {/* Lifts clear of the keyboard. Without this the submit button sits behind
+          it on every create/edit screen, which is what made Add Expense look
+          like it had no way to save.
+          A transform, NOT a margin: a margin would shrink the ScrollView, and
+          automaticallyAdjustKeyboardInsets computes its inset from the frame it
+          had when the keyboard appeared — so the two together would reserve the
+          keyboard height twice and leave a blank screen-height gap below the
+          content. A transform keeps the layout, so the inset stays right. */}
       {footer && (
-        <View
-          className="border-t border-line bg-bg-deep px-4 pt-3"
-          style={{ paddingBottom: insets.bottom + 8 }}
+        <Animated.View
+          style={footerLift}
+          onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
         >
-          {footer}
-        </View>
+          <View
+            className="border-t border-line bg-bg-deep px-4 pt-3"
+            // The home-indicator gap is only wasted space while the keyboard is up.
+            style={{ paddingBottom: keyboardOverlap > 0 ? 10 : insets.bottom + 8 }}
+          >
+            {footer}
+          </View>
+        </Animated.View>
       )}
     </View>
   );

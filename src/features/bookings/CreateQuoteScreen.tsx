@@ -55,6 +55,7 @@ import {
   parseNum,
 } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
+import { status as statusHues } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -76,6 +77,13 @@ const FUEL_FALLBACK: Record<string, number> = {
   'Box Truck': 28,
   'Danger Load': 34,
 };
+
+// Sanity bound on the optimiser's markup-over-cost. Freight does not price at
+// four times cost; a figure past this means the lane benchmark it was derived
+// from is junk (resolve_market_rate averages raw quote totals with no per-km
+// normalisation and no outlier trimming, so one bad row poisons a lane). Past
+// this point we stop presenting the optimiser's price as a recommendation.
+const MAX_PLAUSIBLE_MARKUP_PCT = 300;
 
 // Heuristic 3-letter lane code (mirrors web extractCode).
 function extractCode(s: string): string {
@@ -358,6 +366,25 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     };
   }, [currentRoute, routeData, tripType, vtypes, vehicleType, fuel, company, weightKg, baseRateNum, tollEdited, tollOverrideNum, driverNum, serviceCharge]);
 
+  // Drop a stale analysis the moment a real cost input moves, so the card can't
+  // go on showing numbers for a quote that no longer exists while the next
+  // request is in flight.
+  //
+  // Keyed on directCost, not total: applying the AI markup changes total but not
+  // the cost the optimiser reasoned about, and clearing here would flash the
+  // whole card to a skeleton on every Apply. The guard does depend on total and
+  // simply refreshes on the next pass.
+  useEffect(() => {
+    setAnalysis(null);
+    setGuard(null);
+    // Straight into the loading state, so the gap before the debounce fires
+    // can't render the bare cost total under a "Recommended price" label.
+    // Conditioned exactly as the analyze effect below, so a pass that bails
+    // can't leave the card stuck on a skeleton.
+    if (routeData && costs.total > 0 && pickup && delivery) setAiBusy(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [costs.directCost, vehicleType, weightKg, selectedRouteIndex]);
+
   // AI analyze + guard (debounced 700ms, stale-guarded).
   useEffect(() => {
     if (!routeData || costs.total <= 0 || !pickup || !delivery) return;
@@ -408,10 +435,40 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     () => (pick(analysis ?? {}, ['price_optimization']) ?? {}) as Record<string, unknown>,
     [analysis],
   );
-  const recPrice = num(pick(opt, ['optimal_price'])) || num(pick(analysis ?? {}, ['suggested_price'])) || costs.total;
-  const optMargin = num(pick(opt, ['optimal_margin_pct'])) || costs.marginPct;
+  const winModel = (pick(modelStats ?? {}, ['win_model']) ?? {}) as Record<string, unknown>;
+  const aiLearning = str(pick(winModel, ['mode'])) === 'heuristic';
+  const outcomesLogged = num(pick(winModel, ['outcomes_collected']));
+  const outcomesNeeded = num(pick(winModel, ['outcomes_needed']));
+  // Guarded — a zero threshold would otherwise render a NaN-wide bar.
+  const learnPct = outcomesNeeded > 0 ? Math.min(100, Math.round((outcomesLogged / outcomesNeeded) * 100)) : 0;
+
+  const optPrice = pick(opt, ['optimal_price']) != null ? num(pick(opt, ['optimal_price'])) : null;
+  const backendSuggested = pick(analysis ?? {}, ['suggested_price']) != null ? num(pick(analysis ?? {}, ['suggested_price'])) : null;
+  // The optimiser's margin is a markup on COST, not a margin on revenue, and the
+  // backend returns it unclamped (margin_optimizer.py:269). When the lane
+  // benchmark is junk it comes back in the thousands of percent, which is how a
+  // R64k job was recommended at R1.5M. Treat anything past this as "the
+  // benchmark behind this is not trustworthy" and fall back to cost-based
+  // pricing rather than showing the number.
+  const optMarkupPct = pick(opt, ['optimal_margin_pct']) != null ? num(pick(opt, ['optimal_margin_pct'])) : null;
+  const markupImplausible = optMarkupPct != null && optMarkupPct > MAX_PLAUSIBLE_MARKUP_PCT;
+  // Cost-based fallback price, and the trained optimiser's price. One value
+  // feeds both the number on screen and what Apply actually applies — they used
+  // to be two separate expressions, so applying never matched what was shown
+  // and each apply compounded on the last.
+  const costPlusPrice = Math.round(costs.directCost * 1.25);
+  const priceUntrusted = aiLearning || markupImplausible;
+  const suggestedPrice = priceUntrusted ? costPlusPrice : optPrice || backendSuggested || null;
+  const alreadyApplied = suggestedPrice != null && Math.abs(costs.total - suggestedPrice) < 1;
+  // Margin, win probability and the curve are all outputs of the win model, so
+  // they mean nothing until it is trained — and nothing if its benchmark is off.
+  const statsTrusted = !priceUntrusted;
+
   const winProb = num(pick(opt, ['win_probability_at_optimal']));
-  const expProfit = pick(opt, ['expected_profit']) != null ? num(pick(opt, ['expected_profit'])) : recPrice - costs.directCost;
+  const expProfit =
+    pick(opt, ['expected_profit']) != null
+      ? num(pick(opt, ['expected_profit']))
+      : (suggestedPrice ?? costs.total) - costs.directCost;
   const riskLevel = str(pick(guard ?? {}, ['risk_level']), 'SAFE');
   const curveData = useMemo<CurvePoint[]>(
     () =>
@@ -422,14 +479,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }),
     [opt],
   );
-  const winModel = (pick(modelStats ?? {}, ['win_model']) ?? {}) as Record<string, unknown>;
-  const aiLearning = str(pick(winModel, ['mode'])) === 'heuristic';
   const estimateLoading = (routeBusy || aiBusy) && !analysis;
-  const guardMsg =
-    (asArray<string>(pick(guard ?? {}, ['explanations']))[0] as unknown as string) ||
-    (asArray<string>(pick(guard ?? {}, ['warnings']))[0] as unknown as string) ||
-    (asArray<string>(pick(guard ?? {}, ['suggestions']))[0] as unknown as string) ||
-    'Margin is below your guardrail — review before sending.';
+  const guardExplain = asArray<string>(pick(guard ?? {}, ['explanations']))[0] as unknown as string;
+  const guardWarn = asArray<string>(pick(guard ?? {}, ['warnings']))[0] as unknown as string;
+  const guardFix = asArray<string>(pick(guard ?? {}, ['suggestions']))[0] as unknown as string;
+  const guardMsg = guardExplain || guardWarn || guardFix || 'Margin is below your guardrail — review before sending.';
+  // The suggestion is the actionable half ("increase price by ~R… to reach …%"),
+  // and it was being dropped whenever an explanation existed.
+  const guardHint = guardFix && guardFix !== guardMsg ? guardFix : null;
 
   const submitNL = async (text?: string) => {
     const message = (text ?? nlText).trim();
@@ -531,10 +588,18 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   };
 
+  // Applies the exact figure that is on screen. Floored at 0 because
+  // serviceCharge has no line item of its own in the breakdown, so a negative
+  // would be an unexplained discount below cost.
   const applyRecommended = () => {
-    const target = num(pick(opt, ['optimal_price'])) || num(pick(analysis ?? {}, ['suggested_price']));
-    if (target > 0) setServiceCharge((sc) => Math.max(0, sc + (target - costs.total)));
+    if (suggestedPrice != null && suggestedPrice > 0) {
+      setServiceCharge((sc) => Math.max(0, sc + (suggestedPrice - costs.total)));
+    }
   };
+
+  // serviceCharge is only ever written by apply / this / the form reset, so it
+  // is purely the AI markup — zeroing it drops the total back to true cost.
+  const useActualPrice = () => setServiceCharge(0);
 
   const buildPayload = (status: 'DRAFT' | 'SENT') => ({
     customer: Number(customerId),
@@ -782,62 +847,110 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   </View>
                 ) : (
                 <View className="p-4">
-                  {/* Recommended price — full width */}
-                  <Label className="text-faint">Recommended price</Label>
-                  <Mono className="mt-1 text-accent" style={{ fontSize: 26, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatCurrency(recPrice)}
+                  {/* The price is the hero. Its label and caption say which
+                      basis it came from, so a cost-based figure is never
+                      mistaken for a trained recommendation. */}
+                  <Label className="text-faint">{statsTrusted ? 'Recommended price' : 'Suggested price'}</Label>
+                  <Mono
+                    className={`mt-1 ${statsTrusted ? 'text-accent' : 'text-fg'}`}
+                    style={{ fontSize: 26, fontWeight: '700' }}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {formatCurrency(suggestedPrice ?? costs.total)}
                   </Mono>
+                  <Txt className="mt-0.5 text-caption text-faint">
+                    {statsTrusted ? 'to this client' : 'true cost + 25%'}
+                  </Txt>
 
-                  {/* Margin + win probability */}
-                  <View className="mt-4 flex-row gap-8">
-                    <View className="flex-1">
-                      <Label className="text-faint">Margin</Label>
-                      <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
-                        {formatPercent(optMargin, 0)}
-                      </Mono>
-                      <Mono className="text-micro text-success">{formatCurrencyCompact(expProfit)} profit</Mono>
-                    </View>
-                    <View className="flex-1">
-                      <Label className="text-faint">Win probability</Label>
-                      <Mono className="mt-1 text-fg" style={{ fontSize: 15, fontWeight: '600' }}>
-                        {winProb > 0 ? formatConfidence(winProb) : '—'}
-                      </Mono>
-                      <View className="mt-1.5 h-1 overflow-hidden rounded-pill bg-surface-hover">
-                        <View style={{ width: `${Math.min(100, Math.round(winProb * 100))}%`, height: '100%' }} className="bg-accent" />
+                  {statsTrusted ? (
+                    <>
+                      {/* One compact stat row rather than a tile grid. */}
+                      <View className="mt-4 flex-row gap-8">
+                        <View className="flex-1">
+                          <Label className="text-faint">Margin</Label>
+                          <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
+                            {optMarkupPct != null ? formatPercent(optMarkupPct, 0) : formatPercent(costs.marginPct, 0)}
+                          </Mono>
+                          <Mono className="text-micro text-success">{formatCurrencyCompact(expProfit)} profit</Mono>
+                        </View>
+                        <View className="flex-1">
+                          <Label className="text-faint">Win probability</Label>
+                          <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
+                            {winProb > 0 ? formatConfidence(winProb) : '—'}
+                          </Mono>
+                          <View className="mt-2 h-1 overflow-hidden rounded-pill bg-surface-hover">
+                            <View style={{ width: `${Math.min(100, Math.round(winProb * 100))}%`, height: '100%' }} className="bg-accent" />
+                          </View>
+                        </View>
                       </View>
-                    </View>
-                  </View>
 
-                  {/* Profit sweet-spot — full width, tap to inspect */}
-                  {curveData.length > 1 && (
-                    <View className="mt-4">
-                      <Label className="mb-1 text-faint">Profit sweet-spot · tap to inspect</Label>
-                      <ProfitCurve points={curveData} optimalMargin={Math.round(optMargin)} height={56} />
-                    </View>
+                      {curveData.length > 1 && (
+                        <View className="mt-4">
+                          <Label className="mb-1 text-faint">Profit sweet-spot · tap to inspect</Label>
+                          <ProfitCurve
+                            points={curveData}
+                            optimalMargin={optMarkupPct != null ? Math.round(optMarkupPct) : undefined}
+                            height={56}
+                          />
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    /* One honest line instead of three "unlocks after training"
+                       placeholders — the client asked for less clutter, and
+                       empty tiles are clutter. */
+                    <Txt className="mt-3 text-caption text-faint">
+                      Margin, win probability and the profit curve unlock once the model is trained.
+                    </Txt>
                   )}
 
-                  {(num(pick(opt, ['optimal_price'])) > 0 || num(pick(analysis ?? {}, ['suggested_price'])) > 0) && (
-                    <Button label="Apply recommended" variant="secondary" icon="sparkle" onPress={applyRecommended} fullWidth className="mt-4" />
+                  {alreadyApplied ? (
+                    <View className="mt-4 gap-2.5">
+                      <View className="flex-row items-center gap-1.5">
+                        <Icon name="check" size={15} color={statusHues.success} />
+                        <Txt className="text-sub text-success">AI price applied</Txt>
+                      </View>
+                      <Button label="Use actual price" variant="secondary" onPress={useActualPrice} fullWidth />
+                    </View>
+                  ) : (
+                    suggestedPrice != null &&
+                    suggestedPrice > 0 && (
+                      <Button label="Apply recommended" variant="secondary" icon="sparkle" onPress={applyRecommended} fullWidth className="mt-4" />
+                    )
                   )}
                 </View>
                 )}
 
                 {riskLevel !== 'SAFE' && (
-                  <View className={`flex-row items-center gap-2.5 border-t border-line p-3 ${riskLevel === 'AT_RISK' ? 'bg-danger-bg' : 'bg-warning-bg'}`}>
+                  <View className={`flex-row gap-2.5 border-t border-line p-3 ${riskLevel === 'AT_RISK' ? 'bg-danger-bg' : 'bg-warning-bg'}`}>
                     <Icon name="alert" size={16} color={riskLevel === 'AT_RISK' ? '#FF4949' : '#F59E0B'} />
-                    <Txt className="flex-1 text-sub text-muted">{guardMsg}</Txt>
+                    <Txt className="flex-1 text-sub text-muted">
+                      <Txt className={`text-sub font-semibold ${riskLevel === 'AT_RISK' ? 'text-danger' : 'text-warning'}`}>
+                        {riskLevel === 'AT_RISK' ? 'At risk' : 'Caution'}
+                      </Txt>
+                      {' · '}
+                      {guardMsg}
+                      {guardHint ? ` — ${guardHint}` : ''}
+                    </Txt>
                   </View>
                 )}
 
                 {aiLearning && (
-                  <View className="flex-row gap-2.5 border-t border-line bg-warning-bg p-3">
+                  <View className="flex-row items-center gap-2.5 border-t border-line bg-warning-bg p-3">
                     <Icon name="sparkle" size={16} color="#F59E0B" />
                     <Txt className="flex-1 text-sub text-muted">
-                      <Txt className="text-sub font-semibold text-fg">AI pricing is still learning your fleet. </Txt>
-                      Priced on true cost + your {vehicleType} base rate for now — needs ~
-                      {num(pick(winModel, ['outcomes_needed']))} completed loads (
-                      {num(pick(winModel, ['outcomes_collected']))}/{num(pick(winModel, ['outcomes_needed']))} logged).
+                      <Txt className="text-sub font-semibold text-fg">Still learning your fleet. </Txt>
+                      Priced on true cost + your {vehicleType} base rate for now.
                     </Txt>
+                    <View className="items-end">
+                      <Mono className="text-micro text-fg">
+                        {formatNumber(outcomesLogged)}/{formatNumber(outcomesNeeded)} logged
+                      </Mono>
+                      <View className="mt-1 h-1 w-16 overflow-hidden rounded-pill bg-surface-hover">
+                        <View style={{ width: `${learnPct}%`, height: '100%', backgroundColor: '#F59E0B' }} />
+                      </View>
+                    </View>
                   </View>
                 )}
               </Group>
@@ -975,27 +1088,55 @@ function LocationField({
   const [text, setText] = useState(value?.label ?? '');
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<LocSuggest[]>([]);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // One ref per timer. These used to share a slot, so the clear-results timeout
+  // and the search timeout cancelled each other at random.
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The label the field is already settled on — either tapped from the list or
+  // filled in from outside. While text still equals it, the user isn't
+  // searching, so we must not look it up. Without this, picking "Durban" set
+  // the text to "Durban…", which re-armed the debounce below and reopened the
+  // dropdown a couple of seconds later on top of the completed selection.
+  const chosen = useRef<string | null>(value?.label ?? null);
+  // Monotonic request id, same pattern as routeReq/aiReq above: a reply that is
+  // no longer the newest must not write results. Covers the other half of the
+  // reopen — the in-flight lookup from the last keystroke landing after the tap.
+  const reqId = useRef(0);
 
-  // Reflect an externally-set value (e.g. edit-mode hydration) into the input.
+  useEffect(
+    () => () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+      if (blurTimer.current) clearTimeout(blurTimer.current);
+    },
+    [],
+  );
+
+  // Reflect an externally-set value (edit-mode hydration, or the AI/voice fill
+  // path via geocode → setPickup) into the input. Marked as chosen so an
+  // address we filled in ourselves doesn't trigger a lookup either.
   useEffect(() => {
     if (!value?.label || value.label === text) return;
+    chosen.current = value.label;
     const t = setTimeout(() => setText(value.label), 0);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value?.label]);
 
   useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
-    if (!focused || text.length < 2) {
-      timer.current = setTimeout(() => setResults([]), 0);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!focused || text.length < 2 || chosen.current === text) {
+      clearTimer.current = setTimeout(() => setResults([]), 0);
       return () => {
-        if (timer.current) clearTimeout(timer.current);
+        if (clearTimer.current) clearTimeout(clearTimer.current);
       };
     }
-    timer.current = setTimeout(async () => {
+    searchTimer.current = setTimeout(async () => {
+      const mine = ++reqId.current;
       try {
         const raw = await suggestLocations(text);
+        if (mine !== reqId.current) return;
         const list = asArray(raw)
           .map((r) => {
             const o = r as Record<string, unknown>;
@@ -1014,28 +1155,42 @@ function LocationField({
           .slice(0, 6);
         setResults(list);
       } catch {
-        setResults([]);
+        if (mine === reqId.current) setResults([]);
       }
     }, 300);
     return () => {
-      if (timer.current) clearTimeout(timer.current);
+      if (searchTimer.current) clearTimeout(searchTimer.current);
     };
   }, [text, focused]);
 
   return (
     <View>
       <Label className="mb-1.5 text-muted">{label}</Label>
-      <View className={`h-12 flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}>
-        <Icon name="pin" size={16} color={value ? colors.accent : colors.faint} />
+      {/* Shell matches TextField/SelectField exactly — min height rather than a
+          fixed one, padding on the input rather than a stretched height, and a
+          17px icon. It used to be h-12 with a 16px pin, which read a notch low
+          against the Client and Vehicle-type rows directly above it. */}
+      <View className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}>
+        <Icon name="pin" size={17} color={value ? colors.accent : colors.faint} />
         <TextInput
           className="flex-1 text-body text-fg"
           placeholder={placeholder}
           placeholderTextColor={colors.faint}
           value={text}
-          onChangeText={setText}
+          onChangeText={(t) => {
+            // A real keystroke means the settled value no longer applies, so
+            // searching is wanted again.
+            chosen.current = null;
+            setText(t);
+          }}
           onFocus={() => setFocused(true)}
-          onBlur={() => setTimeout(() => setFocused(false), 150)}
-          style={{ height: '100%', paddingVertical: 0, includeFontPadding: false, textAlignVertical: 'center' }}
+          onBlur={() => {
+            // Delayed so a tap on a suggestion row still registers before the
+            // list unmounts. Tracked so it can't fire into an unmounted field.
+            if (blurTimer.current) clearTimeout(blurTimer.current);
+            blurTimer.current = setTimeout(() => setFocused(false), 150);
+          }}
+          style={{ paddingVertical: 12 }}
         />
       </View>
       {value?.cc && isForeignCc(value.cc) && (
@@ -1049,6 +1204,10 @@ function LocationField({
             <Pressable
               key={`${r.label}-${i}`}
               onPress={() => {
+                // Settle on this label and discard any reply still in flight,
+                // so nothing can refill the list behind the selection.
+                chosen.current = r.label;
+                reqId.current++;
                 onChange(r);
                 setText(r.label);
                 setResults([]);

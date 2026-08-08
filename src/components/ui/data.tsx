@@ -221,6 +221,13 @@ export function Timeline({
 }
 
 // ── RoutePreview: schematic origin → destination strip (never a real map) ──
+// Rail geometry, derived from the type scale rather than guessed: the label line
+// box (text-micro's 14px lineHeight, kept even though fontSize is overridden to
+// 9) and the address line beneath it (text-callout's 20px + the 2px mt-0.5).
+const RAIL_LABEL_H = 14;
+const RAIL_ADDRESS_H = 22;
+const MARKER_COL = 16;
+
 export function RoutePreview({
   origin,
   dest,
@@ -236,24 +243,38 @@ export function RoutePreview({
   return (
     <Card className="overflow-hidden p-4">
       <View className="flex-row gap-3">
-        <View className="items-center pt-1">
+        {/* Marker rail. Each marker sits in a box exactly the height of the
+            label line box it belongs to, so it centres on that label whatever
+            the text scale does — the dot on "Pickup", the pin on "Drop-off".
+            The dashed connector is flex-1 and absorbs whatever is between, and
+            the trailing spacer accounts for the address line under Drop-off.
+            This used to be a hardcoded 4px-pad / 10 / 34 / 16 pixel stack with
+            no relationship to the text, which left the dot 2px low and the pin
+            7px out. */}
+        <View className="items-center" style={{ width: MARKER_COL }}>
+          <View style={{ height: RAIL_LABEL_H }} className="justify-center">
+            <View
+              style={{ width: 10, height: 10, borderRadius: 10, backgroundColor: colors.accent }}
+            />
+          </View>
           <View
-            style={{ width: 10, height: 10, borderRadius: 10, backgroundColor: colors.accent }}
-          />
-          <View
+            className="flex-1"
             style={{
               width: 0,
-              height: 34,
+              minHeight: 12,
               borderLeftWidth: 2,
               borderStyle: 'dashed',
               borderColor: colors.lineActive,
             }}
           />
-          <Icon name="pin" size={16} color={statusHues.success} />
+          <View style={{ height: RAIL_LABEL_H }} className="justify-center">
+            <Icon name="pin" size={16} color={statusHues.success} />
+          </View>
+          <View style={{ height: RAIL_ADDRESS_H }} />
         </View>
         <View className="flex-1">
           <View>
-            <Label className="text-faint" style={{ fontSize: 9 }}>
+            <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
               Pickup
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>
@@ -261,7 +282,7 @@ export function RoutePreview({
             </Txt>
           </View>
           <View className="mt-5">
-            <Label className="text-faint" style={{ fontSize: 9 }}>
+            <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
               Drop-off
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>

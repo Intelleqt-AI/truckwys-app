@@ -49,7 +49,14 @@ export function ProfitCurve({
 
   const line = sorted.map((p, i) => `${i ? 'L' : 'M'}${sx(p.margin).toFixed(1)},${sy(p.profit).toFixed(1)}`).join(' ');
   const area = `${line} L${sx(maxX).toFixed(1)},${height - pad} L${sx(minX).toFixed(1)},${height - pad} Z`;
-  const refX = optimalMargin != null ? sx(optimalMargin) : null;
+  // Only drawn when the optimum actually lies on the plotted curve. It used to
+  // be projected unconditionally, so an out-of-domain margin (the backend
+  // returns markup-over-cost unclamped, which can reach thousands of percent)
+  // put the dashed marker far off the right edge and made the chart look
+  // broken. Pinning it to the edge instead would be worse — it would claim an
+  // optimum where there isn't one.
+  const refInDomain = optimalMargin != null && optimalMargin >= minX && optimalMargin <= maxX;
+  const refX = refInDomain ? sx(optimalMargin as number) : null;
 
   const pick = (e: GestureResponderEvent) => {
     if (!w) return;

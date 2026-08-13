@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { View, Pressable, Modal, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Txt, Mono, Label } from './Text';
+import { Txt, Mono, FieldLabel } from './Text';
 import { Icon, type IconName } from './icons';
 import { SearchField } from './forms';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -22,6 +22,7 @@ export function SelectField({
   onSelect,
   icon,
   error,
+  required,
 }: {
   label?: string;
   value?: string;
@@ -30,6 +31,8 @@ export function SelectField({
   onSelect: (value: string) => void;
   icon?: IconName;
   error?: string;
+  /** Renders a danger-coloured * after the label. Presentational only. */
+  required?: boolean;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -49,7 +52,7 @@ export function SelectField({
 
   return (
     <View>
-      {label && <Label className="mb-1.5 text-muted">{label}</Label>}
+      <FieldLabel label={label} required={required} />
       <Pressable
         onPress={() => setOpen(true)}
         className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${

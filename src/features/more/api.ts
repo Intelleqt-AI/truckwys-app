@@ -337,6 +337,18 @@ export function useCompanyProfile() {
 export const updateCompanyProfile = (data: Record<string, unknown>) =>
   patchData({ url: 'company/profile/', data });
 
+/**
+ * Live national fuel prices, for the "fetch live prices" action on the company
+ * page. `force` bypasses the server's once-per-hour live-retry gate.
+ *
+ * Returns `inland_price` (diesel) and `petrol_95`, plus `is_stale`,
+ * `stale_warning` and `last_updated`. There is no electric or hybrid feed.
+ * Note it 500s on failure rather than returning `success: false`, so callers
+ * need a catch as well as the flag check.
+ */
+export const fetchFuelPrices = (force = false) =>
+  fetchData<Record<string, unknown>>(`fuel-prices/current/${force ? '?force=true' : ''}`);
+
 export const changePassword = (current_password: string, new_password: string) =>
   postData({ url: 'auth/change-password/', data: { current_password, new_password } });
 

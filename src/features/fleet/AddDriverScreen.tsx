@@ -75,9 +75,19 @@ export function AddDriverScreen({ route, navigation }: Props) {
   );
 
   const submit = async () => {
-    if (!firstName.trim() || !lastName.trim() || !license.trim() || !licenseExpiry.trim()) {
-      return toast.error('First name, last name, licence number and expiry are required');
-    }
+    // Web's six required fields. Hire date and province are newly mandatory here
+    // to match it — a driver record without them is incomplete for compliance.
+    const missing = (
+      [
+        ['First name', firstName],
+        ['Last name', lastName],
+        ['Licence number', license],
+        ['Licence expiry', licenseExpiry],
+        ['Hire date', hireDate],
+        ['Licence province', province],
+      ] as [string, string][]
+    ).find(([, v]) => !v.trim());
+    if (missing) return toast.error(`${missing[0]} is required`);
     setBusy(true);
     const driverFields = {
       license_number: license.trim(),
@@ -139,14 +149,35 @@ export function AddDriverScreen({ route, navigation }: Props) {
       footer={<Button label={editing ? 'Save changes' : 'Add driver'} loading={busy} onPress={submit} fullWidth />}
     >
       <View className="gap-4">
+        {/* Required first — licence number and expiry used to sit below email,
+            phone, emergency contact and address, so the mandatory fields were
+            buried under four optional ones. */}
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="First name" placeholder="Jane" icon="user" autoCapitalize="words" value={firstName} onChangeText={setFirstName} />
+            <TextField label="First name" required placeholder="Jane" icon="user" autoCapitalize="words" value={firstName} onChangeText={setFirstName} />
           </View>
           <View className="flex-1">
-            <TextField label="Last name" placeholder="Dlamini" autoCapitalize="words" value={lastName} onChangeText={setLastName} />
+            <TextField label="Last name" required placeholder="Dlamini" autoCapitalize="words" value={lastName} onChangeText={setLastName} />
           </View>
         </View>
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <TextField label="Licence number" required placeholder="e.g. 1234567890" icon="shield" autoCapitalize="characters" value={license} onChangeText={setLicense} />
+          </View>
+          <View className="flex-1">
+            <SelectField label="Licence province" required options={PROVINCES} value={province} onSelect={setProvince} />
+          </View>
+        </View>
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <DateField label="Licence expiry" required value={licenseExpiry} onChange={setLicenseExpiry} />
+          </View>
+          <View className="flex-1">
+            <DateField label="Hire date" required value={hireDate} onChange={setHireDate} />
+          </View>
+        </View>
+
+        <Label className="mt-1 text-muted">Optional</Label>
         <TextField label="Email" placeholder="jane@company.co.za" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
         <View className="flex-row gap-3">
           <View className="flex-1">
@@ -157,29 +188,9 @@ export function AddDriverScreen({ route, navigation }: Props) {
           </View>
         </View>
         <TextField label="Address" placeholder="Street, city" value={address} onChangeText={setAddress} />
-
-        <Label className="mt-1 text-muted">Licence</Label>
         <View className="flex-row gap-3">
-          <View className="flex-1">
-            <TextField label="Licence number" placeholder="e.g. 1234567890" icon="shield" autoCapitalize="characters" value={license} onChangeText={setLicense} />
-          </View>
-          <View className="flex-1">
-            <SelectField label="Province" options={PROVINCES} value={province} onSelect={setProvince} />
-          </View>
-        </View>
-        <View className="flex-row gap-3">
-          <View className="flex-1">
-            <DateField label="Licence expiry" value={licenseExpiry} onChange={setLicenseExpiry} />
-          </View>
           <View className="flex-1">
             <DateField label="Medical expiry" value={medicalExpiry} onChange={setMedicalExpiry} />
-          </View>
-        </View>
-
-        <Label className="mt-1 text-muted">Employment</Label>
-        <View className="flex-row gap-3">
-          <View className="flex-1">
-            <DateField label="Hire date" value={hireDate} onChange={setHireDate} />
           </View>
           <View className="flex-1">
             <SelectField label="Status" options={STATUSES} value={status} onSelect={setStatus} />

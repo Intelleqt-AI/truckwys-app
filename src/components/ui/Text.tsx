@@ -51,3 +51,25 @@ export function Label({ className = '', style, ...props }: Props) {
     />
   );
 }
+
+/**
+ * A form field's label, with an optional required marker.
+ *
+ * Shared by TextField, SelectField and DateField so the asterisk convention
+ * can't drift between them.
+ *
+ * `required` is a flag rather than something callers append to the label string:
+ * SelectField reuses its label as the picker modal's title and inside the search
+ * placeholder, so a decorated `"Vehicle type *"` would leak the asterisk into
+ * both. The marker is a nested RNText so it inherits the label's size and mono
+ * face and overrides nothing but the colour.
+ */
+export function FieldLabel({ label, required }: { label?: string; required?: boolean }) {
+  if (!label) return null;
+  return (
+    <Label className="mb-1.5 text-muted">
+      {label}
+      {required ? <RNText className="text-danger"> *</RNText> : null}
+    </Label>
+  );
+}

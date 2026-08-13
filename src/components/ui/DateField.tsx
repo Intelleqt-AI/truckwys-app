@@ -4,7 +4,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Txt, Mono, Label } from './Text';
+import { Txt, Mono, Label, FieldLabel } from './Text';
 import { Icon } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatDate } from '@/lib/formatters';
@@ -26,6 +26,7 @@ export function DateField({
   placeholder = 'Select date',
   maximumDate,
   minimumDate,
+  required,
 }: {
   label?: string;
   value: string;
@@ -35,6 +36,8 @@ export function DateField({
   maximumDate?: Date;
   /** Blocks earlier dates (e.g. an invoice due date can't be in the past). */
   minimumDate?: Date;
+  /** Renders a danger-coloured * after the label. Presentational only. */
+  required?: boolean;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -44,7 +47,7 @@ export function DateField({
 
   return (
     <View>
-      {label && <Label className="mb-1.5 text-muted">{label}</Label>}
+      <FieldLabel label={label} required={required} />
       <Pressable
         onPress={() => setOpen(true)}
         className="min-h-[48px] flex-row items-center gap-2 rounded-xs border border-line bg-surface px-3"

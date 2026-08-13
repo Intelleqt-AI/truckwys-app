@@ -25,7 +25,6 @@ import {
 import {
   useVehicleTypes,
   useCompanyProfileData,
-  useFuelPrice,
   useModelStats,
   suggestLocations,
   calculateRoute,
@@ -86,6 +85,20 @@ const FUEL_FALLBACK: Record<string, number> = {
 // this point we stop presenting the optimiser's price as a recommendation.
 const MAX_PLAUSIBLE_MARKUP_PCT = 300;
 
+// Which company default price applies, keyed by the selected vehicle type's own
+// fuel_type. Company stores one default per fuel type, and fuel_price_per_litre
+// doubles as the Diesel one because it predates the other three.
+//
+// The mapping lives here rather than server-side because nothing in the backend
+// reads these fields — it still costs everything as diesel — so both clients
+// resolve it themselves and must agree.
+const FUEL_PRICE_FIELD_BY_TYPE: Record<string, string> = {
+  Diesel: 'fuel_price_per_litre',
+  Petrol: 'fuel_price_petrol',
+  Electric: 'fuel_price_electric',
+  Hybrid: 'fuel_price_hybrid',
+};
+
 // Heuristic 3-letter lane code (mirrors web extractCode).
 function extractCode(s: string): string {
   const t = s.toLowerCase();
@@ -122,7 +135,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const { data: customers } = useCustomers();
   const { data: vtypes } = useVehicleTypes();
   const { data: company } = useCompanyProfileData();
-  const { data: fuel } = useFuelPrice();
   const { data: modelStats } = useModelStats();
 
   const [customerId, setCustomerId] = useState('');
@@ -315,11 +327,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const chargeDistance = distance * legs;
     const surchargePctBase = num(pick(company ?? {}, ['weight_surcharge_pct'])) || 15;
 
+    const selectedVt = (vtypes ?? []).find((v) => v.name === vehicleType);
     const consumption =
-      (vtypes ?? []).find((v) => v.name === vehicleType)?.fuel_consumption_l_per_100km ??
-      FUEL_FALLBACK[vehicleType] ??
-      32;
-    const fuelPrice = num(pick(fuel ?? {}, ['diesel_inland'])) || num(pick(company ?? {}, ['fuel_price_per_litre'])) || 21.7;
+      selectedVt?.fuel_consumption_l_per_100km ?? FUEL_FALLBACK[vehicleType] ?? 32;
+    // Price the fuel this vehicle type actually burns, at the company's default
+    // for that fuel — it used to always use the live national DIESEL price no
+    // matter what was selected. Falls back to the diesel default when the
+    // company hasn't set a price for that fuel, then to a literal.
+    const fuelField = FUEL_PRICE_FIELD_BY_TYPE[str(selectedVt?.fuel_type, 'Diesel')] ?? 'fuel_price_per_litre';
+    const fuelPrice =
+      num(pick(company ?? {}, [fuelField])) || num(pick(company ?? {}, ['fuel_price_per_litre'])) || 21.7;
     const fuelCost = Math.round((chargeDistance * consumption * fuelPrice) / 100);
 
     const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
@@ -365,7 +382,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       fuelUsage: Math.round((chargeDistance * consumption) / 100),
       fuelPrice,
     };
-  }, [currentRoute, routeData, tripType, vtypes, vehicleType, fuel, company, weightKg, baseRateNum, tollEdited, tollOverrideNum, driverNum, serviceCharge]);
+  }, [currentRoute, routeData, tripType, vtypes, vehicleType, company, weightKg, baseRateNum, tollEdited, tollOverrideNum, driverNum, serviceCharge]);
 
   // Drop a stale analysis the moment a real cost input moves, so the card can't
   // go on showing numbers for a quote that no longer exists while the next
@@ -748,7 +765,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         {/* R/km lives in the overrides section further down, next to the other
             cost levers — it isn't repeated here. */}
         <TextField
-          label="Weight (tons) *"
+          label="Weight (tons)"
+          required
           placeholder="e.g. 20"
           keyboardType="decimal-pad"
           error={weightInvalid ? 'Enter a number, e.g. 1,5' : undefined}
@@ -758,10 +776,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <TextField label="Cargo" placeholder="e.g. Steel coils" value={cargo} onChangeText={setCargo} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <DateField label="Pickup date *" value={pickupDate} onChange={setPickupDate} />
+            <DateField label="Pickup date" required value={pickupDate} onChange={setPickupDate} />
           </View>
           <View className="flex-1">
-            <DateField label="Delivery date *" value={deliveryDate} onChange={setDeliveryDate} />
+            <DateField label="Delivery date" required value={deliveryDate} onChange={setDeliveryDate} />
           </View>
         </View>
         <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />

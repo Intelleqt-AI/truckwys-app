@@ -8,7 +8,7 @@ import {
   InputAccessoryView,
   type TextInputProps,
 } from 'react-native';
-import { Txt, Mono, Label, INPUT_TEXT } from './Text';
+import { Txt, Mono, Label, FieldLabel, INPUT_TEXT } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
 import { parseNum, formatNumber, formatPlain } from '@/lib/formatters';
@@ -56,10 +56,13 @@ export function TextField({
   numeric,
   decimals,
   secureTextEntry,
+  required,
   className = '',
   ...props
 }: TextInputProps & {
   label?: string;
+  /** Renders a danger-coloured * after the label. Presentational only. */
+  required?: boolean;
   error?: string;
   icon?: IconName;
   /** Leading unit, e.g. `R` for money. Rendered in Mono so it lines up with the digits. */
@@ -108,7 +111,7 @@ export function TextField({
 
   return (
     <View className={className}>
-      {label && <Label className="mb-1.5 text-muted">{label}</Label>}
+      <FieldLabel label={label} required={required} />
       <View
         className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${
           error ? 'border-danger' : focused ? 'border-accent' : 'border-line'

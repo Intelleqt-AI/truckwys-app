@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -21,7 +21,6 @@ const FALLBACK_TYPES = [
   'Tautliner',
   'Box Truck',
 ];
-const FUEL_TYPES = ['Diesel', 'Petrol', 'Electric', 'Hybrid'].map((v) => ({ label: v, value: v }));
 const STATUSES = ['AVAILABLE', 'IN_USE', 'MAINTENANCE', 'INACTIVE', 'OUT_OF_SERVICE'].map((v) => ({
   label: v.replace(/_/g, ' '),
   value: v,
@@ -65,7 +64,10 @@ export function AddVehicleScreen({ route, navigation }: Props) {
     pick(preview, ['last_service_mileage']) != null ? String(num(pick(preview, ['last_service_mileage']))) : '',
   );
   const [type, setType] = useState(str(pick(preview, ['vehicle_type_name', 'vehicle_type'])) || 'Rigid Truck');
-  const [fuelType, setFuelType] = useState(str(pick(preview, ['fuel_type'])) || 'Diesel');
+  // Not shown any more: fuel type moved to the vehicle type, which is what
+  // quotes price against. Vehicle.fuel_type is still required server-side, so
+  // keep whatever the record already had and default new vehicles to Diesel.
+  const fuelType = str(pick(preview, ['fuel_type'])) || 'Diesel';
   const [status, setStatus] = useState(str(pick(preview, ['status'])).toUpperCase() || 'AVAILABLE');
   const [driver, setDriver] = useState(pick(preview, ['driver']) != null ? String(pick(preview, ['driver'])) : '');
 
@@ -76,8 +78,48 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   const numOrNull = (v: string) => (v.trim() ? parseNum(v) : null);
   const capacityTons = capacity.trim() ? parseNum(capacity) : undefined;
 
+  /**
+   * Picking a vehicle type seeds Capacity from that type's own capacity.
+   *
+   * A starting point, not a lock — real vehicles of one type legitimately vary,
+   * so the field stays editable and a later type change overwrites it again.
+   * Both are in tons here; the payload converts to kg on the way out.
+   */
+  const chooseType = (name: string) => {
+    setType(name);
+    const cap = (types ?? []).find((t) => t.name === name)?.capacity;
+    if (cap != null) setCapacity(String(cap));
+  };
+
+  // The form opens with a type already selected, before the list has loaded, so
+  // that selection never went through chooseType. Fill once when the list
+  // arrives — and only while Capacity is still blank, so it can't overwrite an
+  // edited vehicle's real capacity or something the user just typed.
+  const seededCapacity = useRef(false);
+  useEffect(() => {
+    if (seededCapacity.current || !types?.length) return;
+    seededCapacity.current = true;
+    if (capacity.trim()) return;
+    const cap = types.find((t) => t.name === type)?.capacity;
+    if (cap != null) setCapacity(String(cap));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [types]);
+
   const submit = async () => {
-    if (!plate.trim()) return toast.error('Registration plate is required');
+    // Web marks these seven required; unlike web's drawer we actually enforce it
+    // rather than letting the server 400.
+    const missing = (
+      [
+        ['VIN', vin],
+        ['Make', make],
+        ['Model', model],
+        ['Year', year],
+        ['Registration plate', plate],
+        ['Vehicle type', type],
+        ['Capacity', capacity],
+      ] as [string, string][]
+    ).find(([, v]) => !v.trim());
+    if (missing) return toast.error(`${missing[0]} is required`);
     const badField = (
       [
         ['Year', year],
@@ -129,38 +171,36 @@ export function AddVehicleScreen({ route, navigation }: Props) {
       footer={<Button label={editing ? 'Save changes' : 'Add vehicle'} loading={busy} onPress={submit} fullWidth />}
     >
       <View className="gap-4">
-        <TextField label="Registration plate" placeholder="e.g. CA 123-456" icon="truck" autoCapitalize="characters" value={plate} onChangeText={setPlate} />
+        {/* Required first, so nothing mandatory is buried under a run of
+            optional fields. Vehicle type sits above Capacity because picking a
+            type seeds a starting capacity below it. */}
+        <TextField label="VIN" required placeholder="17-character VIN" autoCapitalize="characters" value={vin} onChangeText={setVin} />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Make" placeholder="e.g. Volvo" value={make} onChangeText={setMake} />
+            <TextField label="Make" required placeholder="e.g. Volvo" value={make} onChangeText={setMake} />
           </View>
           <View className="flex-1">
-            <TextField label="Model" placeholder="e.g. FH16" value={model} onChangeText={setModel} />
+            <TextField label="Model" required placeholder="e.g. FH16" value={model} onChangeText={setModel} />
           </View>
         </View>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <TextField label="Year" placeholder="e.g. 2022" keyboardType="number-pad" value={year} onChangeText={setYear} />
+            <TextField label="Year" required placeholder="e.g. 2022" keyboardType="number-pad" value={year} onChangeText={setYear} />
           </View>
           <View className="flex-1">
-            <TextField label="VIN" placeholder="17-character VIN" autoCapitalize="characters" value={vin} onChangeText={setVin} />
+            <TextField label="Registration plate" required placeholder="e.g. CA 123-456" icon="truck" autoCapitalize="characters" value={plate} onChangeText={setPlate} />
           </View>
         </View>
-        <SelectField label="Vehicle type" icon="box" options={typeOptions} value={type} onSelect={setType} />
+        <SelectField label="Vehicle type" icon="box" required options={typeOptions} value={type} onSelect={chooseType} />
+        <TextField label="Capacity (tons)" required placeholder="e.g. 30" keyboardType="decimal-pad" value={capacity} onChangeText={setCapacity} />
+
+        <Label className="mt-1 text-muted">Optional</Label>
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <SelectField label="Fuel type" options={FUEL_TYPES} value={fuelType} onSelect={setFuelType} />
+            <TextField label="Mileage (km)" placeholder="e.g. 120 000" keyboardType="number-pad" numeric value={mileage} onChangeText={setMileage} />
           </View>
           <View className="flex-1">
             <SelectField label="Status" options={STATUSES} value={status} onSelect={setStatus} />
-          </View>
-        </View>
-        <View className="flex-row gap-3">
-          <View className="flex-1">
-            <TextField label="Capacity (tons)" placeholder="e.g. 30" keyboardType="decimal-pad" value={capacity} onChangeText={setCapacity} />
-          </View>
-          <View className="flex-1">
-            <TextField label="Mileage (km)" placeholder="e.g. 120 000" keyboardType="number-pad" numeric value={mileage} onChangeText={setMileage} />
           </View>
         </View>
         <SelectField label="Assigned driver" icon="user" options={driverOptions} value={driver} onSelect={setDriver} />

@@ -45,6 +45,8 @@ export interface VehicleType {
   id: number | string;
   name: string;
   fuel_consumption_l_per_100km?: number;
+  /** Decides which of the company's per-fuel-type default prices a quote uses. */
+  fuel_type?: string;
   base_rate?: number;
   available_vehicle_count?: number;
   capacity?: number;

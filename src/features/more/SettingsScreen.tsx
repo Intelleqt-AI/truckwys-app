@@ -34,6 +34,7 @@ import {
   updateCompanyProfile,
   changePassword,
   updateCompanyLogo,
+  fetchFuelPrices,
   useMe,
   updateProfile,
   uploadAvatar,
@@ -861,6 +862,11 @@ const INDUSTRY_OPTIONS = [
   { label: 'Other', value: 'other' },
 ];
 const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC'].map((p) => ({ label: p, value: p }));
+// The backend's factory default for Company.fuel_price_per_litre. Used both as
+// the blank-box fallback on save and to recognise an untouched diesel price when
+// the live feed offers a fresher one — those two uses must stay in step, or the
+// "don't overwrite a deliberate price" guard inverts.
+const DIESEL_DEFAULT_PRICE = 23.5;
 
 function CompanySection() {
   const { data } = useCompanyProfile();
@@ -887,10 +893,18 @@ function CompanySection() {
   const [allowCrossBorder, setAllowCrossBorder] = useState('yes');
   const [baseRate, setBaseRate] = useState('');
   const [tollRate, setTollRate] = useState('');
-  const [fuelPrice, setFuelPrice] = useState('');
   const [slaHours, setSlaHours] = useState('');
   const [surchargeThreshold, setSurchargeThreshold] = useState('');
   const [surchargePct, setSurchargePct] = useState('');
+  // One default price per fuel type. Diesel keeps the legacy field name
+  // (fuel_price_per_litre) because it predates the other three, and it's the
+  // only one the column can't hold NULL for.
+  const [fuelPrice, setFuelPrice] = useState('');
+  const [fuelPetrol, setFuelPetrol] = useState('');
+  const [fuelElectric, setFuelElectric] = useState('');
+  const [fuelHybrid, setFuelHybrid] = useState('');
+  const [livePrice, setLivePrice] = useState<Record<string, unknown> | null>(null);
+  const [fetchingLive, setFetchingLive] = useState(false);
 
   useEffect(() => {
     if (seeded || !data) return;
@@ -919,6 +933,9 @@ function CompanySection() {
     seedNum(['default_base_rate_per_km', 'base_rate_per_km', 'base_rate'], setBaseRate);
     seedNum(['default_toll_rate_per_km'], setTollRate);
     seedNum(['fuel_price_per_litre'], setFuelPrice);
+    seedNum(['fuel_price_petrol'], setFuelPetrol);
+    seedNum(['fuel_price_electric'], setFuelElectric);
+    seedNum(['fuel_price_hybrid'], setFuelHybrid);
     seedNum(['default_sla_hours'], setSlaHours);
     seedNum(['weight_surcharge_threshold_kg'], setSurchargeThreshold);
     seedNum(['weight_surcharge_pct'], setSurchargePct);
@@ -939,7 +956,10 @@ function CompanySection() {
       ['Weight surcharge threshold', surchargeThreshold],
       ['Base rate / km', baseRate],
       ['Toll rate / km', tollRate],
-      ['Fuel price', fuelPrice],
+      ['Diesel price', fuelPrice],
+      ['Petrol price', fuelPetrol],
+      ['Electric price', fuelElectric],
+      ['Hybrid price', fuelHybrid],
       ['SLA hours', slaHours],
     ];
     for (const [label, v] of numericFields) {
@@ -963,6 +983,10 @@ function CompanySection() {
     // Only send a numeric field when it has a value — an empty box must leave
     // the stored default alone rather than zeroing it.
     const optionalNum = (v: string) => (v.trim() ? (parseNum(v) ?? undefined) : undefined);
+    // For the nullable per-fuel-type prices, blank has to mean "clear it", which
+    // needs an explicit null: optionalNum omits the key entirely, so a price
+    // could be set but never removed.
+    const clearableNum = (v: string) => (v.trim() ? (parseNum(v) ?? null) : null);
 
     setBusy(true);
     try {
@@ -980,7 +1004,12 @@ function CompanySection() {
         default_quote_validity_days: optionalNum(validityDays),
         default_base_rate_per_km: optionalNum(baseRate),
         default_toll_rate_per_km: optionalNum(tollRate),
-        fuel_price_per_litre: optionalNum(fuelPrice),
+        // Diesel is NOT NULL with a 23.50 factory default, so a blank box falls
+        // back to that rather than clearing — matching the web page.
+        fuel_price_per_litre: optionalNum(fuelPrice) ?? DIESEL_DEFAULT_PRICE,
+        fuel_price_petrol: clearableNum(fuelPetrol),
+        fuel_price_electric: clearableNum(fuelElectric),
+        fuel_price_hybrid: clearableNum(fuelHybrid),
         default_sla_hours: optionalNum(slaHours),
         weight_surcharge_threshold_kg: optionalNum(surchargeThreshold),
         weight_surcharge_pct: optionalNum(surchargePct),
@@ -993,6 +1022,71 @@ function CompanySection() {
       setBusy(false);
     }
   };
+
+  /**
+   * Pull the live national prices into the form (not saved until Save changes).
+   *
+   * One action rather than web's two: the endpoint returns diesel and petrol in
+   * a single response, and web wires a FETCH NOW button next to each that both
+   * call the same handler — so pressing the petrol one silently rewrites diesel
+   * too. One button that says it fills both is the honest version.
+   *
+   * There is no live feed for electric or hybrid anywhere in the system, so those
+   * two stay manual.
+   */
+  const loadLivePrice = async (manual: boolean) => {
+    if (manual) setFetchingLive(true);
+    try {
+      const d = (await fetchFuelPrices(manual)) as Record<string, unknown>;
+      setLivePrice(d);
+      if (pick(d, ['success']) === false) {
+        if (manual) toast.error(str(pick(d, ['error']), 'Could not fetch live fuel prices'));
+        return;
+      }
+      const diesel = pick(d, ['inland_price']);
+      if (diesel != null) {
+        // On the silent load, only fill what still looks untouched — blank, or
+        // still sitting on the factory default. A manual fetch is an explicit
+        // request, so it always wins. Never quietly overwrite a real price.
+        setFuelPrice((prev) => {
+          const n = parseNum(prev);
+          const untouched = !prev.trim() || (n != null && Math.abs(n - DIESEL_DEFAULT_PRICE) < 0.001);
+          return manual || untouched ? String(num(diesel)) : prev;
+        });
+      }
+      // petrol_95 comes back as 0 (not null) when there's no data — writing that
+      // would store a zero price.
+      const petrol = num(pick(d, ['petrol_95']));
+      if (petrol > 0) setFuelPetrol((prev) => (manual || !prev.trim() ? String(petrol) : prev));
+      if (manual) toast.success('Fuel prices refreshed');
+    } catch (e) {
+      // The endpoint 500s rather than degrading to a 200, so this path is real.
+      if (manual) toast.error(e instanceof Error ? e.message : 'Could not fetch live fuel prices');
+    } finally {
+      if (manual) setFetchingLive(false);
+    }
+  };
+
+  // Chained off the profile load, not parallel: the guard above reads the
+  // current diesel value to decide whether it looks untouched, so the saved
+  // value has to be in state first.
+  useEffect(() => {
+    if (!seeded) return;
+    void loadLivePrice(false);
+  }, [seeded]);
+
+  // Read-out under the fields: what the live feed last said, and whether it's old.
+  const liveStale = pick(livePrice ?? {}, ['is_stale']) === true;
+  const liveDiesel = num(pick(livePrice ?? {}, ['inland_price']));
+  const liveNote = (() => {
+    if (!livePrice || pick(livePrice, ['success']) === false || liveDiesel <= 0) return '';
+    const updated = str(pick(livePrice, ['last_updated']));
+    const warning = str(pick(livePrice, ['stale_warning']));
+    const parts = [`Live national diesel ${formatCurrency(liveDiesel)}/L`];
+    if (updated) parts.push(`updated ${formatDate(updated)}`);
+    if (warning) parts.push(warning);
+    return parts.join(' · ');
+  })();
 
   const uploadLogo = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
@@ -1062,10 +1156,6 @@ function CompanySection() {
       <Txt className="-mt-1 text-caption text-faint">
         Fallback only — used when the routing service can&apos;t itemise toll plazas.
       </Txt>
-      <TextField label="Diesel price / litre" prefix="R" placeholder="e.g. 21,70" keyboardType="decimal-pad" value={fuelPrice} onChangeText={setFuelPrice} />
-      <Txt className="-mt-1 text-caption text-faint">
-        Fallback only — the live national diesel price is used when available.
-      </Txt>
       <TextField label="Default SLA (hours)" placeholder="e.g. 48" icon="clock" keyboardType="number-pad" value={slaHours} onChangeText={setSlaHours} />
       <View className="flex-row gap-3">
         <View className="flex-1">
@@ -1075,6 +1165,47 @@ function CompanySection() {
           <TextField label="Surcharge (%)" placeholder="e.g. 15" keyboardType="decimal-pad" value={surchargePct} onChangeText={setSurchargePct} />
         </View>
       </View>
+
+      {/* ── Fuel price defaults ───────────────────────────────────────────── */}
+      <View className="mt-1 flex-row items-center justify-between">
+        <Label className="text-muted">Fuel price defaults</Label>
+        <Pressable
+          onPress={() => loadLivePrice(true)}
+          disabled={fetchingLive}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Fetch live fuel prices"
+          className="active:opacity-50"
+        >
+          <Mono className={`text-micro tracking-wide uppercase ${fetchingLive ? 'text-faint' : 'text-accent'}`}>
+            {fetchingLive ? 'Fetching…' : 'Fetch live'}
+          </Mono>
+        </Pressable>
+      </View>
+      <Txt className="-mt-2 text-caption text-faint">
+        Used when a vehicle type of that fuel runs a quote. Diesel and petrol can
+        be pulled from the live national price; electric and hybrid have no feed,
+        so set those yourself.
+      </Txt>
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <TextField label="Diesel (R/L)" prefix="R" placeholder="e.g. 23,50" keyboardType="decimal-pad" value={fuelPrice} onChangeText={setFuelPrice} />
+        </View>
+        <View className="flex-1">
+          <TextField label="Petrol (R/L)" prefix="R" placeholder="Not set" keyboardType="decimal-pad" value={fuelPetrol} onChangeText={setFuelPetrol} />
+        </View>
+      </View>
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <TextField label="Electric (R/kWh)" prefix="R" placeholder="Not set" keyboardType="decimal-pad" value={fuelElectric} onChangeText={setFuelElectric} />
+        </View>
+        <View className="flex-1">
+          <TextField label="Hybrid (R/L)" prefix="R" placeholder="Not set" keyboardType="decimal-pad" value={fuelHybrid} onChangeText={setFuelHybrid} />
+        </View>
+      </View>
+      {liveNote && (
+        <Txt className={`-mt-1 text-caption ${liveStale ? 'text-warning' : 'text-faint'}`}>{liveNote}</Txt>
+      )}
 
       <Button label="Save changes" loading={busy} onPress={save} fullWidth />
     </View>

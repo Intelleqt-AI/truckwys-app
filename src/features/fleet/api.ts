@@ -49,10 +49,17 @@ export function useDriver(id: string | number, preview?: Record<string, unknown>
   });
 }
 
+/** capacity is in tons here — the Vehicle form displays tons and sends kg. */
+export interface VehicleTypeOption {
+  id: number | string;
+  name: string;
+  capacity?: number;
+}
+
 export function useVehicleTypesList() {
-  return useQuery<{ id: number | string; name: string }[]>({
+  return useQuery<VehicleTypeOption[]>({
     queryKey: ['vehicle-types'],
-    queryFn: async () => asArray<{ id: number | string; name: string }>(await fetchData('vehicle-types/')),
+    queryFn: async () => asArray<VehicleTypeOption>(await fetchData('vehicle-types/')),
   });
 }
 

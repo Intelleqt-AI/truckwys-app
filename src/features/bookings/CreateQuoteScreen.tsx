@@ -20,6 +20,7 @@ import {
   Mono,
   Label,
   type CurvePoint,
+  INPUT_TEXT,
 } from '@/components/ui';
 import {
   useVehicleTypes,
@@ -1173,7 +1174,7 @@ function LocationField({
       <View className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}>
         <Icon name="pin" size={17} color={value ? colors.accent : colors.faint} />
         <TextInput
-          className="flex-1 text-body text-fg"
+          className="flex-1 text-fg"
           placeholder={placeholder}
           placeholderTextColor={colors.faint}
           value={text}
@@ -1190,7 +1191,7 @@ function LocationField({
             if (blurTimer.current) clearTimeout(blurTimer.current);
             blurTimer.current = setTimeout(() => setFocused(false), 150);
           }}
-          style={{ paddingVertical: 12 }}
+          style={[INPUT_TEXT, { paddingVertical: 12 }]}
         />
       </View>
       {value?.cc && isForeignCc(value.cc) && (

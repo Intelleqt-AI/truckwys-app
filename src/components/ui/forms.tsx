@@ -8,7 +8,7 @@ import {
   InputAccessoryView,
   type TextInputProps,
 } from 'react-native';
-import { Txt, Mono, Label } from './Text';
+import { Txt, Mono, Label, INPUT_TEXT } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
 import { parseNum, formatNumber, formatPlain } from '@/lib/formatters';
@@ -117,11 +117,13 @@ export function TextField({
         {icon && <Icon name={icon} size={17} color={colors.faint} />}
         {prefix && <Mono className="text-body text-muted">{prefix}</Mono>}
         <TextInput
-          className="flex-1 text-body text-fg"
+          className="flex-1 text-fg"
           placeholderTextColor={colors.faint}
           secureTextEntry={hidden}
-          style={{ paddingVertical: 12 }}
           {...props}
+          // After the spread, and merging props.style rather than being replaced
+          // by it — a caller passing style used to drop paddingVertical outright.
+          style={[INPUT_TEXT, { paddingVertical: 12 }, props.style]}
           onFocus={onFocus}
           onBlur={onBlur}
           inputAccessoryViewID={props.inputAccessoryViewID ?? accessoryID}
@@ -158,7 +160,8 @@ export function SearchField({
     <View className="min-h-[44px] flex-row items-center gap-2 rounded-xs border border-line bg-surface px-3">
       <Icon name="search" size={17} color={colors.faint} />
       <TextInput
-        className="flex-1 text-body text-fg"
+        className="flex-1 text-fg"
+        style={INPUT_TEXT}
         placeholder={placeholder}
         placeholderTextColor={colors.faint}
         value={value}

@@ -9,7 +9,7 @@ import {
   ScrollView,
   type TextInputProps,
 } from 'react-native';
-import { Txt, Icon, KeyboardDoneBar } from '@/components/ui';
+import { Txt, Icon, KeyboardDoneBar, INPUT_TEXT } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // Shared shell for the sign-in flow. These screens deliberately follow the
@@ -75,13 +75,15 @@ export function AuthField({
       className={`min-h-[52px] flex-row items-center px-4 ${last ? '' : 'border-b border-line-row'}`}
     >
       <TextInput
-        className="flex-1 text-body text-fg"
+        className="flex-1 text-fg"
         placeholder={placeholder}
         placeholderTextColor={colors.faint}
         secureTextEntry={hidden}
         accessibilityLabel={accessibilityLabel}
-        style={{ paddingVertical: 15 }}
         {...rest}
+        // After the spread so a caller's style merges instead of replacing it —
+        // the reset screen's code field passes its own letterSpacing.
+        style={[INPUT_TEXT, { paddingVertical: 15 }, rest.style]}
         inputAccessoryViewID={rest.inputAccessoryViewID ?? accessoryID}
       />
       {secure && (

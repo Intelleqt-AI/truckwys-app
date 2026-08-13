@@ -12,7 +12,7 @@ import { useHeaderHeight } from '@react-navigation/elements';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
-import { AmbientGlow, Mono, Icon } from '@/components/ui';
+import { AmbientGlow, Mono, Icon, INPUT_TEXT } from '@/components/ui';
 import { status as statusHues } from '@/theme/tokens';
 import { resolveNotificationLink } from '@/lib/notificationLink';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -390,7 +390,7 @@ export function CopilotScreen({ navigation }: Props) {
         >
           <View className="min-h-[44px] flex-1 justify-center rounded-xs border border-line bg-surface px-3">
             <TextInput
-              className="text-body text-fg"
+              className="text-fg"
               placeholder="Ask about your operation…"
               placeholderTextColor={colors.faint}
               value={input}
@@ -402,7 +402,7 @@ export function CopilotScreen({ navigation }: Props) {
               submitBehavior="newline"
               // Without a cap a long paste grows the dock until it eats the
               // transcript.
-              style={{ maxHeight: 120, paddingVertical: 10 }}
+              style={[INPUT_TEXT, { maxHeight: 120, paddingVertical: 10 }]}
               scrollEnabled
             />
           </View>

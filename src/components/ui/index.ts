@@ -1,4 +1,4 @@
-export { Txt, Mono, Label } from './Text';
+export { Txt, Mono, Label, INPUT_TEXT } from './Text';
 export { Icon, icons, type IconName } from './icons';
 export {
   Card,

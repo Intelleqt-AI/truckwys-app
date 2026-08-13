@@ -182,9 +182,12 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       eyebrow="Invoice"
       title={str(pick(inv, ['invoice_number', 'number']), 'Invoice')}
       onBack={() => navigation.goBack()}
-      actionLabel="Share"
-      actionIcon="share"
-      onAction={share}
+      // A draft has no business being shared — it isn't finalised, and its
+      // view_token isn't minted until it's first sent, so the link wouldn't
+      // work anyway. Hide the action entirely rather than let it fail.
+      actionLabel={status === 'DRAFT' ? undefined : 'Share'}
+      actionIcon={status === 'DRAFT' ? undefined : 'share'}
+      onAction={status === 'DRAFT' ? undefined : share}
       footer={
         <View className="gap-2.5">
           <View className="flex-row gap-2.5">

@@ -1,4 +1,4 @@
-import { type ReactNode, useLayoutEffect, useCallback, useState } from 'react';
+import { type ReactNode, useLayoutEffect, useCallback, useEffect, useRef, useState } from 'react';
 import { View, ScrollView, Pressable, RefreshControl } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
@@ -67,23 +67,49 @@ export function SheetScreen({
     [keyboardOverlap],
   );
 
+  /**
+   * The header callbacks, held in refs.
+   *
+   * Callers pass plain (non-memoised) functions — `onAction={share}` where
+   * `share` is declared in the component body, or a bare inline arrow. Those get
+   * a fresh identity on every render, so renderAction did too, and the
+   * useLayoutEffect below then called setOptions({ headerRight }) on EVERY
+   * render. Each of those recreates the native bar-button item, and iOS 26
+   * sometimes measured its glass background before Yoga had applied the 34x34
+   * layout — which is why the header action came out round on some renders and a
+   * stretched capsule on others, worst on the screens that re-render most (the
+   * quote page constantly; the invoice barely, hence it looked fine).
+   *
+   * Reading through a ref keeps the rendered element identity stable, so the
+   * native item is created once and its frame settles.
+   */
+  const actionRef = useRef(onAction);
+  const backRef = useRef(onBack);
+  useEffect(() => {
+    actionRef.current = onAction;
+    backRef.current = onBack;
+  }, [onAction, onBack]);
+
   const renderAction = useCallback(
     () =>
       actionIcon ? (
         <Pressable
-          onPress={onAction}
+          onPress={() => actionRef.current?.()}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel={actionLabel}
           style={pressDim}
+          // Keeps the square in the native view tree: a flattened wrapper leaves
+          // iOS sizing its glass to something other than the 34x34 we asked for.
+          collapsable={false}
         >
-          <View style={ICON_BTN}>
+          <View style={ICON_BTN} collapsable={false}>
             <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
           </View>
         </Pressable>
       ) : (
         <Pressable
-          onPress={onAction}
+          onPress={() => actionRef.current?.()}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel={actionLabel}
@@ -98,34 +124,39 @@ export function SheetScreen({
           </Mono>
         </Pressable>
       ),
-    [onAction, actionLabel, actionIcon, colors.accent],
+    [actionLabel, actionIcon, colors.accent],
   );
 
   // Modals close with an X (clear "dismiss" affordance) rather than a Cancel word.
   const renderClose = useCallback(
     () => (
       <Pressable
-        onPress={onBack}
+        onPress={() => backRef.current?.()}
         hitSlop={8}
         accessibilityRole="button"
         accessibilityLabel="Close"
         style={pressDim}
+        collapsable={false}
       >
-        <View style={ICON_BTN}>
+        <View style={ICON_BTN} collapsable={false}>
           <Icon name="x" size={22} color={colors.accent} strokeWidth={2} />
         </View>
       </Pressable>
     ),
-    [onBack, colors.accent],
+    [colors.accent],
   );
 
+  // A boolean, not onAction itself — the function's identity changes every
+  // render and would re-run this effect each time. Only whether there IS an
+  // action matters here.
+  const hasAction = !!onAction;
   useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: title ?? '',
-      headerRight: actionLabel && onAction ? renderAction : undefined,
+      headerRight: actionLabel && hasAction ? renderAction : undefined,
       ...(variant === 'modal' ? { headerLeft: renderClose } : {}),
     });
-  }, [navigation, title, actionLabel, onAction, variant, renderAction, renderClose]);
+  }, [navigation, title, actionLabel, hasAction, variant, renderAction, renderClose]);
 
   return (
     <View className="flex-1 bg-bg-deep">

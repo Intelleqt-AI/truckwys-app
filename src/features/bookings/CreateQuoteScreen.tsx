@@ -1010,7 +1010,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 />
                 {serviceCharge !== 0 && <DetailRow label="Service adjustment" value={formatCurrency(serviceCharge)} />}
                 <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
-                  <Txt className="text-callout font-semibold text-fg">Quote total · {costs.marginPct}% margin</Txt>
+                  <Txt className="text-callout font-semibold text-fg">Quote total</Txt>
                   <Mono className="text-heading font-semibold text-accent">{formatCurrency(costs.total)}</Mono>
                 </View>
                 <View className="px-3.5 py-2">

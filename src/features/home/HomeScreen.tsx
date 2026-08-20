@@ -63,7 +63,7 @@ export function HomeScreen() {
       <Screen onRefresh={onRefresh} refreshing={refreshing}>
         <AppHeader
           eyebrow={format(new Date(), 'EEE · d MMM · yyyy')}
-          title="Overviews"
+          title="Overview"
           live
           right={
             <View className="flex-row items-center gap-1">

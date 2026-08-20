@@ -24,6 +24,7 @@ import {
   useQuote,
   sendQuote,
   convertQuoteToLoad,
+  useLoads,
   recordQuoteOutcome,
   deleteQuote,
   downloadQuotePdf,
@@ -42,6 +43,7 @@ import {
   parseNum,
 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
+import { useSubscription } from '@/hooks/useSubscription';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
@@ -68,6 +70,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
+  const subscription = useSubscription();
+  const { data: loads } = useLoads();
   const { id, preview } = route.params;
   const { data, isError, refetch } = useQuote(id, preview);
   const qc = useQueryClient();
@@ -145,6 +149,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const notes = str(pick(q, ['notes']));
 
   const accepted = ['ACCEPTED', 'APPROVED'].includes(status);
+  // The quote row carries its load once converted; fall back to scanning loads
+  // by their `quote` back-reference, which is what the web list keys on.
+  const convertedFromQuote = pick(q, ['load_id', 'load', 'booking_id']);
+  const convertedLoadId =
+    convertedFromQuote != null
+      ? (convertedFromQuote as string | number)
+      : ((loads ?? []).find((l) => String(pick(l.raw ?? {}, ['quote']) ?? '') === String(id))?.id ??
+        null);
   const outcome = str(pick(q, ['outcome'])).toLowerCase();
   // Web only offers won/lost capture while the quote is still open.
   const canRecordOutcome = !outcome && ['SENT', 'DRAFT'].includes(status);
@@ -341,11 +353,24 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           </View>
         </View>
       )}
-      {accepted && (
+      {/* A quote converts to at most one load — convert_to_load rejects a
+          second attempt — so once it has, offer the booking instead of a button
+          that can only fail. */}
+      {accepted && convertedLoadId != null && (
+        <Button
+          label="View booking"
+          icon="arrowRight"
+          variant="secondary"
+          onPress={() => navigation.navigate('LoadDetail', { id: convertedLoadId })}
+          fullWidth
+        />
+      )}
+      {accepted && convertedLoadId == null && (
         <Button
           label="Convert to booking"
           icon="arrowRight"
           loading={convertBusy}
+          disabled={subscription.blocked}
           onPress={() => setShowAssign(true)}
           fullWidth
         />

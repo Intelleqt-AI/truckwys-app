@@ -58,6 +58,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useSubscription } from '@/hooks/useSubscription';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
@@ -136,6 +137,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const { data: vtypes } = useVehicleTypes();
   const { data: company } = useCompanyProfileData();
   const { data: modelStats } = useModelStats();
+  // A suspended or cancelled subscription blocks new quotes server-side
+  // (PlanLimitsMiddleware), so gate it here too rather than letting the user
+  // build a whole quote and take a 403 on save.
+  const subscription = useSubscription();
 
   const [customerId, setCustomerId] = useState('');
   const [vehicleType, setVehicleType] = useState('');
@@ -405,6 +410,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // AI analyze + guard (debounced 700ms, stale-guarded).
   useEffect(() => {
+    // No point spending an AI-pricing call on a quote that cannot be saved.
+    if (subscription.blocked) return;
     if (!routeData || costs.total <= 0 || !pickup || !delivery) return;
     const id = ++aiReq.current;
     const t = setTimeout(async () => {
@@ -653,6 +660,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   });
 
   const save = async (send: boolean) => {
+    if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
     // Draft can be saved any time (just needs a client to attach to).
     if (!customerId) return toast.error('Select a client');
     if (routeBlockedMessage) return toast.error(routeBlockedMessage);
@@ -702,14 +710,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       footer={
         <View className="flex-row gap-2.5">
           <View className="flex-1">
-            <Button label="Save draft" variant="secondary" loading={busy} onPress={() => save(false)} fullWidth />
+            <Button label="Save draft" variant="secondary" loading={busy} disabled={subscription.blocked} onPress={() => save(false)} fullWidth />
           </View>
           <View className="flex-1">
             <Button
               label="Send to client"
               icon="send"
               loading={busy}
-              disabled={!ready || !!routeBlockedMessage}
+              disabled={!ready || !!routeBlockedMessage || subscription.blocked}
               onPress={() => save(true)}
               fullWidth
             />
@@ -718,6 +726,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     >
       <View className="gap-4">
+        {subscription.notice && (
+          <View className="flex-row items-start gap-2.5 rounded-xs border border-danger bg-danger-bg p-3">
+            <Icon name="alert" size={17} color="#FF4949" />
+            <Txt className="flex-1 text-sub text-muted">{subscription.notice}</Txt>
+          </View>
+        )}
         {/* AI voice / natural-language quick fill */}
         <VoiceQuoteBar
           value={nlText}

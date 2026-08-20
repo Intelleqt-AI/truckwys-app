@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Pressable, TextInput, Modal, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
-import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import BottomSheet, { BottomSheetFooter, BottomSheetScrollView, type BottomSheetFooterProps } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
@@ -133,7 +133,6 @@ function plusDays(days: number): string {
 }
 
 export function CreateQuoteScreen({ route, navigation }: Props) {
-  const ai = route.params?.ai;
   const prefill = route.params?.prefill as Record<string, unknown> | undefined;
   const editId = route.params?.quoteId;
   const editing = editId != null;
@@ -219,9 +218,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const sheetRef = useRef<BottomSheet>(null);
   // The map sits behind the sheet, so it needs to know how much of itself is
   // covered — both to keep the route clear of it and to place the confirm card.
-  const SNAP = useMemo(() => ['38%', '72%', '94%'] as const, []);
+  // Two stops, and the upper one caps at 70% so the map always keeps ~30%. It
+  // used to go to 94%, which left the map as a sliver and made the whole
+  // map-first idea pointless. A middle stop made the drag feel indecisive.
+  //
+  // keyboardBehavior lifts the sheet past this while a field is focused, which
+  // has to stay — otherwise you type into an input under the keyboard. The floor
+  // is a constraint on dragging, not on the keyboard.
+  const SNAP_FRACTIONS = useMemo(() => [0.36, 0.7], []);
+  const SNAP = useMemo(() => SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`), [SNAP_FRACTIONS]);
   const [snapIndex, setSnapIndex] = useState(0);
-  const sheetHeight = screenH * [0.38, 0.72, 0.94][Math.max(0, snapIndex)]!;
+  const sheetHeight = screenH * (SNAP_FRACTIONS[Math.max(0, snapIndex)] ?? SNAP_FRACTIONS[0]!);
 
   const [picking, setPicking] = useState<PickTarget | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
@@ -835,6 +842,25 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     </View>
   );
 
+  // Pinned to the sheet's bottom edge via footerComponent rather than sitting at
+  // the end of the scroll view, so the primary action is always reachable and
+  // stays above the keyboard.
+  const renderFooter = useCallback(
+    (props: BottomSheetFooterProps) => (
+      <BottomSheetFooter {...props} bottomInset={0}>
+        <View
+          className="border-t border-line bg-surface px-4 pt-3"
+          style={{ paddingBottom: insets.bottom + 10 }}
+        >
+          {actions}
+        </View>
+      </BottomSheetFooter>
+    ),
+    // actions closes over busy/ready/subscription, which is what should re-render it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [busy, ready, routeBlockedMessage, subscription.blocked, insets.bottom],
+  );
+
   return (
     <View className="flex-1 bg-bg-deep">
       {/* The map is the page. It fills the screen and the sheet floats over it,
@@ -848,26 +874,23 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         picking={!!picking}
         width={screenW}
         height={screenH}
+        topInset={insets.top}
       />
 
-      {/* Own chrome, since the native header is off on this screen. */}
-      <View className="absolute left-0 right-0 flex-row items-center gap-2 px-4" style={{ top: insets.top + 6 }}>
+      {/* Own chrome, since the native header is off on this screen. A white
+          chevron in a translucent circle is the iOS pattern for a back control
+          over full-bleed content — Apple Maps and Photos both do this, because a
+          bare chevron loses contrast as the map moves under it. */}
+      <View className="absolute left-0 right-0 flex-row items-center px-4" style={{ top: insets.top + 6 }}>
         <Pressable
           onPress={() => navigation.goBack()}
-          hitSlop={10}
+          hitSlop={12}
           accessibilityRole="button"
-          accessibilityLabel="Close"
-          className="h-9 w-9 items-center justify-center rounded-pill border border-line bg-bg-deep/85 active:opacity-60"
+          accessibilityLabel="Back"
+          className="h-10 w-10 items-center justify-center rounded-pill bg-black/45 active:opacity-60"
         >
-          <Icon name="x" size={19} color={colors.accent} />
+          <Icon name="chevronLeft" size={24} color="#FFFFFF" strokeWidth={2.4} />
         </Pressable>
-        {!picking && (
-          <View className="rounded-pill border border-line bg-bg-deep/85 px-3 py-1.5">
-            <Mono className="text-micro tracking-wide uppercase text-muted">
-              {editing ? 'Edit quote' : ai ? 'AI quote' : 'Build quote'}
-            </Mono>
-          </View>
-        )}
       </View>
 
       {picking && (
@@ -889,6 +912,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         enableDynamicSizing={false}
         enablePanDownToClose={false}
         onChange={setSnapIndex}
+        footerComponent={renderFooter}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
@@ -901,7 +925,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <BottomSheetScrollView
           contentContainerStyle={{
             paddingHorizontal: 16,
-            paddingBottom: insets.bottom + 28,
+            // Clears the pinned footer, which overlays the scroll area.
+            paddingBottom: insets.bottom + 96,
             gap: 16,
           }}
           keyboardShouldPersistTaps="handled"
@@ -1264,7 +1289,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           "Fill from description" button, which previously only spun a small
           button through a multi-second AI call. */}
       <WorkingOverlay visible={voiceBusy || nlBusy} title="Building your quote" />
-          {actions}
         </BottomSheetScrollView>
       </BottomSheet>
     </View>

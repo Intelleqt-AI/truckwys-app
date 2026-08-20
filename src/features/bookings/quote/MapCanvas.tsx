@@ -19,6 +19,8 @@ export interface MapCanvasProps {
   picking?: boolean;
   width: number;
   height: number;
+  /** Safe-area top, so the route isn't fitted under the floating back button. */
+  topInset?: number;
 }
 
 /**
@@ -38,6 +40,7 @@ export function MapCanvas({
   picking = false,
   width,
   height,
+  topInset = 0,
 }: MapCanvasProps) {
   const maps = getMapsLib();
   const { colors } = useTheme();
@@ -55,8 +58,18 @@ export function MapCanvas({
         {/* Tiles render even with nothing picked yet — a map-first screen with a
             blank panel on it just looks broken. RouteMap falls back to a South
             Africa view when it has no points. */}
-        <RouteMap geometry={geometry} pickup={pickup} delivery={delivery} width={width} height={height} />
-        <View className="absolute bottom-3 self-center rounded-pill border border-line bg-bg-deep/85 px-2.5 py-1">
+        <RouteMap
+          geometry={geometry}
+          pickup={pickup}
+          delivery={delivery}
+          width={width}
+          height={height}
+          bottomInset={bottomInset}
+        />
+        <View
+          className="absolute self-center rounded-pill border border-line bg-bg-deep/85 px-2.5 py-1"
+          style={{ bottom: bottomInset + 28 }}
+        >
           <Mono className="text-nano text-faint">
             {IS_EXPO_GO
               ? 'STATIC MAP · PIN PICKING NEEDS A DEV BUILD'
@@ -82,6 +95,7 @@ export function MapCanvas({
       width={width}
       height={height}
       accent={colors.accent}
+      topInset={topInset}
     />
   );
 }
@@ -100,6 +114,7 @@ function InteractiveMap({
   width,
   height,
   accent,
+  topInset,
 }: {
   maps: MapsModule;
   route: GeoPoint[];
@@ -112,22 +127,36 @@ function InteractiveMap({
   width: number;
   height: number;
   accent: string;
+  topInset: number;
 }) {
   const MapView = maps.default;
   const { Marker, Polyline } = maps;
   const ref = useRef<InstanceType<typeof MapView> | null>(null);
 
-  // Frame the route when it changes, but never while the user is dragging to
-  // place a pin — moving the map under them mid-gesture is the one thing that
-  // makes a map feel broken.
+  // Frame the route inside the part of the map that is actually visible, and
+  // re-frame when that area changes — dragging the sheet up shrinks the window,
+  // so the route has to be re-fitted smaller to stay wholly on screen. mapPadding
+  // alone only shifts the centre; it never changes zoom, which is why the route
+  // used to stay the same size as the window closed over it.
+  //
+  // Never while the user is placing a pin: moving the map under them mid-gesture
+  // is the one thing that makes a map feel broken.
   const framed = useRef('');
   useEffect(() => {
     if (!focus || picking) return;
-    const key = `${focus.latitude.toFixed(4)},${focus.longitude.toFixed(4)},${focus.latitudeDelta.toFixed(4)}`;
+    const key = `${focus.latitude.toFixed(4)},${focus.longitude.toFixed(4)},${focus.latitudeDelta.toFixed(4)}:${Math.round(bottomInset)}`;
     if (framed.current === key) return;
     framed.current = key;
-    ref.current?.animateToRegion(focus, 450);
-  }, [focus, picking]);
+
+    const edgePadding = { top: topInset + 64, right: 40, bottom: bottomInset + 24, left: 40 };
+    if (route.length > 1) {
+      // fitToCoordinates honours edgePadding, so it zooms as well as pans.
+      ref.current?.fitToCoordinates(route.map(toLatLng), { edgePadding, animated: true });
+    } else {
+      // One point can't define a span for fitToCoordinates.
+      ref.current?.animateToRegion(focus, 450);
+    }
+  }, [focus, picking, bottomInset, topInset, route]);
 
   return (
     <View style={{ width, height }}>

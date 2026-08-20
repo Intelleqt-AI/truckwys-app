@@ -66,6 +66,7 @@ export function RouteMap({
   delivery,
   height = 190,
   width: widthProp,
+  bottomInset = 0,
 }: {
   geometry?: GeoPoint[];
   pickup?: GeoPoint | null;
@@ -73,6 +74,12 @@ export function RouteMap({
   height?: number;
   /** Explicit width. Defaults to the screen minus the 16px card gutters. */
   width?: number;
+  /**
+   * How much of the bottom is covered by something else (the quote sheet). Only
+   * used to lift the attribution clear of it — required by MapTiler's ToS and
+   * OSM's ODbL, so it must never end up off-screen.
+   */
+  bottomInset?: number;
 }) {
   const { colors } = useTheme();
   const { width: screenW } = useWindowDimensions();
@@ -146,17 +153,25 @@ export function RouteMap({
       d,
       tiles,
       dashed: !hasRoute,
-      start: local[0],
-      end: local.length > 1 ? local[local.length - 1] : undefined,
+      // Nothing is picked yet: tiles only. `local[0]` here is the synthetic South
+      // Africa centre, and drawing it as a start marker put a green dot in the
+      // middle of the country claiming to be a collection point.
+      empty,
+      start: empty ? undefined : local[0],
+      end: !empty && local.length > 1 ? local[local.length - 1] : undefined,
     };
   }, [geometry, pickup, delivery, width, height]);
 
   if (!view) return null;
 
+  // Parent-sized means full-bleed behind the sheet; the card chrome and the
+  // below-the-box attribution are both wrong at that size.
+  const fullBleed = widthProp != null;
+
   return (
     <View>
       <View
-        className="overflow-hidden rounded-xs border border-line"
+        className={fullBleed ? 'overflow-hidden' : 'overflow-hidden rounded-xs border border-line'}
         style={{ width, height, backgroundColor: colors.surface }}
       >
         {!tilesFailed &&
@@ -175,27 +190,41 @@ export function RouteMap({
 
         <Svg width={width} height={height} style={{ position: 'absolute', left: 0, top: 0 }}>
           {/* Casing under the route so it stays legible over dark map features. */}
-          <Path d={view.d} stroke="rgba(0,0,0,0.35)" strokeWidth={6} fill="none" strokeLinejoin="round" />
-          <Path
-            d={view.d}
-            stroke={colors.accent}
-            strokeWidth={3}
-            fill="none"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            strokeDasharray={view.dashed ? '6 6' : undefined}
-          />
-          {view.start && (
+          {!view.empty && (
+            <>
+              <Path d={view.d} stroke="rgba(0,0,0,0.35)" strokeWidth={6} fill="none" strokeLinejoin="round" />
+              <Path
+                d={view.d}
+                stroke={colors.accent}
+                strokeWidth={3}
+                fill="none"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                strokeDasharray={view.dashed ? '6 6' : undefined}
+              />
+            </>
+          )}
+          {!view.empty && view.start && (
             <Circle cx={view.start.x} cy={view.start.y} r={5} fill={statusHues.success} stroke="#fff" strokeWidth={2} />
           )}
-          {view.end && (
+          {!view.empty && view.end && (
             <Circle cx={view.end.x} cy={view.end.y} r={5} fill={statusHues.danger} stroke="#fff" strokeWidth={2} />
           )}
         </Svg>
+
+        {/* MapTiler's ToS and OSM's ODbL both require attribution, so full-bleed
+            has to overlay it inside the map and lift it above whatever covers the
+            bottom — below the box it would sit off-screen. */}
+        {fullBleed && (
+          <View className="absolute right-2 rounded-xs bg-bg-deep/70 px-1.5 py-0.5" style={{ bottom: bottomInset + 6 }}>
+            <Mono className="text-nano text-faint">© MapTiler © OpenStreetMap</Mono>
+          </View>
+        )}
       </View>
 
-      {/* MapTiler's ToS and OSM's ODbL both require attribution. */}
-      <Mono className="mt-1 text-right text-nano text-faint">© MapTiler © OpenStreetMap contributors</Mono>
+      {!fullBleed && (
+        <Mono className="mt-1 text-right text-nano text-faint">© MapTiler © OpenStreetMap contributors</Mono>
+      )}
     </View>
   );
 }

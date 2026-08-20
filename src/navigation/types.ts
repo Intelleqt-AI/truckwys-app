@@ -20,7 +20,27 @@ export type AppStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   LoadDetail: { id: Id; preview?: Record<string, unknown> };
   QuoteDetail: { id: Id; preview?: Record<string, unknown> };
-  CreateQuote: { ai?: boolean; prefill?: Record<string, unknown>; quoteId?: Id } | undefined;
+  CreateQuote:
+    | {
+        ai?: boolean;
+        prefill?: Record<string, unknown>;
+        quoteId?: Id;
+        /** Arm the map's crosshair for this end on open — "Set on map" from the picker. */
+        pick?: 'pickup' | 'delivery';
+        /** Locations already chosen and sitting in the location store; don't clear them. */
+        fromPicker?: boolean;
+        /**
+         * A recording made on the picker, to transcribe and build from on arrival.
+         * The recorder lives on the picker so "describe the job" opens the mic
+         * rather than a form; the conversation that interprets it lives here.
+         */
+        voiceUri?: string;
+      }
+    | undefined;
+  /** Collection and drop-off, asked for before the builder. */
+  PickLocations: { focus?: 'pickup' | 'delivery'; keep?: boolean } | undefined;
+  /** Place one end by moving the map under a fixed pin. Writes to the location store. */
+  PinDrop: { end: 'pickup' | 'delivery' };
   VehicleDetail: { id: Id; preview?: Record<string, unknown> };
   DriverDetail: { id: Id; preview?: Record<string, unknown> };
   InvoiceDetail: { id: Id; preview?: Record<string, unknown> };

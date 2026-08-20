@@ -9,6 +9,8 @@ import { AppTabs } from './AppTabs';
 import { LoadDetailScreen } from '@/features/bookings/LoadDetailScreen';
 import { QuoteDetailScreen } from '@/features/bookings/QuoteDetailScreen';
 import { CreateQuoteScreen } from '@/features/bookings/CreateQuoteScreen';
+import { LocationPickerScreen } from '@/features/bookings/quote/LocationPickerScreen';
+import { PinDropScreen } from '@/features/bookings/quote/PinDropScreen';
 import { VehicleDetailScreen } from '@/features/fleet/VehicleDetailScreen';
 import { DriverDetailScreen } from '@/features/fleet/DriverDetailScreen';
 import { InvoiceDetailScreen } from '@/features/finance/InvoiceDetailScreen';
@@ -131,6 +133,19 @@ export function AppNavigator() {
           name="CreateQuote"
           component={CreateQuoteScreen}
           options={{ presentation: 'card', headerShown: false, animation: 'slide_from_right' }}
+        />
+        {/* Same chrome as the builder it pushes to, so the two don't jump. */}
+        <Stack.Screen
+          name="PickLocations"
+          component={LocationPickerScreen}
+          options={{ presentation: 'card', headerShown: false, animation: 'slide_from_right' }}
+        />
+        {/* Rises over the picker rather than sliding in from the side: it's a
+            focused sub-task that hands one value back, not a step forward. */}
+        <Stack.Screen
+          name="PinDrop"
+          component={PinDropScreen}
+          options={{ presentation: 'card', headerShown: false, animation: 'slide_from_bottom' }}
         />
         <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
         <Stack.Screen name="CreateInvoice" component={CreateInvoiceScreen} />

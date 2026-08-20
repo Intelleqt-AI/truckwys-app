@@ -1,6 +1,6 @@
 import { View, ActivityIndicator } from 'react-native';
 import { Button, Icon, Label, Mono, Txt } from '@/components/ui';
-import { MapPin, MapReticle } from './MapPin';
+import { MapPin, MapReticle, PIN_TIP_OFFSET } from './MapPin';
 import { status as statusHues } from '@/theme/tokens';
 
 export type PickTarget = 'pickup' | 'dropoff';
@@ -57,7 +57,7 @@ export function CrosshairOverlay({
           the point, so it is lifted by its own height; the reticle sits exactly
           on the spot and stays readable while the map is moving. */}
       <View className="absolute inset-0 items-center justify-center" pointerEvents="none">
-        <View style={{ transform: [{ translateY: -28 }] }}>
+        <View style={{ transform: [{ translateY: 40 * PIN_TIP_OFFSET }] }}>
           <MapPin color={tint} size={40} />
         </View>
         <View className="absolute">

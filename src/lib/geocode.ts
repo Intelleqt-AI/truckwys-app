@@ -89,18 +89,32 @@ const MUNICIPALITY_TO_CITY: Record<string, string> = {
   'buffalo city': 'East London',
 };
 
-/** Municipality names are administrative; a quote wants the town. */
+/**
+ * Municipality names are administrative; a quote wants the town.
+ *
+ * The two kinds of municipality have to be treated as opposites. A *metropolitan*
+ * municipality is named after its city, so its name is the answer once aliased —
+ * "City of Tshwane Metropolitan Municipality" is Pretoria. A *district*
+ * municipality is named after a region and says nothing about the town: a pin in
+ * Heidelberg sits in "Sedibeng District Municipality", and calling that the city
+ * is simply wrong. There the settlement name is in the place/locality context.
+ */
 function townFrom(county: string, locality: string, place: string): string {
-  const cleaned = (county || '')
+  const raw = (county || '').trim();
+  // Locality often reads "Johannesburg Ward 60" — the ward number is noise.
+  const fromLocality = (locality || '').replace(/\s+Ward\s+\d+$/i, '').trim();
+  const settlement = place || fromLocality || '';
+
+  if (/\s+District(\s+Municipality)?$/i.test(raw) && settlement) return settlement;
+
+  const cleaned = raw
     .replace(/^City of\s+/i, '')
     .replace(/\s+(Metropolitan|District|Local)\s+Municipality$/i, '')
     .replace(/\s+Municipality$/i, '')
     .replace(/\s+District$/i, '')
     .trim();
   if (cleaned) return MUNICIPALITY_TO_CITY[cleaned.toLowerCase()] ?? cleaned;
-  // Locality often reads "Johannesburg Ward 60" — the ward number is noise.
-  const fromLocality = (locality || '').replace(/\s+Ward\s+\d+$/i, '').trim();
-  return fromLocality || place || '';
+  return settlement;
 }
 
 /**
@@ -116,24 +130,15 @@ function townFrom(county: string, locality: string, place: string): string {
  * callers must decide what to do, because silently saving numbers is the
  * failure this whole module exists to prevent.
  */
-export async function reverseGeocode({ lat, lon }: Coordinates): Promise<GeoPlace> {
-  if (!MAPTILER_KEY) throw new Error('Map lookup is not configured');
+interface MapTilerFeature {
+  text?: string;
+  place_type?: string[];
+  properties?: { country_code?: string };
+  context?: { id?: string; text?: string; country_code?: string }[];
+}
 
-  // Note the order: MapTiler takes lon,lat — the opposite of how it's written.
-  const url = `https://api.maptiler.com/geocoding/${lon},${lat}.json?key=${MAPTILER_KEY}&limit=1`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Couldn't look up that location");
-
-  const body = (await res.json()) as {
-    features?: {
-      text?: string;
-      properties?: { country_code?: string };
-      context?: { id?: string; text?: string; country_code?: string }[];
-    }[];
-  };
-  const feature = body.features?.[0];
-  if (!feature) throw new Error('No address found at that point');
-
+/** One MapTiler feature to a place. Null when it has no usable label. */
+function placeFrom(feature: MapTilerFeature): GeoPlace | null {
   const ctx: Record<string, string> = {};
   for (const c of feature.context ?? []) {
     const kind = String(c.id ?? '').split('.')[0];
@@ -141,9 +146,16 @@ export async function reverseGeocode({ lat, lon }: Coordinates): Promise<GeoPlac
   }
 
   const town = townFrom(ctx.county ?? '', ctx.locality ?? '', ctx.place ?? '');
-  const parts = [feature.text, ctx.place, town, ctx.region]
+  // A ward number is administrative noise on a customer's quote, and it turns up
+  // in the feature's own name out in open country ("Beaufort West Ward 7"), not
+  // just in the locality context.
+  const name = (feature.text ?? '').replace(/\s+Ward\s+\d+$/i, '').trim();
+  const parts = [name, ctx.place, town, ctx.region]
     .map((p) => (p ?? '').trim())
-    .filter(Boolean);
+    // MapTiler returns unnamed POIs with the text "-". Dropped here rather than
+    // by checking the finished label, which reads as fine because the *context*
+    // supplied the letters: "-, Church Square, Pretoria".
+    .filter((p) => p && /[a-z0-9]/i.test(p));
 
   // Drop repeats and anything already contained in an earlier part, then keep it
   // to three so the label stays readable on a quote.
@@ -153,7 +165,7 @@ export async function reverseGeocode({ lat, lon }: Coordinates): Promise<GeoPlac
     if (label.some((existing) => existing.toLowerCase().includes(p.toLowerCase()))) continue;
     label.push(p);
   }
-  if (!label.length) throw new Error('No address found at that point');
+  if (!label.length) return null;
 
   const cc = (
     feature.properties?.country_code ??
@@ -161,10 +173,92 @@ export async function reverseGeocode({ lat, lon }: Coordinates): Promise<GeoPlac
     ''
   ).toUpperCase();
 
-  // No country means the point isn't in one — open water returns a perfectly
-  // real-looking "South Atlantic Ocean" with no country_code, and that would
-  // sail through as a pickup address. A freight collection is on land.
-  if (!cc) throw new Error('Drop the pin on a road or place');
-
   return { label: label.join(', '), cc, city: town };
+}
+
+/** A label MapTiler returned but no human would accept. POIs yield "-". */
+const junkLabel = (label: string) => !/[a-z0-9]/i.test(label);
+
+async function lookup(lon: number, lat: number, query: string): Promise<MapTilerFeature[]> {
+  const res = await fetch(
+    // Note the order: MapTiler takes lon,lat — the opposite of how it's written.
+    `https://api.maptiler.com/geocoding/${lon},${lat}.json?key=${MAPTILER_KEY}&${query}`,
+  );
+  if (!res.ok) throw new Error("Couldn't look up that location");
+  const body = (await res.json()) as { features?: MapTilerFeature[] };
+  return body.features ?? [];
+}
+
+/**
+ * Everything the geocoder knows about a point, nearest first.
+ *
+ * The pin-drop screen offers these as "suggested addresses" — a pin near a
+ * junction is genuinely ambiguous (the road, the bus stop, the depot on the
+ * corner), and picking from a short list beats nudging the map until one label
+ * happens to appear.
+ *
+ * Two requests, not one. MapTiler refuses `limit` above 1 on a reverse geocode
+ * unless exactly one `types` is given ("Parameter limit must be combined with a
+ * single type parameter when reverse geocoding", HTTP 400 — verified against the
+ * live API), so the addresses and the named places have to be asked for
+ * separately. They come back genuinely different: `address` gives the street
+ * ("Church Square", "Paul Kruger Street 255"), `poi` gives what's actually there
+ * ("Paul Kruger Statue", "Standard Bank Chambers").
+ */
+export async function reverseGeocodeCandidates({ lat, lon }: Coordinates, limit = 3): Promise<GeoPlace[]> {
+  if (!MAPTILER_KEY) throw new Error('Map lookup is not configured');
+
+  const [addresses, pois] = await Promise.all([
+    lookup(lon, lat, `limit=${limit}&types=address`),
+    // A failed POI lookup must not lose the addresses — it's the nice-to-have half.
+    lookup(lon, lat, `limit=${limit}&types=poi`).catch(() => [] as MapTilerFeature[]),
+  ]);
+  // Open country has neither: a farm road in the Karoo returns nothing for
+  // `types=address`, and SA freight genuinely collects from farms. The untyped
+  // lookup still resolves those, so fall back to it rather than refusing.
+  const seeds = addresses.length || pois.length ? addresses : await lookup(lon, lat, 'limit=1');
+
+  const out: GeoPlace[] = [];
+  let sawLabel = false;
+  const add = (place: GeoPlace | null) => {
+    if (!place || junkLabel(place.label)) return;
+    sawLabel = true;
+    // No country means the point isn't in one — open water returns a perfectly
+    // real-looking "South Atlantic Ocean" with no country_code, and that would
+    // sail through as a pickup address. A freight collection is on land.
+    if (!place.cc) return;
+    if (out.some((e) => e.label.toLowerCase() === place.label.toLowerCase())) return;
+    out.push(place);
+  };
+
+  for (const f of seeds) add(placeFrom(f));
+
+  // A POI's context chain is thin — "Paul Kruger Statue, South Africa" — so on
+  // its own it would lose the town, which is both worse to read on a quote and
+  // enough to break extractCode's lane matching. Borrow the town the address
+  // lookup already resolved.
+  const town = out.find((p) => p.city)?.city ?? '';
+  for (const f of pois) {
+    const place = placeFrom(f);
+    if (!place) continue;
+    const needsTown = town && !place.label.toLowerCase().includes(town.toLowerCase());
+    add(needsTown ? { ...place, label: `${place.label}, ${town}`, city: town } : place);
+  }
+
+  if (!out.length) throw new Error(sawLabel ? 'Drop the pin on a road or place' : 'No address found at that point');
+  return out;
+}
+
+export async function reverseGeocode(coords: Coordinates): Promise<GeoPlace> {
+  if (!MAPTILER_KEY) throw new Error('Map lookup is not configured');
+  // Deliberately the plain single-result lookup, not the first candidate: this is
+  // the path every *saved* location goes through, and it must not depend on the
+  // two-request merge above or on `types=address` being the right filter for a
+  // pasted coordinate that might be a farm gate.
+  const features = await lookup(coords.lon, coords.lat, 'limit=1');
+  if (!features.length) throw new Error('No address found at that point');
+  const place = placeFrom(features[0]!);
+  if (!place || junkLabel(place.label)) throw new Error('No address found at that point');
+  if (!place.cc) throw new Error('Drop the pin on a road or place');
+  return place;
 }

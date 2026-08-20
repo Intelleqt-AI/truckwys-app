@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { View, Pressable, TextInput, Modal, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import BottomSheet, { BottomSheetFooter, BottomSheetScrollView, type BottomSheetFooterProps } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -43,6 +44,10 @@ import { useCustomers } from '@/features/customers/api';
 import type { GeoPoint } from '@/lib/routeGeometry';
 import { MapCanvas } from './quote/MapCanvas';
 import { CrosshairOverlay, type PickTarget } from './quote/CrosshairOverlay';
+import { RouteCallouts } from './quote/RouteCallouts';
+import { useLocationSearch, SuggestionRow, isForeignCc } from './quote/LocationSearch';
+import { useLocationStore, type QuoteLoc } from './quote/locationStore';
+import { saveRecentPlace } from './quote/recentPlaces';
 import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
 import { VoiceQuoteBar } from './VoiceQuoteBar';
 import { VoiceQuoteSheet } from './VoiceQuoteSheet';
@@ -67,12 +72,8 @@ import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
 
-interface Loc {
-  label: string;
-  lat: number;
-  lon: number;
-  cc?: string;
-}
+// Same shape the location store holds, aliased so the two can't drift.
+type Loc = QuoteLoc;
 
 const FUEL_FALLBACK: Record<string, number> = {
   Flatbed: 32,
@@ -157,8 +158,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   const [customerId, setCustomerId] = useState('');
   const [vehicleType, setVehicleType] = useState('');
-  const [pickup, setPickup] = useState<Loc | null>(null);
-  const [delivery, setDelivery] = useState<Loc | null>(null);
+  // Shared with the picker screen — "Set on map" pushes here and the answer has
+  // to be visible back there, and nothing in this app returns a value from a
+  // pushed screen. See quote/locationStore.ts.
+  const pickup = useLocationStore((st) => st.pickup);
+  const delivery = useLocationStore((st) => st.delivery);
+  const setPickup = useLocationStore((st) => st.setPickup);
+  const setDelivery = useLocationStore((st) => st.setDelivery);
+  const resetLocations = useLocationStore((st) => st.reset);
   const [weight, setWeight] = useState(str(prefill?.weight));
   const [pickupDate, setPickupDate] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
@@ -229,6 +236,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const SNAP = useMemo(() => SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`), [SNAP_FRACTIONS]);
   const [snapIndex, setSnapIndex] = useState(0);
   const sheetHeight = screenH * (SNAP_FRACTIONS[Math.max(0, snapIndex)] ?? SNAP_FRACTIONS[0]!);
+  /**
+   * The sheet's top edge, live, straight off the gesture.
+   *
+   * `sheetHeight` above is derived from the settled snap index, so it only exists
+   * as a before and an after. This is the in-between, which is what the map needs
+   * to follow the drawer rather than cut to its destination.
+   */
+  const sheetTop = useSharedValue(screenH * (1 - SNAP_FRACTIONS[0]!));
+  // animatedPosition is the sheet's top edge measured from its *container* top, so
+  // the height is container - position. The container here is the full-bleed root
+  // view of a screen with no header, which is why screenH stands in for it — the
+  // same assumption `sheetHeight` above already makes.
+  const liveSheetHeight = useDerivedValue(() => screenH - sheetTop.value);
 
   const [picking, setPicking] = useState<PickTarget | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
@@ -295,12 +315,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const wasPicking = picking;
     if (wasPicking === 'pickup') setPickup(loc);
     else setDelivery(loc);
+    void saveRecentPlace(loc);
     endPick();
     // Straight on to the other end when it's still empty — same as web.
     const other = wasPicking === 'pickup' ? delivery : pickup;
     if (!other) setTimeout(() => beginPick(wasPicking === 'pickup' ? 'dropoff' : 'pickup'), 250);
     else sheetRef.current?.snapToIndex(1);
-  }, [picking, pinPlace, pickup, delivery, endPick, beginPick]);
+  }, [picking, pinPlace, pickup, delivery, endPick, beginPick, setPickup, setDelivery]);
 
   useEffect(
     () => () => {
@@ -308,6 +329,24 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     },
     [],
   );
+
+  // What the store holds on arrival, once per mount.
+  //
+  // Arriving from the picker, it holds the two ends that were just chosen — keep
+  // them. Arriving any other way (the AI shortcut, a deep link, editing), it may
+  // still hold the *last* quote's ends, and inheriting those silently is exactly
+  // the risk of keeping locations outside the screen. Edit mode's own hydration
+  // fills them in a moment later.
+  const armed = useRef(false);
+  useEffect(() => {
+    if (armed.current) return;
+    armed.current = true;
+    if (!route.params?.fromPicker) resetLocations();
+    // "Set on map" hands off to the crosshair, which only exists on this screen.
+    const target = route.params?.pick;
+    if (target) beginPick(target === 'delivery' ? 'dropoff' : 'pickup');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // This screen draws its own chrome over the map, so the native header goes.
   useLayoutEffect(() => {
@@ -380,7 +419,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       setHydrated(true);
     }, 0);
     return () => clearTimeout(t);
-  }, [editing, hydrated, existing, editId]);
+  }, [editing, hydrated, existing, editId, setPickup, setDelivery]);
 
   const customerOptions = useMemo(
     () => (customers ?? []).map((c) => ({ label: c.name, value: String(c.id) })),
@@ -394,11 +433,18 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       .map((v) => ({ label: v.name, value: v.name }));
   }, [vtypes]);
 
+  // `ready` means "priceable": costing a load genuinely needs a vehicle type, and
+  // saving needs a client.
   const ready = !!(customerId && vehicleType && pickup?.lat && delivery?.lat);
+  // Drawing a line between two points needs neither. The route call used to be
+  // gated on `ready`, so setting both ends showed an empty map until a client and
+  // a vehicle type were also chosen — with nothing on screen saying why, because
+  // the estimate block hid behind the same flag.
+  const canRoute = !!(pickup?.lat && delivery?.lat);
 
   // Route calc (debounced 500ms, stale-guarded).
   useEffect(() => {
-    if (!ready || !pickup || !delivery) return;
+    if (!canRoute || !pickup || !delivery) return;
     const id = ++routeReq.current;
     const t = setTimeout(async () => {
       setRouteBusy(true);
@@ -437,7 +483,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, vehicleType, weightKg]);
+  }, [canRoute, pickup, delivery, vehicleType, weightKg]);
 
   const routes = useMemo(
     () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
@@ -736,6 +782,27 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   };
 
+  /**
+   * A recording made on the picker, before this screen existed.
+   *
+   * The recorder lives there so "describe the job" opens the mic rather than a
+   * form, but everything that interprets the result is here: transcription, the
+   * entity conversation, and geocoding whatever addresses come back. So the URI
+   * travels as a param and lands in the same handler the in-screen sheet uses.
+   *
+   * Guarded by a ref, not by the param, because the param stays in the route for
+   * as long as the screen is mounted and re-running it would rebuild the quote
+   * from scratch under the user.
+   */
+  const voiceParam = route.params?.voiceUri;
+  const voiceParamDone = useRef(false);
+  useEffect(() => {
+    if (!voiceParam || voiceParamDone.current) return;
+    voiceParamDone.current = true;
+    void onVoiceCaptured(voiceParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceParam]);
+
   // Applies the exact figure that is on screen. Floored at 0 because
   // serviceCharge has no line item of its own in the breakdown, so a negative
   // would be an unexplained discount below cost.
@@ -870,12 +937,31 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         pickup={pickup ? { lat: pickup.lat, lon: pickup.lon } : null}
         delivery={delivery ? { lat: delivery.lat, lon: delivery.lon } : null}
         bottomInset={picking ? 220 : sheetHeight}
+        liveBottomInset={picking ? undefined : liveSheetHeight}
         onCentreSettled={onCentreSettled}
         picking={!!picking}
+        hideMarker={picking === 'dropoff' ? 'delivery' : picking === 'pickup' ? 'pickup' : undefined}
         width={screenW}
         height={screenH}
         topInset={insets.top}
       />
+
+      {/* The route's numbers, on the map — otherwise dragging the sheet down to
+          see the route hides the distance and duration you're comparing. Hidden
+          while placing a pin, when the crosshair card owns the same space. */}
+      {!picking && (
+        <RouteCallouts
+          pickupLabel={pickup?.label}
+          deliveryLabel={delivery?.label}
+          distanceKm={costs.distance ? costs.chargeDistance : undefined}
+          durationLabel={costs.duration ? formatDuration(costs.duration / 60) : undefined}
+          busy={routeBusy}
+          blocked={routeBlockedMessage}
+          topInset={insets.top}
+          bottomInset={sheetHeight}
+          liveBottomInset={liveSheetHeight}
+        />
+      )}
 
       {/* Own chrome, since the native header is off on this screen. A white
           chevron in a translucent circle is the iOS pattern for a back control
@@ -911,6 +997,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         snapPoints={SNAP as unknown as string[]}
         enableDynamicSizing={false}
         enablePanDownToClose={false}
+        animatedPosition={sheetTop}
+        // onAnimate, not just onChange: onChange fires when the sheet has *finished*
+        // moving, so the map re-fit started only once the drawer had already
+        // stopped — which is what read as a sudden jump-cut zoom. onAnimate fires
+        // as the sheet starts towards its target, so the camera and the drawer
+        // travel together and the zoom looks like a consequence of the drag.
+        onAnimate={(_from, to) => {
+          if (to >= 0) setSnapIndex(to);
+        }}
+        // Still needed: onAnimate carries the *intended* index, and a gesture can
+        // be interrupted before it gets there.
         onChange={setSnapIndex}
         footerComponent={renderFooter}
         keyboardBehavior="interactive"
@@ -1008,15 +1105,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
       {/* Route refused by company policy — replaces the whole estimate block,
           same as web. */}
-      {ready && routeBlockedMessage && (
+      {canRoute && routeBlockedMessage && (
         <View className="mt-5 rounded-xs border border-danger bg-danger-bg p-4">
           <Txt className="text-callout font-semibold text-danger">Route not allowed</Txt>
           <Txt className="mt-1.5 text-sub text-muted">{routeBlockedMessage}</Txt>
         </View>
       )}
 
-      {/* Route + estimate */}
-      {ready && !routeBlockedMessage && (
+      {/* Route and distance appear on geography alone; pricing waits for a
+          client and a vehicle type, and says so rather than showing nothing. */}
+      {canRoute && !routeBlockedMessage && (
         <View className="mt-5 gap-5">
           <RoutePreview
             origin={pickup!.label}
@@ -1052,7 +1150,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             </View>
           )}
 
-          {costs.total > 0 && (
+          {!ready && (
+            <View className="flex-row items-start gap-2.5 rounded-xs border border-line bg-surface p-3">
+              <Icon name="alert" size={17} color={colors.faint} />
+              <Txt className="flex-1 text-sub text-muted">
+                {!customerId && !vehicleType
+                  ? 'Pick a client and a vehicle type to price this route.'
+                  : !customerId
+                    ? 'Pick a client to price this route.'
+                    : 'Pick a vehicle type to price this route.'}
+              </Txt>
+            </View>
+          )}
+
+          {ready && costs.total > 0 && (
             <>
               {/* AI recommendation card */}
               <Group label="AI recommendation">
@@ -1297,15 +1408,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
 
 // A location is cross-border when its country code isn't South Africa.
-const isForeignCc = (cc?: string) => {
-  if (!cc) return false;
-  const c = cc.replace(/\s/g, '').toUpperCase();
-  return c !== '' && !['ZA', 'ZAF', 'SOUTHAFRICA'].includes(c);
-};
-
-type LocSuggest = Loc & { foreign: boolean; country: string };
-
 // ── Location autocomplete with coordinates ──────────────────────────────────
+// Search behaviour lives in useLocationSearch, shared with the picker screen.
+// This is the sheet's shell around it: a labelled box, an inline dropdown, and
+// the two other ways in — the map's crosshair and raw coordinates.
 function LocationField({
   label,
   value,
@@ -1321,7 +1427,6 @@ function LocationField({
   onPickOnMap?: () => void;
 }) {
   const { colors } = useTheme();
-  const [text, setText] = useState(value?.label ?? '');
   // Coordinate entry, matching what the web builder offers — but as one
   // paste-friendly field rather than two number boxes, because the useful case
   // is a pin someone shared over WhatsApp, and because a browser number input
@@ -1330,6 +1435,9 @@ function LocationField({
   const [coordText, setCoordText] = useState('');
   const [coordBusy, setCoordBusy] = useState(false);
   const [coordError, setCoordError] = useState<string | null>(null);
+
+  const search = useLocationSearch({ value, onChange, paused: coordMode });
+  const { focused, results, resolving } = search;
 
   const applyCoords = async (swap = false) => {
     setCoordError(null);
@@ -1346,8 +1454,12 @@ function LocationField({
     setCoordBusy(true);
     try {
       const place = await reverseGeocode(point);
-      onChange({ label: place.label, lat: point.lat, lon: point.lon, cc: place.cc || undefined });
-      setText(place.label);
+      const loc = { label: place.label, lat: point.lat, lon: point.lon, cc: place.cc || undefined };
+      // Settle the field on this label so leaving coordinate mode doesn't send
+      // the resolved address straight back through the geocoder.
+      search.markChosen(loc.label);
+      search.setText(loc.label);
+      onChange(loc);
       setCoordMode(false);
       setCoordText('');
     } catch (e) {
@@ -1356,82 +1468,6 @@ function LocationField({
       setCoordBusy(false);
     }
   };
-  const [focused, setFocused] = useState(false);
-  const [results, setResults] = useState<LocSuggest[]>([]);
-  // One ref per timer. These used to share a slot, so the clear-results timeout
-  // and the search timeout cancelled each other at random.
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The label the field is already settled on — either tapped from the list or
-  // filled in from outside. While text still equals it, the user isn't
-  // searching, so we must not look it up. Without this, picking "Durban" set
-  // the text to "Durban…", which re-armed the debounce below and reopened the
-  // dropdown a couple of seconds later on top of the completed selection.
-  const chosen = useRef<string | null>(value?.label ?? null);
-  // Monotonic request id, same pattern as routeReq/aiReq above: a reply that is
-  // no longer the newest must not write results. Covers the other half of the
-  // reopen — the in-flight lookup from the last keystroke landing after the tap.
-  const reqId = useRef(0);
-
-  useEffect(
-    () => () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-      if (clearTimer.current) clearTimeout(clearTimer.current);
-      if (blurTimer.current) clearTimeout(blurTimer.current);
-    },
-    [],
-  );
-
-  // Reflect an externally-set value (edit-mode hydration, or the AI/voice fill
-  // path via geocode → setPickup) into the input. Marked as chosen so an
-  // address we filled in ourselves doesn't trigger a lookup either.
-  useEffect(() => {
-    if (!value?.label || value.label === text) return;
-    chosen.current = value.label;
-    const t = setTimeout(() => setText(value.label), 0);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value?.label]);
-
-  useEffect(() => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (!focused || text.length < 2 || chosen.current === text) {
-      clearTimer.current = setTimeout(() => setResults([]), 0);
-      return () => {
-        if (clearTimer.current) clearTimeout(clearTimer.current);
-      };
-    }
-    searchTimer.current = setTimeout(async () => {
-      const mine = ++reqId.current;
-      try {
-        const raw = await suggestLocations(text);
-        if (mine !== reqId.current) return;
-        const list = asArray(raw)
-          .map((r) => {
-            const o = r as Record<string, unknown>;
-            const cc = str(pick(o, ['country_code', 'country'])) || undefined;
-            const foreign = Boolean(pick(o, ['cross_border'])) || isForeignCc(cc);
-            return {
-              label: str(pick(o, ['label', 'name', 'description', 'address'])),
-              lat: num(pick(o, ['lat', 'latitude'])),
-              lon: num(pick(o, ['lon', 'lng', 'longitude'])),
-              cc,
-              foreign,
-              country: str(pick(o, ['country', 'country_name'])),
-            } as LocSuggest;
-          })
-          .filter((l) => l.label && l.lat && l.lon)
-          .slice(0, 6);
-        setResults(list);
-      } catch {
-        if (mine === reqId.current) setResults([]);
-      }
-    }, 300);
-    return () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-    };
-  }, [text, focused]);
 
   return (
     <View>
@@ -1446,22 +1482,10 @@ function LocationField({
           className="flex-1 text-fg"
           placeholder={placeholder}
           placeholderTextColor={colors.faint}
-          value={text}
-          onChangeText={(t) => {
-            // A real keystroke means the settled value no longer applies, so
-            // searching is wanted again.
-            chosen.current = null;
-            setText(t);
-          }}
-          onFocus={() => setFocused(true)}
-          onBlur={() => {
-            // Delayed so a tap on a suggestion row still registers before the
-            // list unmounts. Tracked so it can't fire into an unmounted field.
-            if (blurTimer.current) clearTimeout(blurTimer.current);
-            blurTimer.current = setTimeout(() => setFocused(false), 150);
-          }}
           style={[INPUT_TEXT, { paddingVertical: 12 }]}
+          {...search.inputProps}
         />
+        {resolving && <ActivityIndicator size="small" color={colors.faint} />}
       </View>
       {/* Two ways in besides typing: the map, and raw coordinates. */}
       <View className="mt-2 flex-row items-center gap-2">
@@ -1514,25 +1538,12 @@ function LocationField({
       {focused && results.length > 0 && (
         <View className="mt-2 overflow-hidden rounded-xs border border-line bg-surface">
           {results.map((r, i) => (
-            <Pressable
+            <SuggestionRow
               key={`${r.label}-${i}`}
-              onPress={() => {
-                // Settle on this label and discard any reply still in flight,
-                // so nothing can refill the list behind the selection.
-                chosen.current = r.label;
-                reqId.current++;
-                onChange(r);
-                setText(r.label);
-                setResults([]);
-              }}
-              className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3 active:bg-surface-hover"
-            >
-              <Icon name="pin" size={15} color={r.foreign ? '#F59E0B' : colors.faint} />
-              <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
-                {r.label}
-              </Txt>
-              {r.foreign && <Badge label={r.country || 'Cross-border'} tone="warning" />}
-            </Pressable>
+              suggestion={r}
+              last={i === results.length - 1}
+              onPress={() => search.choose(r)}
+            />
           ))}
         </View>
       )}

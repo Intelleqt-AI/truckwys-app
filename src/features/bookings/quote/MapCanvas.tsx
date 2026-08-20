@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { View } from 'react-native';
+import { runOnJS, useAnimatedReaction, type SharedValue } from 'react-native-reanimated';
 import { Mono } from '@/components/ui';
 import { RouteMap } from '@/components/RouteMap';
 import { getMapsLib, IS_EXPO_GO, NEEDS_ANDROID_MAPS_KEY } from '@/lib/mapNative';
@@ -14,13 +15,43 @@ export interface MapCanvasProps {
   delivery?: GeoPoint | null;
   /** Keeps the route clear of the sheet overlapping the bottom of the map. */
   bottomInset?: number;
-  /** While picking, the map reports its centre so the caller can resolve it. */
-  onCentreSettled?: (point: GeoPoint) => void;
+  /**
+   * While picking, the map reports its centre so the caller can resolve it. The
+   * span comes with it, because a pin dropped at city zoom is not a street
+   * address and the caller has to be able to say so.
+   */
+  onCentreSettled?: (point: GeoPoint, span?: { latDelta: number }) => void;
+  /** Fires as soon as the map starts moving, for the pin's lift animation. */
+  onCentreMoving?: () => void;
   picking?: boolean;
+  /**
+   * Hide one end's marker — the one currently being placed, since the centre pin
+   * is standing in for it. The other end stays visible, which is what makes
+   * placing a drop-off relative to a known collection possible.
+   */
+  hideMarker?: 'pickup' | 'delivery';
   width: number;
   height: number;
   /** Safe-area top, so the route isn't fitted under the floating back button. */
   topInset?: number;
+  /**
+   * Frame this single point instead of fitting everything given.
+   *
+   * The pin-drop screen needs it: it shows both ends as markers, but opening
+   * framed to *both* means a country-wide first frame when a route is already
+   * set — a pin aimed at half a province, which is not an address.
+   */
+  focusPoint?: GeoPoint | null;
+  /**
+   * The live bottom inset, as a Reanimated shared value — the sheet's height
+   * while the finger is still on it.
+   *
+   * `bottomInset` above is React state and only lands when the sheet settles, so
+   * re-fitting from it alone meant the map sat still through the whole drag and
+   * then cut to a new zoom. Sampling this on the UI thread lets the camera follow
+   * the drawer frame by frame, which is what makes the two read as one gesture.
+   */
+  liveBottomInset?: SharedValue<number>;
 }
 
 /**
@@ -37,19 +68,24 @@ export function MapCanvas({
   delivery,
   bottomInset = 0,
   onCentreSettled,
+  onCentreMoving,
   picking = false,
+  hideMarker,
   width,
   height,
   topInset = 0,
+  focusPoint,
+  liveBottomInset,
 }: MapCanvasProps) {
   const maps = getMapsLib();
   const { colors } = useTheme();
 
   const route = useMemo(() => decimate((geometry ?? []).filter((p) => p?.lat && p?.lon)), [geometry]);
   const focus = useMemo(() => {
+    if (focusPoint) return regionFor([focusPoint]);
     const pts = route.length > 1 ? route : ([pickup, delivery].filter(Boolean) as GeoPoint[]);
     return regionFor(pts);
-  }, [route, pickup, delivery]);
+  }, [route, pickup, delivery, focusPoint]);
 
   // ── Expo Go: the static map, plus an honest note ──────────────────────────
   if (!maps) {
@@ -65,6 +101,7 @@ export function MapCanvas({
           width={width}
           height={height}
           bottomInset={bottomInset}
+          topInset={topInset}
         />
         <View
           className="absolute self-center rounded-pill border border-line bg-bg-deep/85 px-2.5 py-1"
@@ -91,7 +128,10 @@ export function MapCanvas({
       delivery={delivery}
       bottomInset={bottomInset}
       onCentreSettled={onCentreSettled}
+      onCentreMoving={onCentreMoving}
       picking={picking}
+      hideMarker={hideMarker}
+      liveBottomInset={liveBottomInset}
       width={width}
       height={height}
       accent={colors.accent}
@@ -110,11 +150,14 @@ function InteractiveMap({
   delivery,
   bottomInset,
   onCentreSettled,
+  onCentreMoving,
   picking,
+  hideMarker,
   width,
   height,
   accent,
   topInset,
+  liveBottomInset,
 }: {
   maps: MapsModule;
   route: GeoPoint[];
@@ -122,8 +165,11 @@ function InteractiveMap({
   pickup?: GeoPoint | null;
   delivery?: GeoPoint | null;
   bottomInset: number;
-  onCentreSettled?: (point: GeoPoint) => void;
+  onCentreSettled?: (point: GeoPoint, span?: { latDelta: number }) => void;
+  onCentreMoving?: () => void;
   picking: boolean;
+  hideMarker?: 'pickup' | 'delivery';
+  liveBottomInset?: SharedValue<number>;
   width: number;
   height: number;
   accent: string;
@@ -141,6 +187,47 @@ function InteractiveMap({
   //
   // Never while the user is placing a pin: moving the map under them mid-gesture
   // is the one thing that makes a map feel broken.
+  /** The points the camera should frame: the route, or failing that both ends. */
+  const span = useMemo<GeoPoint[]>(() => {
+    if (route.length > 1) return route;
+    return [pickup, delivery].filter((p) => p?.lat != null && p?.lon != null) as GeoPoint[];
+  }, [route, pickup, delivery]);
+
+  /**
+   * Re-frame for a bottom inset, without animating.
+   *
+   * Called repeatedly while the sheet is being dragged, so it must not start an
+   * animation: each call would interrupt the last one and the result reads as
+   * stutter rather than motion. Instant re-frames at drag rate *are* the motion.
+   */
+  const frameFor = useCallback(
+    (inset: number) => {
+      if (picking || span.length < 2) return;
+      ref.current?.fitToCoordinates(span.map(toLatLng), {
+        edgePadding: { top: topInset + 64, right: 40, bottom: Math.max(0, inset) + 24, left: 40 },
+        animated: false,
+      });
+    },
+    [picking, span, topInset],
+  );
+
+  // Sampled on the UI thread and only forwarded when the sheet has actually moved
+  // a few pixels — a frame-perfect stream of identical values would just be bridge
+  // traffic. 6px is under a frame of travel at drag speed, so nothing visible is
+  // skipped.
+  useAnimatedReaction(
+    () => liveBottomInset?.value ?? -1,
+    (current, previous) => {
+      if (current < 0) return;
+      if (previous != null && Math.abs(current - previous) < 6) return;
+      runOnJS(frameFor)(current);
+    },
+    // liveBottomInset is in here too: it switches to undefined in pick mode, and a
+    // reaction still holding the old shared value would keep re-framing the map
+    // under a user who is aiming a pin.
+    [frameFor, liveBottomInset],
+  );
+
   const framed = useRef('');
   useEffect(() => {
     if (!focus || picking) return;
@@ -149,14 +236,23 @@ function InteractiveMap({
     framed.current = key;
 
     const edgePadding = { top: topInset + 64, right: 40, bottom: bottomInset + 24, left: 40 };
-    if (route.length > 1) {
+    // Two distinct points are all fitToCoordinates needs, so prefer the endpoints
+    // over animateToRegion whenever there's no geometry yet. That case used to
+    // fall through to animateToRegion, which ignores edgePadding entirely — so
+    // with both ends set but the route still loading (or failed), dragging the
+    // sheet moved nothing.
+    const span: GeoPoint[] =
+      route.length > 1
+        ? route
+        : ([pickup, delivery].filter((p) => p?.lat != null && p?.lon != null) as GeoPoint[]);
+    if (span.length > 1) {
       // fitToCoordinates honours edgePadding, so it zooms as well as pans.
-      ref.current?.fitToCoordinates(route.map(toLatLng), { edgePadding, animated: true });
+      ref.current?.fitToCoordinates(span.map(toLatLng), { edgePadding, animated: true });
     } else {
       // One point can't define a span for fitToCoordinates.
       ref.current?.animateToRegion(focus, 450);
     }
-  }, [focus, picking, bottomInset, topInset, route]);
+  }, [focus, picking, bottomInset, topInset, route, pickup, delivery]);
 
   return (
     <View style={{ width, height }}>
@@ -173,8 +269,11 @@ function InteractiveMap({
         // No location permission is requested anywhere in this app, and the
         // store listing says so — do not turn these on without updating both.
         showsUserLocation={false}
-        onRegionChangeComplete={(r: { latitude: number; longitude: number }) =>
-          onCentreSettled?.({ lat: r.latitude, lon: r.longitude })
+        // Fires continuously during a gesture — used only as "the map is moving",
+        // never to do work, so the JS thread stays free while the pin animates.
+        onRegionChange={onCentreMoving}
+        onRegionChangeComplete={(r: { latitude: number; longitude: number; latitudeDelta?: number }) =>
+          onCentreSettled?.({ lat: r.latitude, lon: r.longitude }, { latDelta: r.latitudeDelta ?? 0 })
         }
       >
         {route.length > 1 && (
@@ -184,12 +283,12 @@ function InteractiveMap({
             Custom children rather than pinColor: the platform default is a
             balloon that looks nothing like the rest of the app, and anchoring at
             the tip is what makes a marker sit on its point instead of near it. */}
-        {pickup && !picking && (
+        {pickup && (picking ? hideMarker !== 'pickup' : true) && (
           <Marker coordinate={toLatLng(pickup)} title="Collection" anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
             <MapPin color={statusHues.success} size={34} />
           </Marker>
         )}
-        {delivery && !picking && (
+        {delivery && (picking ? hideMarker !== 'delivery' : true) && (
           <Marker coordinate={toLatLng(delivery)} title="Drop-off" anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
             <MapPin color={statusHues.danger} size={34} />
           </Marker>

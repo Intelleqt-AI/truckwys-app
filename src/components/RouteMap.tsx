@@ -19,6 +19,8 @@ import { status as statusHues } from '@/theme/tokens';
 // dashed-line fallback when only the endpoints are known.
 
 const TILE = 256;
+// Breathing room so the route never runs into the edge of the visible band.
+const FIT_PAD = 28;
 const MIN_ZOOM = 3;
 // Web's MapLocationPicker caps fitBounds at 12; RouteMapView forgets to and
 // over-zooms short lanes. Cap here.
@@ -67,6 +69,7 @@ export function RouteMap({
   height = 190,
   width: widthProp,
   bottomInset = 0,
+  topInset = 0,
 }: {
   geometry?: GeoPoint[];
   pickup?: GeoPoint | null;
@@ -75,11 +78,14 @@ export function RouteMap({
   /** Explicit width. Defaults to the screen minus the 16px card gutters. */
   width?: number;
   /**
-   * How much of the bottom is covered by something else (the quote sheet). Only
-   * used to lift the attribution clear of it — required by MapTiler's ToS and
-   * OSM's ODbL, so it must never end up off-screen.
+   * How much of the bottom is covered by something else (the quote sheet). The
+   * route is framed inside what's left, so dragging the sheet re-zooms the map —
+   * and the attribution is lifted clear of the cover, which MapTiler's ToS and
+   * OSM's ODbL both require it to be.
    */
   bottomInset?: number;
+  /** Same, for chrome over the top of the map (the status bar and back button). */
+  topInset?: number;
 }) {
   const { colors } = useTheme();
   const { width: screenW } = useWindowDimensions();
@@ -96,6 +102,12 @@ export function RouteMap({
     const source = hasRoute ? geometry! : endpoints;
     if (width <= 0) return null;
 
+    // Frame the route in the part of the map that isn't covered. Without this the
+    // zoom was computed against the full screen height and so never changed as the
+    // sheet moved: the whole point of dragging it down is to see more of the route.
+    // Clamped because a tall sheet on a short screen can cover everything.
+    const visibleH = Math.max(80, height - topInset - bottomInset);
+
     // With nothing picked yet, frame South Africa rather than rendering nothing.
     // The screen this feeds is map-first, so an empty panel reads as a bug — and
     // the tiles are what tell the user the map is alive before they've typed
@@ -108,16 +120,23 @@ export function RouteMap({
         : source;
     // A single known point can't define a span — show it at street-ish zoom,
     // or country zoom when it's the placeholder centre.
-    const zoom = pts.length > 1 ? fitZoom(pts, width, height) : empty ? 5 : 9;
+    const zoom =
+      pts.length > 1
+        ? fitZoom(pts, Math.max(40, width - FIT_PAD * 2), Math.max(40, visibleH - FIT_PAD * 2))
+        : empty
+          ? 5
+          : 9;
 
     // Centre the viewport on the bbox midpoint, in world pixels.
     const xs = pts.map((p) => lonToX(p.lon, zoom));
     const ys = pts.map((p) => latToY(p.lat, zoom));
     const centreX = (Math.min(...xs) + Math.max(...xs)) / 2;
     const centreY = (Math.min(...ys) + Math.max(...ys)) / 2;
-    // World-pixel coords of the viewport's top-left corner.
+    // World-pixel coords of the viewport's top-left corner. Horizontally the
+    // viewport centre is the bbox centre; vertically the bbox is centred in the
+    // *visible* band, which sits `topInset` down from the top of the canvas.
     const originX = centreX - width / 2;
-    const originY = centreY - height / 2;
+    const originY = centreY - (topInset + visibleH / 2);
 
     // Same projection drives the tile grid and the SVG, so they register exactly.
     const toLocal = (p: GeoPoint) => ({
@@ -160,7 +179,7 @@ export function RouteMap({
       start: empty ? undefined : local[0],
       end: !empty && local.length > 1 ? local[local.length - 1] : undefined,
     };
-  }, [geometry, pickup, delivery, width, height]);
+  }, [geometry, pickup, delivery, width, height, topInset, bottomInset]);
 
   if (!view) return null;
 

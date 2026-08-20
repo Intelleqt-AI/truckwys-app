@@ -21,8 +21,9 @@ type Target = { screen: keyof AppStackParamList; params?: Record<string, unknown
  * the screen would mount and immediately fail its fetch.
  */
 const EXACT_ROUTES: Record<string, Target> = {
-  '/quotes/new': { screen: 'CreateQuote' },
-  '/bookings/new': { screen: 'CreateQuote' },
+  // Same entry point as the + button: a quote starts by asking where it's going.
+  '/quotes/new': { screen: 'PickLocations' },
+  '/bookings/new': { screen: 'PickLocations' },
   '/finance/invoices/new': { screen: 'CreateInvoice' },
   '/customers/new': { screen: 'AddCustomer' },
 };

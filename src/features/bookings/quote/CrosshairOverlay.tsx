@@ -1,5 +1,6 @@
 import { View, ActivityIndicator } from 'react-native';
 import { Button, Icon, Label, Mono, Txt } from '@/components/ui';
+import { MapPin, MapReticle } from './MapPin';
 import { status as statusHues } from '@/theme/tokens';
 
 export type PickTarget = 'pickup' | 'dropoff';
@@ -52,17 +53,16 @@ export function CrosshairOverlay({
         </View>
       </View>
 
-      {/* The pin itself, centred on the map's centre point. Offset upward by
-          half its height so the tip — not the middle — marks the spot. */}
+      {/* Pin and reticle both centred on the map's centre. The pin's tip is
+          the point, so it is lifted by its own height; the reticle sits exactly
+          on the spot and stays readable while the map is moving. */}
       <View className="absolute inset-0 items-center justify-center" pointerEvents="none">
-        <View style={{ transform: [{ translateY: -18 }] }} className="items-center">
-          <Icon name="pin" size={38} color={tint} strokeWidth={2} />
+        <View style={{ transform: [{ translateY: -28 }] }}>
+          <MapPin color={tint} size={40} />
         </View>
-        {/* Ground dot, so the exact point stays readable while dragging. */}
-        <View
-          style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: tint, opacity: 0.9 }}
-          className="absolute"
-        />
+        <View className="absolute">
+          <MapReticle color={tint} size={20} />
+        </View>
       </View>
 
       {/* Readout + confirm, above whatever the sheet is occupying. */}

@@ -124,7 +124,14 @@ export function AppNavigator() {
           headerStyle: { backgroundColor: colors.bgDeep },
         }}
       >
-        <Stack.Screen name="CreateQuote" component={CreateQuoteScreen} />
+        {/* A page, not a modal. It draws its own chrome over a full-bleed
+            map, and sliding that up as a drawer left the map sitting under a
+            rounded sheet edge with the tab bar showing through beneath it. */}
+        <Stack.Screen
+          name="CreateQuote"
+          component={CreateQuoteScreen}
+          options={{ presentation: 'card', headerShown: false, animation: 'slide_from_right' }}
+        />
         <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
         <Stack.Screen name="CreateInvoice" component={CreateInvoiceScreen} />
         <Stack.Screen name="AddExpense" component={AddExpenseScreen} />

@@ -1440,25 +1440,20 @@ function LocationField({
         />
       </View>
       {/* Two ways in besides typing: the map, and raw coordinates. */}
-      <View className="mt-1.5 flex-row items-center gap-3">
+      <View className="mt-2 flex-row items-center gap-2">
         {onPickOnMap && (
-          <Pressable onPress={onPickOnMap} hitSlop={8} accessibilityRole="button" className="active:opacity-60">
-            <Mono className="text-micro tracking-wide uppercase text-accent">Set on map</Mono>
-          </Pressable>
+          <Button label="Set on map" icon="pin" variant="secondary" size="sm" onPress={onPickOnMap} />
         )}
-        <Pressable
+        <Button
+          label={coordMode ? 'Search instead' : 'Coordinates'}
+          icon={coordMode ? 'search' : 'gauge'}
+          variant="secondary"
+          size="sm"
           onPress={() => {
             setCoordError(null);
             setCoordMode((m) => !m);
           }}
-          hitSlop={8}
-          accessibilityRole="button"
-          className="active:opacity-60"
-        >
-          <Mono className="text-micro tracking-wide uppercase text-faint">
-            {coordMode ? 'Search instead' : 'Coordinates'}
-          </Mono>
-        </Pressable>
+        />
         {value?.cc && isForeignCc(value.cc) ? (
           <View className="ml-auto">
             <Badge label="Cross-border" tone="warning" />

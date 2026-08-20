@@ -35,10 +35,12 @@ export function Card({
 
 // ── Button: primary / secondary / ghost / danger, uppercase mono label ─────
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type ButtonSize = 'md' | 'sm';
 export function Button({
   label,
   onPress,
   variant = 'primary',
+  size = 'md',
   icon,
   loading,
   disabled,
@@ -48,6 +50,13 @@ export function Button({
   label: string;
   onPress?: () => void;
   variant?: ButtonVariant;
+  /**
+   * `sm` is for inline affordances sitting beside a field or a section heading,
+   * where the 48px primary height would dominate the row. Still a real button
+   * with a border and a background — a bare tappable label reads as static text,
+   * which is exactly how the map and fuel actions were being missed.
+   */
+  size?: ButtonSize;
   icon?: IconName;
   loading?: boolean;
   disabled?: boolean;
@@ -56,7 +65,9 @@ export function Button({
 }) {
   const { colors } = useTheme();
   const base =
-    'flex-row items-center justify-center gap-2 rounded-xs px-4 min-h-[48px]';
+    size === 'sm'
+      ? 'flex-row items-center justify-center gap-1.5 rounded-xs px-2.5 min-h-[32px]'
+      : 'flex-row items-center justify-center gap-2 rounded-xs px-4 min-h-[48px]';
   const variants: Record<ButtonVariant, string> = {
     primary: 'bg-accent',
     secondary: 'bg-surface border border-line-active',
@@ -92,8 +103,8 @@ export function Button({
         <ActivityIndicator size="small" color={iconColor} />
       ) : (
         <>
-          {icon && <Icon name={icon} size={17} color={iconColor} strokeWidth={2.2} />}
-          <Mono className={`text-micro tracking-wide uppercase ${textColor[variant]}`}>
+          {icon && <Icon name={icon} size={size === 'sm' ? 14 : 17} color={iconColor} strokeWidth={2.2} />}
+          <Mono className={`${size === 'sm' ? 'text-nano' : 'text-micro'} tracking-wide uppercase ${textColor[variant]}`}>
             {label}
           </Mono>
         </>

@@ -27,6 +27,9 @@ const MAX_ZOOM = 12;
 // tile.openstreetmap.org blocks direct app traffic under its usage policy
 // (no throttling, no descriptive User-Agent from a mobile client) — MapTiler
 // is a paid/free-tier host that explicitly allows this traffic pattern.
+// Roughly the centroid of South Africa — the same view the web map opens on.
+const SA_CENTRE = { lat: -28.48, lon: 24.67 };
+
 const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY ?? '';
 const OSM_TILE = (z: number, x: number, y: number) =>
   `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${MAPTILER_KEY}`;
@@ -84,11 +87,21 @@ export function RouteMap({
     const hasRoute = !!geometry && geometry.length > 1;
     const endpoints = [pickup, delivery].filter(Boolean) as GeoPoint[];
     const source = hasRoute ? geometry! : endpoints;
-    if (source.length === 0 || width <= 0) return null;
+    if (width <= 0) return null;
 
-    const pts = hasRoute ? decimate(source, MAX_ROUTE_POINTS) : source;
-    // A single known point can't define a span — show it at street-ish zoom.
-    const zoom = pts.length > 1 ? fitZoom(pts, width, height) : 9;
+    // With nothing picked yet, frame South Africa rather than rendering nothing.
+    // The screen this feeds is map-first, so an empty panel reads as a bug — and
+    // the tiles are what tell the user the map is alive before they've typed
+    // anything.
+    const empty = source.length === 0;
+    const pts = empty
+      ? [{ lat: SA_CENTRE.lat, lon: SA_CENTRE.lon }]
+      : hasRoute
+        ? decimate(source, MAX_ROUTE_POINTS)
+        : source;
+    // A single known point can't define a span — show it at street-ish zoom,
+    // or country zoom when it's the placeholder centre.
+    const zoom = pts.length > 1 ? fitZoom(pts, width, height) : empty ? 5 : 9;
 
     // Centre the viewport on the bbox midpoint, in world pixels.
     const xs = pts.map((p) => lonToX(p.lon, zoom));

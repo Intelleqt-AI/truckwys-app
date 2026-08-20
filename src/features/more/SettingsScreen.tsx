@@ -1170,18 +1170,16 @@ function CompanySection() {
       {/* ── Fuel price defaults ───────────────────────────────────────────── */}
       <View className="mt-1 flex-row items-center justify-between">
         <Label className="text-muted">Fuel price defaults</Label>
-        <Pressable
+        {/* A real button: as a bare label this read as a heading and nobody
+            knew it was the way to pull the national price. */}
+        <Button
+          label={fetchingLive ? 'Fetching' : 'Fetch live'}
+          icon="download"
+          variant="secondary"
+          size="sm"
+          loading={fetchingLive}
           onPress={() => loadLivePrice(true)}
-          disabled={fetchingLive}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Fetch live fuel prices"
-          className="active:opacity-50"
-        >
-          <Mono className={`text-micro tracking-wide uppercase ${fetchingLive ? 'text-faint' : 'text-accent'}`}>
-            {fetchingLive ? 'Fetching…' : 'Fetch live'}
-          </Mono>
-        </Pressable>
+        />
       </View>
       <Txt className="-mt-2 text-caption text-faint">
         Used when a vehicle type of that fuel runs a quote. Diesel and petrol can

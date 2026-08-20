@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { View } from 'react-native';
-import { Mono, Txt } from '@/components/ui';
+import { Mono } from '@/components/ui';
 import { RouteMap } from '@/components/RouteMap';
 import { getMapsLib } from '@/lib/mapNative';
 import { decimate, regionFor, toLatLng, type GeoPoint } from '@/lib/routeGeometry';
 import { status as statusHues } from '@/theme/tokens';
+import { MapPin } from './MapPin';
 import { useTheme } from '@/theme/ThemeProvider';
 
 export interface MapCanvasProps {
@@ -47,19 +48,16 @@ export function MapCanvas({
     return regionFor(pts);
   }, [route, pickup, delivery]);
 
-  // ── Expo Go: the static map, unchanged, plus an honest note ───────────────
+  // ── Expo Go: the static map, plus an honest note ──────────────────────────
   if (!maps) {
     return (
-      <View style={{ width, height }} className="items-center justify-center bg-surface">
-        {focus ? (
-          <RouteMap geometry={geometry} pickup={pickup} delivery={delivery} width={width} height={height} />
-        ) : (
-          <Txt className="px-10 text-center text-caption text-faint">
-            Search for a collection and drop-off to see the route.
-          </Txt>
-        )}
-        <View className="absolute bottom-2 self-center rounded-xs border border-line bg-bg-deep/80 px-2 py-1">
-          <Mono className="text-nano text-faint">STATIC MAP · PICKING NEEDS A DEV BUILD</Mono>
+      <View style={{ width, height }} className="bg-surface">
+        {/* Tiles render even with nothing picked yet — a map-first screen with a
+            blank panel on it just looks broken. RouteMap falls back to a South
+            Africa view when it has no points. */}
+        <RouteMap geometry={geometry} pickup={pickup} delivery={delivery} width={width} height={height} />
+        <View className="absolute bottom-3 self-center rounded-pill border border-line bg-bg-deep/85 px-2.5 py-1">
+          <Mono className="text-nano text-faint">STATIC MAP · TAP TO PICK NEEDS A DEV BUILD</Mono>
         </View>
       </View>
     );
@@ -147,12 +145,19 @@ function InteractiveMap({
         {route.length > 1 && (
           <Polyline coordinates={route.map(toLatLng)} strokeWidth={4} strokeColor={accent} />
         )}
-        {/* Hidden while picking that end, so the crosshair is the only pin. */}
+        {/* Hidden while picking that end, so the crosshair is the only pin.
+            Custom children rather than pinColor: the platform default is a
+            balloon that looks nothing like the rest of the app, and anchoring at
+            the tip is what makes a marker sit on its point instead of near it. */}
         {pickup && !picking && (
-          <Marker coordinate={toLatLng(pickup)} title="Collection" pinColor={statusHues.success} />
+          <Marker coordinate={toLatLng(pickup)} title="Collection" anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
+            <MapPin color={statusHues.success} size={34} />
+          </Marker>
         )}
         {delivery && !picking && (
-          <Marker coordinate={toLatLng(delivery)} title="Drop-off" pinColor={statusHues.danger} />
+          <Marker coordinate={toLatLng(delivery)} title="Drop-off" anchor={{ x: 0.5, y: 1 }} tracksViewChanges={false}>
+            <MapPin color={statusHues.danger} size={34} />
+          </Marker>
         )}
       </MapView>
     </View>

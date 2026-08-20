@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { View } from 'react-native';
 import { Mono } from '@/components/ui';
 import { RouteMap } from '@/components/RouteMap';
-import { getMapsLib } from '@/lib/mapNative';
+import { getMapsLib, IS_EXPO_GO, NEEDS_ANDROID_MAPS_KEY } from '@/lib/mapNative';
 import { decimate, regionFor, toLatLng, type GeoPoint } from '@/lib/routeGeometry';
 import { status as statusHues } from '@/theme/tokens';
 import { MapPin } from './MapPin';
@@ -57,7 +57,13 @@ export function MapCanvas({
             Africa view when it has no points. */}
         <RouteMap geometry={geometry} pickup={pickup} delivery={delivery} width={width} height={height} />
         <View className="absolute bottom-3 self-center rounded-pill border border-line bg-bg-deep/85 px-2.5 py-1">
-          <Mono className="text-nano text-faint">STATIC MAP · TAP TO PICK NEEDS A DEV BUILD</Mono>
+          <Mono className="text-nano text-faint">
+            {IS_EXPO_GO
+              ? 'STATIC MAP · PIN PICKING NEEDS A DEV BUILD'
+              : NEEDS_ANDROID_MAPS_KEY
+                ? 'STATIC MAP · ANDROID NEEDS A GOOGLE MAPS KEY'
+                : 'STATIC MAP'}
+          </Mono>
         </View>
       </View>
     );

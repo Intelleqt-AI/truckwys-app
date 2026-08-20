@@ -1,14 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  getMessaging,
-  onMessage,
-  onNotificationOpenedApp,
-  getInitialNotification,
-  type RemoteMessage,
-} from '@react-native-firebase/messaging';
-import notifee, { EventType } from '@notifee/react-native';
+import { getMessagingLib, getNotifeeLib } from '@/lib/pushNative';
 import { registerForPush, presentForeground, syncBadge } from '@/lib/push';
 import { resolveNotificationLink } from '@/lib/notificationLink';
 import { invalidateForServerEvent } from '@/lib/queryInvalidation';
@@ -65,11 +58,17 @@ export function usePushNotifications() {
       navigation.navigate(target.screen, target.params);
     };
 
-    const fcm = getMessaging();
+    // Expo Go has neither native library; the app runs, push is simply inert.
+    const fb = getMessagingLib();
+    const notifeeLib = getNotifeeLib();
+    if (!fb || !notifeeLib) return;
+    const { notifee, EventType } = notifeeLib;
+
+    const fcm = fb.getMessaging();
 
     // Foreground: FCM does NOT display these itself, so present them and
     // refresh the list behind them.
-    const unsubMessage = onMessage(fcm, async (msg: RemoteMessage) => {
+    const unsubMessage = fb.onMessage(fcm, async (msg) => {
       const data = (msg.data ?? {}) as Record<string, string>;
       refreshLists(data.event_id);
       const title = msg.notification?.title ?? 'Truckwys';
@@ -78,7 +77,7 @@ export function usePushNotifications() {
     });
 
     // Tapping a notification the OS displayed while the app was backgrounded.
-    const unsubOpened = onNotificationOpenedApp(fcm, (msg: RemoteMessage) => {
+    const unsubOpened = fb.onNotificationOpenedApp(fcm, (msg) => {
       refreshLists((msg.data?.event_id as string | undefined) ?? '');
       open(msg.data);
     });
@@ -90,7 +89,7 @@ export function usePushNotifications() {
 
     // Cold start: the app was killed and the listeners above did not exist when
     // the tap happened, so the intent is only readable once, here.
-    void getInitialNotification(fcm).then((msg) => {
+    void fb.getInitialNotification(fcm).then((msg) => {
       if (!msg) return;
       refreshLists((msg.data?.event_id as string | undefined) ?? '');
       open(msg.data);

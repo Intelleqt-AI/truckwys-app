@@ -1,14 +1,7 @@
 import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
-import {
-  getMessaging,
-  getToken,
-  deleteToken,
-  registerDeviceForRemoteMessages,
-  isDeviceRegisteredForRemoteMessages,
-} from '@react-native-firebase/messaging';
-import notifee, { AndroidImportance, AuthorizationStatus } from '@notifee/react-native';
+import { getMessagingLib, getNotifeeLib } from '@/lib/pushNative';
 import { postData, deleteData } from '@/lib/api/client';
 
 // Mobile push via Firebase Cloud Messaging — Android natively, iOS through
@@ -43,6 +36,9 @@ export type PushStatus = 'unsupported' | 'denied' | 'registered';
 /** Android needs explicit channels; without one notifications are silent. */
 async function ensureAndroidChannel() {
   if (Platform.OS !== 'android') return;
+  const lib = getNotifeeLib();
+  if (!lib) return;
+  const { notifee, AndroidImportance } = lib;
   for (const channel of CHANNELS) {
     await notifee.createChannel({ ...channel, importance: AndroidImportance.HIGH, sound: 'default' });
   }
@@ -62,6 +58,12 @@ export async function registerForPush(): Promise<PushStatus> {
   // Simulators have no APNs/FCM registration path.
   if (!Device.isDevice) return 'unsupported';
 
+  // Expo Go has neither library, and cannot receive remote pushes anyway.
+  const notifeeLib = getNotifeeLib();
+  const fb = getMessagingLib();
+  if (!notifeeLib || !fb) return 'unsupported';
+  const { notifee, AuthorizationStatus } = notifeeLib;
+
   await ensureAndroidChannel();
 
   const settings = await notifee.requestPermission();
@@ -70,14 +72,14 @@ export async function registerForPush(): Promise<PushStatus> {
     settings.authorizationStatus === AuthorizationStatus.PROVISIONAL;
   if (!granted) return 'denied';
 
-  const fcm = getMessaging();
+  const fcm = fb.getMessaging();
 
   // iOS must hold an APNs token before FCM will issue a registration token.
-  if (Platform.OS === 'ios' && !isDeviceRegisteredForRemoteMessages(fcm)) {
-    await registerDeviceForRemoteMessages(fcm);
+  if (Platform.OS === 'ios' && !fb.isDeviceRegisteredForRemoteMessages(fcm)) {
+    await fb.registerDeviceForRemoteMessages(fcm);
   }
 
-  const token = await getToken(fcm);
+  const token = await fb.getToken(fcm);
   if (!token) return 'unsupported';
 
   await postData({
@@ -100,8 +102,10 @@ export async function registerForPush(): Promise<PushStatus> {
  */
 export async function unregisterPush(): Promise<void> {
   if (!Device.isDevice) return;
-  const fcm = getMessaging();
-  const token = registeredToken ?? (await getToken(fcm).catch(() => null));
+  const fb = getMessagingLib();
+  if (!fb) return;
+  const fcm = fb.getMessaging();
+  const token = registeredToken ?? (await fb.getToken(fcm).catch(() => null));
   if (!token) return;
   registeredToken = null;
   try {
@@ -112,7 +116,7 @@ export async function unregisterPush(): Promise<void> {
   }
   // Stop this install receiving anything until it registers again.
   try {
-    await deleteToken(fcm);
+    await fb.deleteToken(fcm);
   } catch {
     /* best effort */
   }
@@ -120,8 +124,10 @@ export async function unregisterPush(): Promise<void> {
 
 /** Keep the springboard/launcher badge in step with the unread count. */
 export async function syncBadge(count: number): Promise<void> {
+  const lib = getNotifeeLib();
+  if (!lib) return;
   try {
-    await notifee.setBadgeCount(Math.max(0, count));
+    await lib.notifee.setBadgeCount(Math.max(0, count));
   } catch {
     /* badge support is platform-dependent; never throw for it */
   }
@@ -138,8 +144,10 @@ export async function presentForeground(
   data?: Record<string, string>,
   channelId: string = DEFAULT_CHANNEL_ID,
 ) {
+  const lib = getNotifeeLib();
+  if (!lib) return;
   await ensureAndroidChannel();
-  await notifee.displayNotification({
+  await lib.notifee.displayNotification({
     title,
     body,
     data,

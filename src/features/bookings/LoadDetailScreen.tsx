@@ -20,6 +20,7 @@ import {
 import { ErrorState } from '@/components/feedback';
 import { useLoad, updateLoadStatus, convertLoadToInvoice, uploadLoadPod, assignLoadDriver } from './api';
 import { AssignSheet, assignedIds } from './AssignSheet';
+import { useSubscription } from '@/hooks/useSubscription';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL } from './constants';
 import { num, str, pick } from '@/lib/api/list';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -35,6 +36,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const { data, isError, refetch } = useLoad(id, preview);
   const { colors } = useTheme();
   const qc = useQueryClient();
+  const subscription = useSubscription();
   const [busy, setBusy] = useState(false);
   const [podBusy, setPodBusy] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
@@ -58,6 +60,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const refresh = () => invalidateFor(qc, 'load');
 
   const doStatus = async (next: string) => {
+    if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
     setBusy(true);
     try {
       await updateLoadStatus(id, next);
@@ -99,6 +102,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   };
 
   const submitAssign = async (driverId: string, vehicleId: string) => {
+    if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
     setAssignBusy(true);
     try {
       await assignLoadDriver(id, driverId ? Number(driverId) : null, vehicleId ? Number(vehicleId) : null);

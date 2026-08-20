@@ -8,6 +8,7 @@ import { useCustomers } from '@/features/customers/api';
 import { formatCurrency, parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useSubscription } from '@/hooks/useSubscription';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateInvoice'>;
@@ -22,6 +23,7 @@ const today = () => plusDays(0);
 
 export function CreateInvoiceScreen({ navigation }: Props) {
   const qc = useQueryClient();
+  const subscription = useSubscription();
   const { data: customers } = useCustomers();
   const [customerId, setCustomerId] = useState('');
   const [subtotal, setSubtotal] = useState('');
@@ -42,6 +44,7 @@ export function CreateInvoiceScreen({ navigation }: Props) {
   const total = sub + vat;
 
   const submit = async () => {
+    if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
     if (!customerId) return toast.error('Select a customer');
     if (subInvalid) return toast.error('Amount is not a number');
     if (sub <= 0) return toast.error('Enter an amount');

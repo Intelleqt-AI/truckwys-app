@@ -39,6 +39,7 @@ import type { ExpenseLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useSubscription } from '@/hooks/useSubscription';
 import { useTheme } from '@/theme/ThemeProvider';
 import {
   formatCurrency,
@@ -56,6 +57,11 @@ export function FinanceScreen({ route }: Props) {
   const [tab, setTab] = useState<FinanceTab>(route.params?.tab ?? 'invoices');
   const insets = useSafeAreaInsets();
   const { nav } = useAppNavigation();
+  const subscription = useSubscription();
+  // The manual action goes away while billing is blocked; invoice-on-delivery is
+  // raised server-side and is deliberately unaffected.
+  const hideCreate = subscription.blocked && tab !== 'expenses';
+
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
       <AmbientGlow />
@@ -65,7 +71,10 @@ export function FinanceScreen({ route }: Props) {
           right={
             // Ghost slot on Reports keeps the header height identical across
             // tabs, so the pager never jumps vertically.
-            <View style={tab === 'reports' ? { opacity: 0 } : undefined} pointerEvents={tab === 'reports' ? 'none' : 'auto'}>
+            <View
+              style={tab === 'reports' || hideCreate ? { opacity: 0 } : undefined}
+              pointerEvents={tab === 'reports' || hideCreate ? 'none' : 'auto'}
+            >
               <IconButton
                 name="plus"
                 accessibilityLabel={tab === 'expenses' ? 'New expense' : 'New invoice'}

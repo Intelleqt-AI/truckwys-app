@@ -65,6 +65,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { subscriptionStatusDetail, subscriptionStatusLabel } from '@/lib/subscriptionStatus';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Settings'>;
@@ -1169,18 +1170,16 @@ function CompanySection() {
       {/* ── Fuel price defaults ───────────────────────────────────────────── */}
       <View className="mt-1 flex-row items-center justify-between">
         <Label className="text-muted">Fuel price defaults</Label>
-        <Pressable
+        {/* A real button: as a bare label this read as a heading and nobody
+            knew it was the way to pull the national price. */}
+        <Button
+          label={fetchingLive ? 'Fetching' : 'Fetch live'}
+          icon="download"
+          variant="secondary"
+          size="sm"
+          loading={fetchingLive}
           onPress={() => loadLivePrice(true)}
-          disabled={fetchingLive}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Fetch live fuel prices"
-          className="active:opacity-50"
-        >
-          <Mono className={`text-micro tracking-wide uppercase ${fetchingLive ? 'text-faint' : 'text-accent'}`}>
-            {fetchingLive ? 'Fetching…' : 'Fetch live'}
-          </Mono>
-        </Pressable>
+        />
       </View>
       <Txt className="-mt-2 text-caption text-faint">
         Used when a vehicle type of that fuel runs a quote. Diesel and petrol can
@@ -1391,6 +1390,11 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   const last4 = str(pick(card, ['last4']));
   const cardType = str(pick(card, ['card_type']));
   const suspended = Boolean(pick(d, ['suspended']));
+  // cancel_at_period_end (backend migration 0096): the subscription is winding
+  // down but access continues to the end of the paid period, so this is not a
+  // blocked state and must not read like one.
+  const cancelling = Boolean(pick(d, ['cancel_at_period_end']));
+  const subEnd = str(pick(d, ['subscription_end']));
   const graceDays = num(pick(grace, ['days_remaining']));
   const graceExpires = str(pick(grace, ['grace_period_expires_at']));
   const nextBillingDate = str(pick(d, ['next_billing_date']));
@@ -1408,7 +1412,17 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
           </Txt>
         </View>
       )}
-      {!suspended && graceDays > 0 && (
+      {!suspended && cancelling && (
+        <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+          <Icon name="alert" size={17} color="#F59E0B" />
+          <Txt className="flex-1 text-sub text-muted">
+            Cancelling
+            {subEnd ? ` — access continues until ${formatDate(subEnd)}` : ''}. Quoting and invoicing
+            keep working until then.
+          </Txt>
+        </View>
+      )}
+      {!suspended && !cancelling && graceDays > 0 && (
         <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
           <Icon name="alert" size={17} color="#F59E0B" />
           <Txt className="flex-1 text-sub text-muted">
@@ -1418,9 +1432,11 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
         </View>
       )}
 
+      <Txt className="text-caption text-faint">{subscriptionStatusDetail(status)}</Txt>
+
       <Group>
         <DetailRow label="Plan" value={planLabel} mono={false} />
-        <DetailRow label="Status" value={status} />
+        <DetailRow label="Status" value={subscriptionStatusLabel(status)} />
         {amount > 0 ? <DetailRow label="Amount" value={formatCurrency(amount)} /> : null}
         {last4 ? (
           <DetailRow label="Card" value={`${cardType || 'Card'} •••• ${last4}`} mono={false} />

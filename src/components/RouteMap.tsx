@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Mono } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
+import { decimate, MAX_ROUTE_POINTS, type GeoPoint } from '@/lib/routeGeometry';
 import { status as statusHues } from '@/theme/tokens';
 
 // Static route map: OpenStreetMap raster tiles under an SVG polyline.
@@ -22,22 +23,17 @@ const MIN_ZOOM = 3;
 // Web's MapLocationPicker caps fitBounds at 12; RouteMapView forgets to and
 // over-zooms short lanes. Cap here.
 const MAX_ZOOM = 12;
-// A long SA lane comes back from TomTom undecimated (2000–6000 points). One SVG
-// path that long janks on mid-range Android, and at this scale the extra points
-// are sub-pixel anyway. The backend does the same thing (geometry[::10]).
-const MAX_POINTS = 300;
 
 // tile.openstreetmap.org blocks direct app traffic under its usage policy
 // (no throttling, no descriptive User-Agent from a mobile client) — MapTiler
 // is a paid/free-tier host that explicitly allows this traffic pattern.
+// Roughly the centroid of South Africa — the same view the web map opens on.
+const SA_CENTRE = { lat: -28.48, lon: 24.67 };
+
 const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY ?? '';
 const OSM_TILE = (z: number, x: number, y: number) =>
   `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${MAPTILER_KEY}`;
 
-export interface GeoPoint {
-  lat: number;
-  lon: number;
-}
 
 // ── Web Mercator ───────────────────────────────────────────────────────────
 // World pixel coordinates at a given zoom (origin top-left, 256px tiles).
@@ -64,32 +60,32 @@ function fitZoom(pts: GeoPoint[], w: number, h: number): number {
   return MIN_ZOOM;
 }
 
-/** Keep every nth point, always preserving the first and last. */
-function decimate(pts: GeoPoint[], max: number): GeoPoint[] {
-  if (pts.length <= max) return pts;
-  const step = Math.ceil(pts.length / max);
-  const out: GeoPoint[] = [];
-  for (let i = 0; i < pts.length; i += step) out.push(pts[i]!);
-  const last = pts[pts.length - 1]!;
-  if (out[out.length - 1] !== last) out.push(last);
-  return out;
-}
-
 export function RouteMap({
   geometry,
   pickup,
   delivery,
   height = 190,
+  width: widthProp,
+  bottomInset = 0,
 }: {
   geometry?: GeoPoint[];
   pickup?: GeoPoint | null;
   delivery?: GeoPoint | null;
   height?: number;
+  /** Explicit width. Defaults to the screen minus the 16px card gutters. */
+  width?: number;
+  /**
+   * How much of the bottom is covered by something else (the quote sheet). Only
+   * used to lift the attribution clear of it — required by MapTiler's ToS and
+   * OSM's ODbL, so it must never end up off-screen.
+   */
+  bottomInset?: number;
 }) {
   const { colors } = useTheme();
   const { width: screenW } = useWindowDimensions();
-  // Card sits inside the screen's 16px gutters.
-  const width = Math.max(0, screenW - 32);
+  // Sized by the parent when it needs to be (the full-bleed map canvas);
+  // otherwise the card inside the screen's 16px gutters, as before.
+  const width = Math.max(0, widthProp ?? screenW - 32);
   const [tilesFailed, setTilesFailed] = useState(false);
 
   const view = useMemo(() => {
@@ -98,11 +94,21 @@ export function RouteMap({
     const hasRoute = !!geometry && geometry.length > 1;
     const endpoints = [pickup, delivery].filter(Boolean) as GeoPoint[];
     const source = hasRoute ? geometry! : endpoints;
-    if (source.length === 0 || width <= 0) return null;
+    if (width <= 0) return null;
 
-    const pts = hasRoute ? decimate(source, MAX_POINTS) : source;
-    // A single known point can't define a span — show it at street-ish zoom.
-    const zoom = pts.length > 1 ? fitZoom(pts, width, height) : 9;
+    // With nothing picked yet, frame South Africa rather than rendering nothing.
+    // The screen this feeds is map-first, so an empty panel reads as a bug — and
+    // the tiles are what tell the user the map is alive before they've typed
+    // anything.
+    const empty = source.length === 0;
+    const pts = empty
+      ? [{ lat: SA_CENTRE.lat, lon: SA_CENTRE.lon }]
+      : hasRoute
+        ? decimate(source, MAX_ROUTE_POINTS)
+        : source;
+    // A single known point can't define a span — show it at street-ish zoom,
+    // or country zoom when it's the placeholder centre.
+    const zoom = pts.length > 1 ? fitZoom(pts, width, height) : empty ? 5 : 9;
 
     // Centre the viewport on the bbox midpoint, in world pixels.
     const xs = pts.map((p) => lonToX(p.lon, zoom));
@@ -147,17 +153,25 @@ export function RouteMap({
       d,
       tiles,
       dashed: !hasRoute,
-      start: local[0],
-      end: local.length > 1 ? local[local.length - 1] : undefined,
+      // Nothing is picked yet: tiles only. `local[0]` here is the synthetic South
+      // Africa centre, and drawing it as a start marker put a green dot in the
+      // middle of the country claiming to be a collection point.
+      empty,
+      start: empty ? undefined : local[0],
+      end: !empty && local.length > 1 ? local[local.length - 1] : undefined,
     };
   }, [geometry, pickup, delivery, width, height]);
 
   if (!view) return null;
 
+  // Parent-sized means full-bleed behind the sheet; the card chrome and the
+  // below-the-box attribution are both wrong at that size.
+  const fullBleed = widthProp != null;
+
   return (
     <View>
       <View
-        className="overflow-hidden rounded-xs border border-line"
+        className={fullBleed ? 'overflow-hidden' : 'overflow-hidden rounded-xs border border-line'}
         style={{ width, height, backgroundColor: colors.surface }}
       >
         {!tilesFailed &&
@@ -176,27 +190,41 @@ export function RouteMap({
 
         <Svg width={width} height={height} style={{ position: 'absolute', left: 0, top: 0 }}>
           {/* Casing under the route so it stays legible over dark map features. */}
-          <Path d={view.d} stroke="rgba(0,0,0,0.35)" strokeWidth={6} fill="none" strokeLinejoin="round" />
-          <Path
-            d={view.d}
-            stroke={colors.accent}
-            strokeWidth={3}
-            fill="none"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            strokeDasharray={view.dashed ? '6 6' : undefined}
-          />
-          {view.start && (
+          {!view.empty && (
+            <>
+              <Path d={view.d} stroke="rgba(0,0,0,0.35)" strokeWidth={6} fill="none" strokeLinejoin="round" />
+              <Path
+                d={view.d}
+                stroke={colors.accent}
+                strokeWidth={3}
+                fill="none"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                strokeDasharray={view.dashed ? '6 6' : undefined}
+              />
+            </>
+          )}
+          {!view.empty && view.start && (
             <Circle cx={view.start.x} cy={view.start.y} r={5} fill={statusHues.success} stroke="#fff" strokeWidth={2} />
           )}
-          {view.end && (
+          {!view.empty && view.end && (
             <Circle cx={view.end.x} cy={view.end.y} r={5} fill={statusHues.danger} stroke="#fff" strokeWidth={2} />
           )}
         </Svg>
+
+        {/* MapTiler's ToS and OSM's ODbL both require attribution, so full-bleed
+            has to overlay it inside the map and lift it above whatever covers the
+            bottom — below the box it would sit off-screen. */}
+        {fullBleed && (
+          <View className="absolute right-2 rounded-xs bg-bg-deep/70 px-1.5 py-0.5" style={{ bottom: bottomInset + 6 }}>
+            <Mono className="text-nano text-faint">© MapTiler © OpenStreetMap</Mono>
+          </View>
+        )}
       </View>
 
-      {/* MapTiler's ToS and OSM's ODbL both require attribution. */}
-      <Mono className="mt-1 text-right text-nano text-faint">© MapTiler © OpenStreetMap contributors</Mono>
+      {!fullBleed && (
+        <Mono className="mt-1 text-right text-nano text-faint">© MapTiler © OpenStreetMap contributors</Mono>
+      )}
     </View>
   );
 }

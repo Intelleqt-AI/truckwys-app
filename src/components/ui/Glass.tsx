@@ -1,18 +1,28 @@
 import { type ReactNode } from 'react';
 import { View, Platform, type ViewStyle, type StyleProp } from 'react-native';
 import { BlurView } from 'expo-blur';
-import {
-  GlassView,
-  isLiquidGlassAvailable,
-  isGlassEffectAPIAvailable,
-} from 'expo-glass-effect';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // True iOS 26 Liquid Glass when the device supports it; graceful fallback to an
 // expo-blur frosted surface on iOS < 26, and a near-solid surface on Android
 // (where system blur is unreliable). Detected once — cheap, stable per launch.
-const LIQUID =
-  Platform.OS === 'ios' && isLiquidGlassAvailable() && isGlassEffectAPIAvailable();
+//
+// Loaded through require() in a try/catch rather than imported: expo-glass-effect
+// is a 0.1.x preview module and is not guaranteed to exist in Expo Go, where a
+// static import — plus the top-level availability call below — throws while the
+// module graph is evaluating and takes the whole app down before either fallback
+// can run. In a real build the require resolves and behaviour is unchanged.
+const glass = (() => {
+  if (Platform.OS !== 'ios') return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-glass-effect') as typeof import('expo-glass-effect');
+  } catch {
+    return null;
+  }
+})();
+
+const LIQUID = !!glass && glass.isLiquidGlassAvailable() && glass.isGlassEffectAPIAvailable();
 
 export function Glass({
   children,
@@ -35,7 +45,8 @@ export function Glass({
 
   // iOS 26 Liquid Glass. NOTE: never animate a GlassView's opacity to 0 — it
   // disables rendering; animate scale/translate instead.
-  if (LIQUID) {
+  if (LIQUID && glass) {
+    const GlassView = glass.GlassView;
     return (
       <GlassView
         glassEffectStyle="regular"

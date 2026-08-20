@@ -73,7 +73,20 @@ export function DateField({
             >
               <View className="flex-row items-center justify-between border-b border-line px-4 py-3">
                 <Label className="text-muted">{label ?? 'Date'}</Label>
-                <Pressable hitSlop={8} onPress={() => setOpen(false)}>
+                {/* Done commits the date on screen. The picker's onChange only
+                    fires when the wheel actually MOVES, so without this, opening
+                    the sheet and tapping Done straight away selected nothing —
+                    the user had to scroll off today and back to pick it.
+                    Idempotent: if they did scroll, onChange already wrote the
+                    value and `current` re-derived from it, so this writes the
+                    same string again. */}
+                <Pressable
+                  hitSlop={8}
+                  onPress={() => {
+                    onChange(toISODate(current));
+                    setOpen(false);
+                  }}
+                >
                   <Mono className="text-micro tracking-wide uppercase text-accent">Done</Mono>
                 </Pressable>
               </View>
@@ -98,9 +111,12 @@ export function DateField({
           display="default"
           maximumDate={maximumDate}
           minimumDate={minimumDate}
-          onChange={(_e: DateTimePickerEvent, d?: Date) => {
+          onChange={(e: DateTimePickerEvent, d?: Date) => {
             setOpen(false);
-            if (d) onChange(toISODate(d));
+            // Android's dialog reports Cancel as type 'dismissed' but still
+            // hands back a date, so writing on any callback set a date the user
+            // had just cancelled.
+            if (e.type === 'set' && d) onChange(toISODate(d));
           }}
         />
       )}

@@ -201,14 +201,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // Prefill R/km from the company default only if one is configured — no
   // hard-coded fallback (leave blank so the field isn't pre-filled with a
   // made-up rate). Deferred to avoid sync setState in effect.
+  //
+  // baseRatePerKm is deliberately NOT a dependency. It used to be, and because
+  // the effect also writes it, clearing the field re-armed the effect and the
+  // default was written straight back — so the box could never be emptied and
+  // its first digit could never be changed (10 -> 19 worked, 10 -> 20 did not).
+  // The "don't clobber what the user typed" intent now lives in the functional
+  // update instead, which is where it belongs.
   useEffect(() => {
-    if (!company || baseRatePerKm || editing) return;
+    if (!company || editing) return;
     const def = num(pick(company, ['default_base_rate_per_km']));
     if (def > 0) {
-      const t = setTimeout(() => setBaseRatePerKm(String(def)), 0);
+      const t = setTimeout(() => setBaseRatePerKm((prev) => prev || String(def)), 0);
       return () => clearTimeout(t);
     }
-  }, [company, baseRatePerKm, editing]);
+  }, [company, editing]);
 
   // Cross-border is a company policy, not a per-quote choice (web moved it to
   // Settings → Company Details). The form only reacts to it: an early warning

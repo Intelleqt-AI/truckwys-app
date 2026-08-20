@@ -84,6 +84,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // appears and notifications are silently dropped.
     permissions: ['POST_NOTIFICATIONS'],
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? undefined,
+    config: {
+      // react-native-maps renders Google Maps on Android and needs its own key
+      // — the Firebase google-services file does not cover the Maps SDK. iOS
+      // uses Apple Maps, which needs no key. Set EXPO_PUBLIC_GOOGLE_MAPS_KEY in
+      // the EAS environment; without it the Android map renders blank.
+      googleMaps: { apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ?? '' },
+    },
   },
   plugins: [
     'expo-secure-store',

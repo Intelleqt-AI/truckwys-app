@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { Mono } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
+import { decimate, MAX_ROUTE_POINTS, type GeoPoint } from '@/lib/routeGeometry';
 import { status as statusHues } from '@/theme/tokens';
 
 // Static route map: OpenStreetMap raster tiles under an SVG polyline.
@@ -22,10 +23,6 @@ const MIN_ZOOM = 3;
 // Web's MapLocationPicker caps fitBounds at 12; RouteMapView forgets to and
 // over-zooms short lanes. Cap here.
 const MAX_ZOOM = 12;
-// A long SA lane comes back from TomTom undecimated (2000–6000 points). One SVG
-// path that long janks on mid-range Android, and at this scale the extra points
-// are sub-pixel anyway. The backend does the same thing (geometry[::10]).
-const MAX_POINTS = 300;
 
 // tile.openstreetmap.org blocks direct app traffic under its usage policy
 // (no throttling, no descriptive User-Agent from a mobile client) — MapTiler
@@ -34,10 +31,6 @@ const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY ?? '';
 const OSM_TILE = (z: number, x: number, y: number) =>
   `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${MAPTILER_KEY}`;
 
-export interface GeoPoint {
-  lat: number;
-  lon: number;
-}
 
 // ── Web Mercator ───────────────────────────────────────────────────────────
 // World pixel coordinates at a given zoom (origin top-left, 256px tiles).
@@ -64,32 +57,25 @@ function fitZoom(pts: GeoPoint[], w: number, h: number): number {
   return MIN_ZOOM;
 }
 
-/** Keep every nth point, always preserving the first and last. */
-function decimate(pts: GeoPoint[], max: number): GeoPoint[] {
-  if (pts.length <= max) return pts;
-  const step = Math.ceil(pts.length / max);
-  const out: GeoPoint[] = [];
-  for (let i = 0; i < pts.length; i += step) out.push(pts[i]!);
-  const last = pts[pts.length - 1]!;
-  if (out[out.length - 1] !== last) out.push(last);
-  return out;
-}
-
 export function RouteMap({
   geometry,
   pickup,
   delivery,
   height = 190,
+  width: widthProp,
 }: {
   geometry?: GeoPoint[];
   pickup?: GeoPoint | null;
   delivery?: GeoPoint | null;
   height?: number;
+  /** Explicit width. Defaults to the screen minus the 16px card gutters. */
+  width?: number;
 }) {
   const { colors } = useTheme();
   const { width: screenW } = useWindowDimensions();
-  // Card sits inside the screen's 16px gutters.
-  const width = Math.max(0, screenW - 32);
+  // Sized by the parent when it needs to be (the full-bleed map canvas);
+  // otherwise the card inside the screen's 16px gutters, as before.
+  const width = Math.max(0, widthProp ?? screenW - 32);
   const [tilesFailed, setTilesFailed] = useState(false);
 
   const view = useMemo(() => {
@@ -100,7 +86,7 @@ export function RouteMap({
     const source = hasRoute ? geometry! : endpoints;
     if (source.length === 0 || width <= 0) return null;
 
-    const pts = hasRoute ? decimate(source, MAX_POINTS) : source;
+    const pts = hasRoute ? decimate(source, MAX_ROUTE_POINTS) : source;
     // A single known point can't define a span — show it at street-ish zoom.
     const zoom = pts.length > 1 ? fitZoom(pts, width, height) : 9;
 

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, TextInput, Modal, ScrollView, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { View, Pressable, TextInput, Modal, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
+import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  SheetScreen,
   Group,
   DetailRow,
   RoutePreview,
@@ -39,7 +40,10 @@ import {
   type AiChatTurn,
 } from './api';
 import { useCustomers } from '@/features/customers/api';
-import { RouteMap, type GeoPoint } from '@/components/RouteMap';
+import type { GeoPoint } from '@/lib/routeGeometry';
+import { MapCanvas } from './quote/MapCanvas';
+import { CrosshairOverlay, type PickTarget } from './quote/CrosshairOverlay';
+import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
 import { VoiceQuoteBar } from './VoiceQuoteBar';
 import { VoiceQuoteSheet } from './VoiceQuoteSheet';
 import { Skeleton, WorkingOverlay } from '@/components/feedback';
@@ -101,14 +105,24 @@ const FUEL_PRICE_FIELD_BY_TYPE: Record<string, string> = {
 };
 
 // Heuristic 3-letter lane code (mirrors web extractCode).
+//
+// These codes are not cosmetic: analyzeQuote and benchmarkQuote key off them, and
+// an unrecognised address falls through to the first three letters of whatever
+// string arrives — which lands the quote in a junk lane, so the market rate
+// resolves to nothing and AI pricing silently drops to a cost anchor.
+//
+// The municipality names matter for exactly that reason. SA metros are named
+// after their municipality and both the geocoder and TomTom's suggestions return
+// that name, so a pin on Church Square used to arrive as "Tshwane" and score
+// "TSH" rather than PTA.
 function extractCode(s: string): string {
   const t = s.toLowerCase();
-  if (/johannesburg|joburg|jhb/.test(t)) return 'JHB';
+  if (/johannesburg|joburg|jhb|ekurhuleni/.test(t)) return 'JHB';
   if (/cape town|cpt/.test(t)) return 'CPT';
-  if (/durban|dbn|dur/.test(t)) return 'DUR';
-  if (/port elizabeth|gqeberha|pe/.test(t)) return 'PE';
-  if (/pretoria|pta/.test(t)) return 'PTA';
-  if (/bloemfontein|bfn/.test(t)) return 'BFN';
+  if (/durban|dbn|dur|ethekwini/.test(t)) return 'DUR';
+  if (/port elizabeth|gqeberha|nelson mandela bay|pe/.test(t)) return 'PE';
+  if (/pretoria|pta|tshwane/.test(t)) return 'PTA';
+  if (/bloemfontein|bfn|mangaung/.test(t)) return 'BFN';
   return s.trim().slice(0, 3).toUpperCase();
 }
 
@@ -197,6 +211,101 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const savedId = useRef<string | number | null>(null);
   const routeReq = useRef(0);
   const aiReq = useRef(0);
+
+  // ── Map-first shell ──────────────────────────────────────────────────────
+  const insets = useSafeAreaInsets();
+  const { width: screenW, height: screenH } = useWindowDimensions();
+  const { colors } = useTheme();
+  const sheetRef = useRef<BottomSheet>(null);
+  // The map sits behind the sheet, so it needs to know how much of itself is
+  // covered — both to keep the route clear of it and to place the confirm card.
+  const SNAP = useMemo(() => ['38%', '72%', '94%'] as const, []);
+  const [snapIndex, setSnapIndex] = useState(0);
+  const sheetHeight = screenH * [0.38, 0.72, 0.94][Math.max(0, snapIndex)]!;
+
+  const [picking, setPicking] = useState<PickTarget | null>(null);
+  const [pinLabel, setPinLabel] = useState<string | null>(null);
+  const [pinPlace, setPinPlace] = useState<{ label: string; cc: string } | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const pinCentre = useRef<GeoPoint | null>(null);
+  const pinReq = useRef(0);
+  const pinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const beginPick = useCallback((target: PickTarget) => {
+    setPicking(target);
+    setPinLabel(null);
+    setPinPlace(null);
+    setPinError(null);
+    // Get out of the way so the user can see what they're aiming at.
+    sheetRef.current?.snapToIndex(0);
+  }, []);
+
+  const endPick = useCallback(() => {
+    if (pinTimer.current) clearTimeout(pinTimer.current);
+    pinReq.current++;
+    setPicking(null);
+    setPinBusy(false);
+    setPinError(null);
+  }, []);
+
+  /**
+   * The map settled on a new centre. Debounced, and sequence-guarded so a slow
+   * lookup for a point the user has already dragged away from can't overwrite a
+   * newer one.
+   */
+  const onCentreSettled = useCallback(
+    (point: GeoPoint) => {
+      if (!picking) return;
+      pinCentre.current = point;
+      if (pinTimer.current) clearTimeout(pinTimer.current);
+      setPinError(null);
+      setPinBusy(true);
+      pinTimer.current = setTimeout(async () => {
+        const mine = ++pinReq.current;
+        try {
+          const place = await reverseGeocode(point);
+          if (mine !== pinReq.current) return;
+          setPinPlace({ label: place.label, cc: place.cc });
+          setPinLabel(place.label);
+        } catch (e) {
+          if (mine !== pinReq.current) return;
+          setPinPlace(null);
+          setPinLabel(null);
+          setPinError(e instanceof Error ? e.message : "Couldn't find that address");
+        } finally {
+          if (mine === pinReq.current) setPinBusy(false);
+        }
+      }, 400);
+    },
+    [picking],
+  );
+
+  const confirmPick = useCallback(() => {
+    const centre = pinCentre.current;
+    if (!picking || !centre || !pinPlace) return;
+    const loc: Loc = { label: pinPlace.label, lat: centre.lat, lon: centre.lon, cc: pinPlace.cc || undefined };
+    const wasPicking = picking;
+    if (wasPicking === 'pickup') setPickup(loc);
+    else setDelivery(loc);
+    endPick();
+    // Straight on to the other end when it's still empty — same as web.
+    const other = wasPicking === 'pickup' ? delivery : pickup;
+    if (!other) setTimeout(() => beginPick(wasPicking === 'pickup' ? 'dropoff' : 'pickup'), 250);
+    else sheetRef.current?.snapToIndex(1);
+  }, [picking, pinPlace, pickup, delivery, endPick, beginPick]);
+
+  useEffect(
+    () => () => {
+      if (pinTimer.current) clearTimeout(pinTimer.current);
+    },
+    [],
+  );
+
+  // This screen draws its own chrome over the map, so the native header goes.
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   // Prefill R/km from the company default only if one is configured — no
   // hard-coded fallback (leave blank so the field isn't pre-filled with a
@@ -708,31 +817,96 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   };
 
+  const actions = (
+    <View className="flex-row gap-2.5">
+      <View className="flex-1">
+        <Button label="Save draft" variant="secondary" loading={busy} disabled={subscription.blocked} onPress={() => save(false)} fullWidth />
+      </View>
+      <View className="flex-1">
+        <Button
+          label="Send to client"
+          icon="send"
+          loading={busy}
+          disabled={!ready || !!routeBlockedMessage || subscription.blocked}
+          onPress={() => save(true)}
+          fullWidth
+        />
+      </View>
+    </View>
+  );
+
   return (
-    <SheetScreen
-      eyebrow={editing ? 'Edit' : ai ? 'AI quote' : 'New quote'}
-      title={editing ? 'Edit quote' : 'Build quote'}
-      variant="modal"
-      onBack={() => navigation.goBack()}
-      footer={
-        <View className="flex-row gap-2.5">
-          <View className="flex-1">
-            <Button label="Save draft" variant="secondary" loading={busy} disabled={subscription.blocked} onPress={() => save(false)} fullWidth />
+    <View className="flex-1 bg-bg-deep">
+      {/* The map is the page. It fills the screen and the sheet floats over it,
+          so dragging the sheet down reveals more map without any relayout. */}
+      <MapCanvas
+        geometry={asArray(pick(currentRoute, ['geometry'])) as GeoPoint[]}
+        pickup={pickup ? { lat: pickup.lat, lon: pickup.lon } : null}
+        delivery={delivery ? { lat: delivery.lat, lon: delivery.lon } : null}
+        bottomInset={picking ? 220 : sheetHeight}
+        onCentreSettled={onCentreSettled}
+        picking={!!picking}
+        width={screenW}
+        height={screenH}
+      />
+
+      {/* Own chrome, since the native header is off on this screen. */}
+      <View className="absolute left-0 right-0 flex-row items-center gap-2 px-4" style={{ top: insets.top + 6 }}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          className="h-9 w-9 items-center justify-center rounded-pill border border-line bg-bg-deep/85 active:opacity-60"
+        >
+          <Icon name="x" size={19} color={colors.accent} />
+        </Pressable>
+        {!picking && (
+          <View className="rounded-pill border border-line bg-bg-deep/85 px-3 py-1.5">
+            <Mono className="text-micro tracking-wide uppercase text-muted">
+              {editing ? 'Edit quote' : ai ? 'AI quote' : 'Build quote'}
+            </Mono>
           </View>
-          <View className="flex-1">
-            <Button
-              label="Send to client"
-              icon="send"
-              loading={busy}
-              disabled={!ready || !!routeBlockedMessage || subscription.blocked}
-              onPress={() => save(true)}
-              fullWidth
-            />
-          </View>
-        </View>
-      }
-    >
-      <View className="gap-4">
+        )}
+      </View>
+
+      {picking && (
+        <CrosshairOverlay
+          target={picking}
+          address={pinLabel}
+          resolving={pinBusy}
+          error={pinError}
+          onConfirm={confirmPick}
+          onCancel={endPick}
+          bottomInset={insets.bottom + 8}
+        />
+      )}
+
+      <BottomSheet
+        ref={sheetRef}
+        index={0}
+        snapPoints={SNAP as unknown as string[]}
+        enableDynamicSizing={false}
+        enablePanDownToClose={false}
+        onChange={setSnapIndex}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
+        backgroundStyle={{ backgroundColor: colors.surface, borderRadius: 2 }}
+        handleIndicatorStyle={{ backgroundColor: colors.faint, width: 42 }}
+        // Hidden rather than unmounted while picking, so the form keeps its state
+        // and the transition back is instant.
+        style={{ opacity: picking ? 0 : 1 }}
+      >
+        <BottomSheetScrollView
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingBottom: insets.bottom + 28,
+            gap: 16,
+          }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View className="gap-4">
         {subscription.notice && (
           <View className="flex-row items-start gap-2.5 rounded-xs border border-danger bg-danger-bg p-3">
             <Icon name="alert" size={17} color="#FF4949" />
@@ -754,8 +928,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
         <SelectField label="Client" icon="user" placeholder="Select customer" options={customerOptions} value={customerId} onSelect={setCustomerId} />
         <SelectField label="Vehicle type" icon="truck" placeholder="Select vehicle type" options={vtypeOptions} value={vehicleType} onSelect={setVehicleType} />
-        <LocationField label="Collection" value={pickup} onChange={setPickup} placeholder="Search origin" />
-        <LocationField label="Drop-off" value={delivery} onChange={setDelivery} placeholder="Search destination" />
+        <LocationField label="Collection" value={pickup} onChange={setPickup} placeholder="Search origin" onPickOnMap={() => beginPick('pickup')} />
+        <LocationField label="Drop-off" value={delivery} onChange={setDelivery} placeholder="Search destination" onPickOnMap={() => beginPick('dropoff')} />
 
         {/* Early heads-up the moment a picked location is outside SA, before the
             rest of the form is filled in. The real enforcement happens once
@@ -819,14 +993,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       {/* Route + estimate */}
       {ready && !routeBlockedMessage && (
         <View className="mt-5 gap-5">
-          {/* Static OSM map of the selected route. Geometry already comes back
-              from route/calculate/ — this just draws it. */}
-          <RouteMap
-            geometry={asArray(pick(currentRoute, ['geometry'])) as GeoPoint[]}
-            pickup={pickup ? { lat: pickup.lat, lon: pickup.lon } : null}
-            delivery={delivery ? { lat: delivery.lat, lon: delivery.lon } : null}
-          />
-
           <RoutePreview
             origin={pickup!.label}
             dest={delivery!.label}
@@ -1098,7 +1264,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           "Fill from description" button, which previously only spun a small
           button through a multi-second AI call. */}
       <WorkingOverlay visible={voiceBusy || nlBusy} title="Building your quote" />
-    </SheetScreen>
+          {actions}
+        </BottomSheetScrollView>
+      </BottomSheet>
+    </View>
   );
 }
 
@@ -1118,14 +1287,51 @@ function LocationField({
   value,
   onChange,
   placeholder,
+  onPickOnMap,
 }: {
   label: string;
   value: Loc | null;
   onChange: (l: Loc) => void;
   placeholder: string;
+  /** Hands control to the map's crosshair. Omitted where there is no map. */
+  onPickOnMap?: () => void;
 }) {
   const { colors } = useTheme();
   const [text, setText] = useState(value?.label ?? '');
+  // Coordinate entry, matching what the web builder offers — but as one
+  // paste-friendly field rather than two number boxes, because the useful case
+  // is a pin someone shared over WhatsApp, and because a browser number input
+  // silently rejects the comma in "-33.9249, 18.4241".
+  const [coordMode, setCoordMode] = useState(false);
+  const [coordText, setCoordText] = useState('');
+  const [coordBusy, setCoordBusy] = useState(false);
+  const [coordError, setCoordError] = useState<string | null>(null);
+
+  const applyCoords = async (swap = false) => {
+    setCoordError(null);
+    const parsed = parseCoordinates(coordText);
+    if (!parsed) {
+      setCoordError('Enter coordinates as "-33.9249, 18.4241", or paste a map link');
+      return;
+    }
+    const point = swap ? { lat: parsed.lon, lon: parsed.lat } : parsed;
+    if (!swap && looksSwapped(point)) {
+      setCoordError('That looks like longitude first. Tap Swap if you meant the other way round.');
+      return;
+    }
+    setCoordBusy(true);
+    try {
+      const place = await reverseGeocode(point);
+      onChange({ label: place.label, lat: point.lat, lon: point.lon, cc: place.cc || undefined });
+      setText(place.label);
+      setCoordMode(false);
+      setCoordText('');
+    } catch (e) {
+      setCoordError(e instanceof Error ? e.message : "Couldn't find that point");
+    } finally {
+      setCoordBusy(false);
+    }
+  };
   const [focused, setFocused] = useState(false);
   const [results, setResults] = useState<LocSuggest[]>([]);
   // One ref per timer. These used to share a slot, so the clear-results timeout
@@ -1233,9 +1439,57 @@ function LocationField({
           style={[INPUT_TEXT, { paddingVertical: 12 }]}
         />
       </View>
-      {value?.cc && isForeignCc(value.cc) && (
-        <View className="mt-1.5 flex-row">
-          <Badge label="Cross-border" tone="warning" />
+      {/* Two ways in besides typing: the map, and raw coordinates. */}
+      <View className="mt-1.5 flex-row items-center gap-3">
+        {onPickOnMap && (
+          <Pressable onPress={onPickOnMap} hitSlop={8} accessibilityRole="button" className="active:opacity-60">
+            <Mono className="text-micro tracking-wide uppercase text-accent">Set on map</Mono>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={() => {
+            setCoordError(null);
+            setCoordMode((m) => !m);
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          className="active:opacity-60"
+        >
+          <Mono className="text-micro tracking-wide uppercase text-faint">
+            {coordMode ? 'Search instead' : 'Coordinates'}
+          </Mono>
+        </Pressable>
+        {value?.cc && isForeignCc(value.cc) ? (
+          <View className="ml-auto">
+            <Badge label="Cross-border" tone="warning" />
+          </View>
+        ) : null}
+      </View>
+
+      {coordMode && (
+        <View className="mt-2 gap-2 rounded-xs border border-line bg-surface p-3">
+          <TextField
+            label="Latitude, longitude"
+            placeholder="-33.9249, 18.4241"
+            value={coordText}
+            onChangeText={(t) => {
+              setCoordText(t);
+              setCoordError(null);
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            error={coordError ?? undefined}
+          />
+          <View className="flex-row gap-2.5">
+            {coordError?.startsWith('That looks like longitude') && (
+              <View className="flex-1">
+                <Button label="Swap" variant="secondary" onPress={() => applyCoords(true)} fullWidth />
+              </View>
+            )}
+            <View className="flex-[1.4]">
+              <Button label="Use these" icon="check" loading={coordBusy} onPress={() => applyCoords()} fullWidth />
+            </View>
+          </View>
         </View>
       )}
       {focused && results.length > 0 && (

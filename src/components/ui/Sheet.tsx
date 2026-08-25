@@ -1,9 +1,8 @@
 import { type ReactNode, useLayoutEffect, useCallback, useEffect, useRef, useState } from 'react';
-import { View, ScrollView, Pressable, RefreshControl } from 'react-native';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { View, Pressable, RefreshControl } from 'react-native';
+import { KeyboardAwareScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useKeyboardOverlap } from '@/hooks/useKeyboardOverlap';
 import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { AmbientGlow } from './layout';
@@ -58,14 +57,7 @@ export function SheetScreen({
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { colors } = useTheme();
-  const keyboardOverlap = useKeyboardOverlap();
   const [footerHeight, setFooterHeight] = useState(0);
-  // Timed rather than a bare style change so the footer rides up with the
-  // keyboard instead of snapping ahead of it.
-  const footerLift = useAnimatedStyle(
-    () => ({ transform: [{ translateY: withTiming(-keyboardOverlap, { duration: 250 }) }] }),
-    [keyboardOverlap],
-  );
 
   /**
    * The header callbacks, held in refs.
@@ -117,7 +109,7 @@ export function SheetScreen({
         >
           <Mono
             numberOfLines={1}
-            className="px-1 text-micro tracking-wide uppercase text-accent"
+            className="px-1 text-micro uppercase tracking-wide text-accent"
             style={{ fontWeight: '600' }}
           >
             {actionLabel}
@@ -161,22 +153,25 @@ export function SheetScreen({
   return (
     <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{
           paddingHorizontal: 16,
           // Breathing room below the header so content never butts against it.
           paddingTop: variant === 'modal' ? 16 : 12,
-          // While the footer is raised it sits over the bottom of the content,
-          // so reserve its height as well or the last field hides behind it.
-          paddingBottom: insets.bottom + 24 + (keyboardOverlap > 0 ? footerHeight : 0),
+          // Resting (keyboard-closed) reservation for the footer. The keyboard-open
+          // case is handled by bottomOffset below instead — that's the one that
+          // needs to know the footer height, not this baseline.
+          paddingBottom: insets.bottom + 24,
         }}
         keyboardShouldPersistTaps="handled"
-        // Swipe down over the keyboard to dismiss it, and let iOS inset the
-        // content so a focused field lower down still scrolls into view.
+        // Swipe down over the keyboard to dismiss it.
         keyboardDismissMode="interactive"
-        automaticallyAdjustKeyboardInsets
+        // Reserves this much extra space above the keyboard when scrolling a
+        // focused field into view, so it clears the sticky footer instead of
+        // landing directly above the keyboard and behind the footer.
+        bottomOffset={footerHeight}
         showsVerticalScrollIndicator={false}
         refreshControl={
           onRefresh ? (
@@ -190,29 +185,30 @@ export function SheetScreen({
       >
         {eyebrow && <Label className="mb-3 mt-1">{eyebrow}</Label>}
         {children}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
-      {/* Lifts clear of the keyboard. Without this the submit button sits behind
-          it on every create/edit screen, which is what made Add Expense look
-          like it had no way to save.
-          A transform, NOT a margin: a margin would shrink the ScrollView, and
-          automaticallyAdjustKeyboardInsets computes its inset from the frame it
-          had when the keyboard appeared — so the two together would reserve the
-          keyboard height twice and leave a blank screen-height gap below the
-          content. A transform keeps the layout, so the inset stays right. */}
+      {/* Sticks to the top of the keyboard on both platforms. Without this the
+          submit button sits behind it on every create/edit screen, which is
+          what made Add Expense look like it had no way to save. */}
       {footer && (
-        <Animated.View
-          style={footerLift}
+        <KeyboardStickyView
+          // `insets.bottom + 8` below is only needed to clear the home
+          // indicator while the keyboard is closed — once it's open the
+          // keyboard already covers that area, so this offset eats the same
+          // amount back on the way up. It's driven by the same shared
+          // progress value as the sticky transform itself, so it animates in
+          // lockstep with no separate render/clock — unlike swapping the
+          // padding via state, which would snap instead of animate.
+          offset={{ opened: insets.bottom + 8 - 10 }}
           onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}
         >
           <View
             className="border-t border-line bg-bg-deep px-4 pt-3"
-            // The home-indicator gap is only wasted space while the keyboard is up.
-            style={{ paddingBottom: keyboardOverlap > 0 ? 10 : insets.bottom + 8 }}
+            style={{ paddingBottom: insets.bottom + 8 }}
           >
             {footer}
           </View>
-        </Animated.View>
+        </KeyboardStickyView>
       )}
     </View>
   );

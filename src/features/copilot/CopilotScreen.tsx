@@ -1,12 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import {
-  View,
-  TextInput,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-} from 'react-native';
+import { View, TextInput, Pressable, ActivityIndicator } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHeaderHeight } from '@react-navigation/elements';
 import { useNavigation } from '@react-navigation/native';
@@ -351,7 +345,7 @@ export function CopilotScreen({ navigation }: Props) {
       <AmbientGlow />
       <KeyboardAvoidingView
         className="flex-1"
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
         keyboardVerticalOffset={headerHeight}
       >
         <MessageList
@@ -362,7 +356,10 @@ export function CopilotScreen({ navigation }: Props) {
             ) : aiAvailable === false ? (
               <View className="mb-2 flex-row items-center gap-1.5">
                 <Icon name="alert" size={12} color={statusHues.warning} />
-                <Mono className="text-micro tracking-wide uppercase" style={{ color: statusHues.warning }}>
+                <Mono
+                  className="text-micro uppercase tracking-wide"
+                  style={{ color: statusHues.warning }}
+                >
                   Rules engine
                 </Mono>
               </View>

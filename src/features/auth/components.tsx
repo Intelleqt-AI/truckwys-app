@@ -4,11 +4,10 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   type TextInputProps,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Txt, Icon, KeyboardDoneBar, INPUT_TEXT } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -23,10 +22,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 /** Centred, keyboard-aware, scrollable-on-small-screens body. */
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      className="flex-1"
-    >
+    <KeyboardAvoidingView behavior="padding" className="flex-1">
       <ScrollView
         contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24 }}
         keyboardShouldPersistTaps="handled"

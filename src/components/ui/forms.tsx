@@ -8,6 +8,7 @@ import {
   InputAccessoryView,
   type TextInputProps,
 } from 'react-native';
+import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { Txt, Mono, Label, FieldLabel, INPUT_TEXT } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -58,6 +59,7 @@ export function TextField({
   secureTextEntry,
   required,
   className = '',
+  bottomSheet,
   ...props
 }: TextInputProps & {
   label?: string;
@@ -72,6 +74,12 @@ export function TextField({
   /** Fixed decimal places for `numeric` — 2 for money. Omit to keep what was typed. */
   decimals?: number;
   className?: string;
+  /**
+   * Render as `BottomSheetTextInput` instead of RN's `TextInput` — required
+   * for a field living inside a `@gorhom/bottom-sheet` sheet, otherwise the
+   * sheet can't track focus to keep the field above the keyboard.
+   */
+  bottomSheet?: boolean;
 }) {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
@@ -109,6 +117,8 @@ export function TextField({
     props.onBlur?.(e);
   };
 
+  const Input = bottomSheet ? BottomSheetTextInput : TextInput;
+
   return (
     <View className={className}>
       <FieldLabel label={label} required={required} />
@@ -119,7 +129,7 @@ export function TextField({
       >
         {icon && <Icon name={icon} size={17} color={colors.faint} />}
         {prefix && <Mono className="text-body text-muted">{prefix}</Mono>}
-        <TextInput
+        <Input
           className="flex-1 text-fg"
           placeholderTextColor={colors.faint}
           secureTextEntry={hidden}

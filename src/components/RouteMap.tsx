@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path, Circle, G, Text as SvgText } from 'react-native-svg';
 import { Mono } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { decimate, MAX_ROUTE_POINTS, type GeoPoint } from '@/lib/routeGeometry';
+import { MAPTILER_KEY } from '@/lib/mapNative';
 import { status as statusHues } from '@/theme/tokens';
 
 // Static route map: OpenStreetMap raster tiles under an SVG polyline.
@@ -30,7 +31,6 @@ const MAX_ZOOM = 12;
 // Roughly the centroid of South Africa — the same view the web map opens on.
 const SA_CENTRE = { lat: -28.48, lon: 24.67 };
 
-const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY ?? '';
 const OSM_TILE = (z: number, x: number, y: number) =>
   `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${MAPTILER_KEY}`;
 
@@ -64,6 +64,7 @@ export function RouteMap({
   geometry,
   pickup,
   delivery,
+  stops,
   height = 190,
   width: widthProp,
   bottomInset = 0,
@@ -71,6 +72,8 @@ export function RouteMap({
   geometry?: GeoPoint[];
   pickup?: GeoPoint | null;
   delivery?: GeoPoint | null;
+  /** Intermediate points, in visit order, between pickup and delivery. */
+  stops?: GeoPoint[];
   height?: number;
   /** Explicit width. Defaults to the screen minus the 16px card gutters. */
   width?: number;
@@ -92,7 +95,7 @@ export function RouteMap({
     // Prefer the real route; fall back to just the endpoints (drawn dashed, as
     // web does when it has coords but no geometry yet).
     const hasRoute = !!geometry && geometry.length > 1;
-    const endpoints = [pickup, delivery].filter(Boolean) as GeoPoint[];
+    const endpoints = [pickup, ...(stops ?? []), delivery].filter(Boolean) as GeoPoint[];
     const source = hasRoute ? geometry! : endpoints;
     if (width <= 0) return null;
 
@@ -159,8 +162,12 @@ export function RouteMap({
       empty,
       start: empty ? undefined : local[0],
       end: !empty && local.length > 1 ? local[local.length - 1] : undefined,
+      // Projected independently of `local` (which follows the route geometry,
+      // not the stop list) so stop numbers stay correct even when the route
+      // hasn't been recalculated yet.
+      stops: empty ? [] : (stops ?? []).map(toLocal),
     };
-  }, [geometry, pickup, delivery, width, height]);
+  }, [geometry, pickup, delivery, stops, width, height]);
 
   if (!view) return null;
 
@@ -210,6 +217,15 @@ export function RouteMap({
           {!view.empty && view.end && (
             <Circle cx={view.end.x} cy={view.end.y} r={5} fill={statusHues.danger} stroke="#fff" strokeWidth={2} />
           )}
+          {!view.empty &&
+            view.stops.map((p, i) => (
+              <G key={i}>
+                <Circle cx={p.x} cy={p.y} r={7} fill={statusHues.info} stroke="#fff" strokeWidth={2} />
+                <SvgText x={p.x} y={p.y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">
+                  {i + 1}
+                </SvgText>
+              </G>
+            ))}
         </Svg>
 
         {/* MapTiler's ToS and OSM's ODbL both require attribution, so full-bleed

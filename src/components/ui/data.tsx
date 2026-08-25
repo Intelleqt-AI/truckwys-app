@@ -1,5 +1,5 @@
-import { type ReactNode } from 'react';
-import { View, Pressable } from 'react-native';
+import { Fragment, type ReactNode } from 'react';
+import { View, Pressable, ActivityIndicator } from 'react-native';
 import { Txt, Mono, Label } from './Text';
 import { Card } from './primitives';
 import { Icon, type IconName } from './icons';
@@ -227,29 +227,52 @@ export function Timeline({
 const RAIL_LABEL_H = 14;
 const RAIL_ADDRESS_H = 22;
 const MARKER_COL = 16;
+// Every block after the first (each stop, and Drop-off) opens with mt-5 (20px)
+// before its own label box. So the dashed run between any two consecutive
+// marker boxes is always exactly "the rest of the previous block's address
+// line, then the next block's top margin" — a fixed height, not something to
+// flex-grow into. Using flex here previously required the connector's own
+// parent to have a resolved height, which broke as soon as a stop's dot+line
+// pair was wrapped in its own View (its height went auto instead of stretched,
+// so the connector collapsed to its 12px minHeight and every stop bunched up
+// near the top of the rail while its address text sat far below it).
+const CONNECTOR_H = RAIL_ADDRESS_H + 20;
 
 export function RoutePreview({
   origin,
   dest,
+  stops,
   distance,
   duration,
+  loading,
 }: {
   origin: string;
   dest: string;
+  /** Intermediate stops, in visit order, between origin and dest. */
+  stops?: string[];
   distance?: string;
   duration?: string;
+  /** A recalculation is in flight — shown as a small spinner over whatever
+      distance/duration is still on screen, so stale numbers don't read as final. */
+  loading?: boolean;
 }) {
   const { colors } = useTheme();
   return (
     <Card className="overflow-hidden p-4">
+      {loading && (
+        <View className="absolute right-3 top-3">
+          <ActivityIndicator size="small" color={colors.accent} />
+        </View>
+      )}
       <View className="flex-row gap-3">
         {/* Marker rail. Each marker sits in a box exactly the height of the
             label line box it belongs to, so it centres on that label whatever
-            the text scale does — the dot on "Pickup", the pin on "Drop-off".
-            The dashed connector is flex-1 and absorbs whatever is between, and
-            the trailing spacer accounts for the address line under Drop-off.
-            This used to be a hardcoded 4px-pad / 10 / 34 / 16 pixel stack with
-            no relationship to the text, which left the dot 2px low and the pin
+            the text scale does — the dot on "Pickup", the pin on "Drop-off",
+            a numbered dot per stop. Every gap between markers is CONNECTOR_H,
+            a fixed height rather than flex-grow (see its definition), and the
+            trailing spacer accounts for the address line under Drop-off. This
+            used to be a hardcoded 4px-pad / 10 / 34 / 16 pixel stack with no
+            relationship to the text, which left the dot 2px low and the pin
             7px out. */}
         <View className="items-center" style={{ width: MARKER_COL }}>
           <View style={{ height: RAIL_LABEL_H }} className="justify-center">
@@ -257,11 +280,31 @@ export function RoutePreview({
               style={{ width: 10, height: 10, borderRadius: 10, backgroundColor: colors.accent }}
             />
           </View>
+          {(stops ?? []).map((_, i) => (
+            <Fragment key={i}>
+              <View
+                style={{
+                  width: 0,
+                  height: CONNECTOR_H,
+                  borderLeftWidth: 2,
+                  borderStyle: 'dashed',
+                  borderColor: colors.lineActive,
+                }}
+              />
+              <View style={{ height: RAIL_LABEL_H }} className="justify-center">
+                <View
+                  className="items-center justify-center"
+                  style={{ width: 14, height: 14, borderRadius: 14, backgroundColor: statusHues.info }}
+                >
+                  <Mono style={{ fontSize: 8, fontWeight: '700', color: '#fff' }}>{i + 1}</Mono>
+                </View>
+              </View>
+            </Fragment>
+          ))}
           <View
-            className="flex-1"
             style={{
               width: 0,
-              minHeight: 12,
+              height: CONNECTOR_H,
               borderLeftWidth: 2,
               borderStyle: 'dashed',
               borderColor: colors.lineActive,
@@ -281,6 +324,16 @@ export function RoutePreview({
               {origin}
             </Txt>
           </View>
+          {(stops ?? []).map((s, i) => (
+            <View key={i} className="mt-5">
+              <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
+                Stop {i + 1}
+              </Label>
+              <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>
+                {s}
+              </Txt>
+            </View>
+          ))}
           <View className="mt-5">
             <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
               Drop-off

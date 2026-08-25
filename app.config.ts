@@ -84,19 +84,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // appears and notifications are silently dropped.
     permissions: ['POST_NOTIFICATIONS'],
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? undefined,
-    config: {
-      // react-native-maps renders Google Maps on Android and needs its own key
-      // — the Firebase google-services file does not cover the Maps SDK. iOS
-      // uses Apple Maps, which needs no key. Set EXPO_PUBLIC_GOOGLE_MAPS_KEY in
-      // the EAS environment; without it the Android map renders blank.
-      googleMaps: { apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ?? '' },
-    },
   },
   plugins: [
     'expo-secure-store',
     'expo-font',
     'expo-audio',
     'expo-web-browser',
+    // Android's interactive map — MapLibre GL Native styled with MapTiler
+    // tiles, so no Google Maps key/billing account is needed. iOS keeps
+    // react-native-maps (Apple Maps, free) untouched.
+    '@maplibre/maplibre-react-native',
     // Injects NSPhotoLibraryUsageDescription's Android counterparts and the
     // picker's native config.
     [

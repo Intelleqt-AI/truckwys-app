@@ -1,6 +1,19 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, TextInput, Modal, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
-import BottomSheet, { BottomSheetFooter, BottomSheetScrollView, type BottomSheetFooterProps } from '@gorhom/bottom-sheet';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { View, Pressable, Modal, ActivityIndicator, useWindowDimensions } from 'react-native';
+// Gesture-handler's ScrollView, not react-native's — nested inside
+// BottomSheetScrollView's PanGestureHandler tree, a plain ScrollView loses
+// touch arbitration and never gets to claim a horizontal swipe (documented
+// gorhom/bottom-sheet gotcha for any scrollable nested in sheet content).
+import { ScrollView } from 'react-native-gesture-handler';
+import BottomSheet, {
+  BottomSheetFooter,
+  BottomSheetScrollView,
+  BottomSheetTextInput,
+  useBottomSheetInternal,
+  KEYBOARD_STATUS,
+  type BottomSheetFooterProps,
+} from '@gorhom/bottom-sheet';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
@@ -72,6 +85,12 @@ interface Loc {
   lat: number;
   lon: number;
   cc?: string;
+}
+
+interface StopEntry {
+  /** Client-side only — never sent anywhere, just a stable React key. */
+  id: string;
+  loc: Loc | null;
 }
 
 const FUEL_FALLBACK: Record<string, number> = {
@@ -159,6 +178,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [vehicleType, setVehicleType] = useState('');
   const [pickup, setPickup] = useState<Loc | null>(null);
   const [delivery, setDelivery] = useState<Loc | null>(null);
+  const [stops, setStops] = useState<StopEntry[]>([]);
+  const stopSeq = useRef(0);
   const [weight, setWeight] = useState(str(prefill?.weight));
   const [pickupDate, setPickupDate] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
@@ -235,6 +256,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [pinPlace, setPinPlace] = useState<{ label: string; cc: string } | null>(null);
   const [pinBusy, setPinBusy] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
+  // True as soon as the map has settled on a point at least once this pick
+  // session — independent of whether the address lookup for it has finished
+  // or even succeeded. Confirming only ever needs a coordinate; gating it on
+  // the geocode meant a spot with no resolvable address (a farm gate, a yard
+  // with no listed address) couldn't be confirmed at all, forcing the pin to
+  // be dragged toward wherever *did* resolve — i.e. the nearest named place,
+  // not the exact one being marked.
+  const [pinReady, setPinReady] = useState(false);
   const pinCentre = useRef<GeoPoint | null>(null);
   const pinReq = useRef(0);
   const pinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -244,6 +273,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setPinLabel(null);
     setPinPlace(null);
     setPinError(null);
+    setPinReady(false);
     // Get out of the way so the user can see what they're aiming at.
     sheetRef.current?.snapToIndex(0);
   }, []);
@@ -254,6 +284,32 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setPicking(null);
     setPinBusy(false);
     setPinError(null);
+    setPinReady(false);
+  }, []);
+
+  const removeStop = useCallback((id: string) => {
+    setStops((prev) => prev.filter((s) => s.id !== id));
+  }, []);
+
+  const updateStop = useCallback((id: string, loc: Loc) => {
+    setStops((prev) => prev.map((s) => (s.id === id ? { ...s, loc } : s)));
+  }, []);
+
+  // Simple index swap — no drag gesture, matches the up/down affordance in the UI.
+  const moveStop = useCallback((id: string, dir: -1 | 1) => {
+    setStops((prev) => {
+      const i = prev.findIndex((s) => s.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j]!, next[i]!];
+      return next;
+    });
+  }, []);
+
+  const addStop = useCallback(() => {
+    const id = `stop-${++stopSeq.current}`;
+    setStops((prev) => [...prev, { id, loc: null }]);
   }, []);
 
   /**
@@ -265,6 +321,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     (point: GeoPoint) => {
       if (!picking) return;
       pinCentre.current = point;
+      setPinReady(true);
       if (pinTimer.current) clearTimeout(pinTimer.current);
       setPinError(null);
       setPinBusy(true);
@@ -290,17 +347,31 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   const confirmPick = useCallback(() => {
     const centre = pinCentre.current;
-    if (!picking || !centre || !pinPlace) return;
-    const loc: Loc = { label: pinPlace.label, lat: centre.lat, lon: centre.lon, cc: pinPlace.cc || undefined };
+    if (!picking || !centre) return;
+    // The pin itself is always this exact coordinate. The address lookup only
+    // supplies a friendlier label for it — when it hasn't resolved (or can't,
+    // for a spot with no known nearby address), fall back to the coordinates
+    // themselves rather than blocking the confirm on a name existing at all.
+    const loc: Loc = {
+      label: pinPlace?.label ?? `${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}`,
+      lat: centre.lat,
+      lon: centre.lon,
+      cc: pinPlace?.cc || undefined,
+    };
     const wasPicking = picking;
+    // A stop pin never auto-advances to another field — just settles and
+    // reopens the sheet, unlike the pickup/dropoff chain below.
+    if (typeof wasPicking === 'object') {
+      updateStop(wasPicking.stop, loc);
+      endPick();
+      sheetRef.current?.snapToIndex(1);
+      return;
+    }
     if (wasPicking === 'pickup') setPickup(loc);
     else setDelivery(loc);
     endPick();
-    // Straight on to the other end when it's still empty — same as web.
-    const other = wasPicking === 'pickup' ? delivery : pickup;
-    if (!other) setTimeout(() => beginPick(wasPicking === 'pickup' ? 'dropoff' : 'pickup'), 250);
-    else sheetRef.current?.snapToIndex(1);
-  }, [picking, pinPlace, pickup, delivery, endPick, beginPick]);
+    sheetRef.current?.snapToIndex(1);
+  }, [picking, pinPlace, endPick, updateStop]);
 
   useEffect(
     () => () => {
@@ -416,6 +487,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           // Default only for an empty field. It used to also catch a failed
           // parse, so a comma weight estimated tolls for a 20-ton load.
           weight_kg: weightKg || 20000,
+          // Unresolved rows (no coords yet) are omitted rather than blocking
+          // the calc — same shape RouteCalculatorView already parses for web.
+          stops: stops.filter((s) => s.loc).map((s) => ({ lat: s.loc!.lat, lon: s.loc!.lon })),
         });
         if (id === routeReq.current && (res as { success?: boolean }).success !== false) {
           setRouteBlockedMessage('');
@@ -437,7 +511,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, vehicleType, weightKg]);
+  }, [ready, pickup, delivery, stops, vehicleType, weightKg]);
 
   const routes = useMemo(
     () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
@@ -848,12 +922,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const renderFooter = useCallback(
     (props: BottomSheetFooterProps) => (
       <BottomSheetFooter {...props} bottomInset={0}>
-        <View
-          className="border-t border-line bg-surface px-4 pt-3"
-          style={{ paddingBottom: insets.bottom + 10 }}
-        >
-          {actions}
-        </View>
+        <QuoteFooterBar insetsBottom={insets.bottom}>{actions}</QuoteFooterBar>
       </BottomSheetFooter>
     ),
     // actions closes over busy/ready/subscription, which is what should re-render it.
@@ -869,7 +938,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         geometry={asArray(pick(currentRoute, ['geometry'])) as GeoPoint[]}
         pickup={pickup ? { lat: pickup.lat, lon: pickup.lon } : null}
         delivery={delivery ? { lat: delivery.lat, lon: delivery.lon } : null}
-        bottomInset={picking ? 220 : sheetHeight}
+        stops={stops.filter((s) => s.loc).map((s) => ({ lat: s.loc!.lat, lon: s.loc!.lon }))}
+        // 0 while picking, not some peek height, so the route-framing math
+        // above the sheet still has room to work with. Coordinate accuracy no
+        // longer depends on this: MapCanvas resolves the picked point via
+        // coordinateForPoint/unproject at the crosshair's exact pixel, not
+        // off the reported region centre, so it's correct regardless of
+        // mapPadding.
+        bottomInset={picking ? 0 : sheetHeight}
         onCentreSettled={onCentreSettled}
         picking={!!picking}
         width={screenW}
@@ -893,18 +969,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         </Pressable>
       </View>
 
-      {picking && (
-        <CrosshairOverlay
-          target={picking}
-          address={pinLabel}
-          resolving={pinBusy}
-          error={pinError}
-          onConfirm={confirmPick}
-          onCancel={endPick}
-          bottomInset={insets.bottom + 8}
-        />
-      )}
-
       <BottomSheet
         ref={sheetRef}
         index={0}
@@ -915,7 +979,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         footerComponent={renderFooter}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
-        android_keyboardInputMode="adjustResize"
+        android_keyboardInputMode="adjustPan"
         backgroundStyle={{ backgroundColor: colors.surface, borderRadius: 2 }}
         handleIndicatorStyle={{ backgroundColor: colors.faint, width: 42 }}
         // Hidden rather than unmounted while picking, so the form keeps its state
@@ -954,6 +1018,36 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <SelectField label="Client" icon="user" placeholder="Select customer" options={customerOptions} value={customerId} onSelect={setCustomerId} />
         <SelectField label="Vehicle type" icon="truck" placeholder="Select vehicle type" options={vtypeOptions} value={vehicleType} onSelect={setVehicleType} />
         <LocationField label="Collection" value={pickup} onChange={setPickup} placeholder="Search origin" onPickOnMap={() => beginPick('pickup')} />
+
+        {/* Stops between Collection and Drop-off, in visit order — mirrors the
+            physical route rather than sitting off to the side of it. */}
+        {stops.map((stop, i) => (
+          <LocationField
+            key={stop.id}
+            label={`Stop ${i + 1}`}
+            value={stop.loc}
+            onChange={(l) => updateStop(stop.id, l)}
+            placeholder="Search stop"
+            onPickOnMap={() => beginPick({ stop: stop.id })}
+            headerRight={
+              <View className="flex-row items-center gap-3">
+                <Pressable onPress={() => moveStop(stop.id, -1)} disabled={i === 0} hitSlop={8}>
+                  <Icon name="chevronUp" size={16} color={i === 0 ? colors.faint : colors.muted} />
+                </Pressable>
+                <Pressable onPress={() => moveStop(stop.id, 1)} disabled={i === stops.length - 1} hitSlop={8}>
+                  <Icon name="chevronDown" size={16} color={i === stops.length - 1 ? colors.faint : colors.muted} />
+                </Pressable>
+                <Pressable onPress={() => removeStop(stop.id)} hitSlop={8} accessibilityLabel={`Remove stop ${i + 1}`}>
+                  <Icon name="x" size={16} color={colors.faint} />
+                </Pressable>
+              </View>
+            }
+          />
+        ))}
+        {pickup && delivery && (
+          <Button label="Add stop" icon="plus" variant="secondary" size="sm" onPress={addStop} />
+        )}
+
         <LocationField label="Drop-off" value={delivery} onChange={setDelivery} placeholder="Search destination" onPickOnMap={() => beginPick('dropoff')} />
 
         {/* Early heads-up the moment a picked location is outside SA, before the
@@ -992,8 +1086,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           error={weightInvalid ? 'Enter a number, e.g. 1,5' : undefined}
           value={weight}
           onChangeText={setWeight}
+          bottomSheet
         />
-        <TextField label="Cargo" placeholder="e.g. Steel coils" value={cargo} onChangeText={setCargo} />
+        <TextField
+          label="Cargo"
+          placeholder="e.g. Steel coils"
+          value={cargo}
+          onChangeText={setCargo}
+          bottomSheet
+        />
         <View className="flex-row gap-3">
           <View className="flex-1">
             <DateField label="Pickup date" required value={pickupDate} onChange={setPickupDate} />
@@ -1003,7 +1104,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           </View>
         </View>
         <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />
-        <TextField label="Notes" placeholder="Anything the client should see" value={notes} onChangeText={setNotes} multiline />
+        <TextField
+          label="Notes"
+          placeholder="Anything the client should see"
+          value={notes}
+          onChangeText={setNotes}
+          multiline
+          bottomSheet
+        />
       </View>
 
       {/* Route refused by company policy — replaces the whole estimate block,
@@ -1021,8 +1129,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           <RoutePreview
             origin={pickup!.label}
             dest={delivery!.label}
+            stops={stops.filter((s) => s.loc).map((s) => s.loc!.label)}
             distance={costs.distance ? `${Math.round(costs.chargeDistance)} km` : 'Calculating…'}
             duration={costs.duration ? formatDuration(costs.duration / 60) : undefined}
+            loading={routeBusy}
           />
 
           {/* Alternative routes */}
@@ -1233,13 +1343,32 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       setTollEdited(true);
                       setTollOverride(v);
                     }}
+                    bottomSheet
                   />
                 </View>
                 <View className="flex-1">
-                  <TextField label="Driver" prefix="R" placeholder="0" keyboardType="decimal-pad" numeric decimals={2} value={driverAllowance} onChangeText={setDriverAllowance} />
+                  <TextField
+                    label="Driver"
+                    prefix="R"
+                    placeholder="0"
+                    keyboardType="decimal-pad"
+                    numeric
+                    decimals={2}
+                    value={driverAllowance}
+                    onChangeText={setDriverAllowance}
+                    bottomSheet
+                  />
                 </View>
                 <View className="flex-1">
-                  <TextField label="Rate / km" prefix="R" placeholder="e.g. 25" keyboardType="decimal-pad" value={baseRatePerKm} onChangeText={setBaseRatePerKm} />
+                  <TextField
+                    label="Rate / km"
+                    prefix="R"
+                    placeholder="e.g. 25"
+                    keyboardType="decimal-pad"
+                    value={baseRatePerKm}
+                    onChangeText={setBaseRatePerKm}
+                    bottomSheet
+                  />
                 </View>
               </View>
             </>
@@ -1291,6 +1420,23 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       <WorkingOverlay visible={voiceBusy || nlBusy} title="Building your quote" />
         </BottomSheetScrollView>
       </BottomSheet>
+
+      {/* Painted after the sheet, not before — the sheet's footer/background
+          sit in this same bottom region and would otherwise cover (and steal
+          taps from) the Confirm/Cancel card, even while the sheet is faded
+          to opacity 0. */}
+      {picking && (
+        <CrosshairOverlay
+          target={picking}
+          address={pinLabel}
+          resolving={pinBusy}
+          error={pinError}
+          ready={pinReady}
+          onConfirm={confirmPick}
+          onCancel={endPick}
+          bottomInset={insets.bottom + 8}
+        />
+      )}
     </View>
   );
 }
@@ -1305,6 +1451,34 @@ const isForeignCc = (cc?: string) => {
 
 type LocSuggest = Loc & { foreign: boolean; country: string };
 
+// ── Sticky footer bar, shrinking its own bottom padding while the keyboard
+// is up ──────────────────────────────────────────────────────────────────────
+// `insetsBottom + 10` only exists to clear the home indicator while the
+// keyboard is closed. BottomSheetFooter already lifts this whole bar to sit
+// right on top of the keyboard once it's shown — so without shrinking this
+// same padding back down, it reappears as a dead gap between the buttons and
+// the keyboard instead of the home indicator it was meant for. Reads the
+// sheet's own keyboard state (rather than react-native-keyboard-controller)
+// so it can't drag in that library's Android adjustResize side effect, which
+// would fight the sheet's own android_keyboardInputMode="adjustPan" above.
+function QuoteFooterBar({ insetsBottom, children }: { insetsBottom: number; children: ReactNode }) {
+  const { animatedKeyboardState } = useBottomSheetInternal();
+  const restingPadding = insetsBottom + 10;
+  const style = useAnimatedStyle(() => {
+    const shown = animatedKeyboardState.value.status === KEYBOARD_STATUS.SHOWN;
+    return {
+      paddingBottom: withTiming(shown ? 10 : restingPadding, {
+        duration: animatedKeyboardState.value.duration,
+      }),
+    };
+  });
+  return (
+    <Animated.View className="border-t border-line bg-surface px-4 pt-3" style={style}>
+      {children}
+    </Animated.View>
+  );
+}
+
 // ── Location autocomplete with coordinates ──────────────────────────────────
 function LocationField({
   label,
@@ -1312,6 +1486,7 @@ function LocationField({
   onChange,
   placeholder,
   onPickOnMap,
+  headerRight,
 }: {
   label: string;
   value: Loc | null;
@@ -1319,6 +1494,8 @@ function LocationField({
   placeholder: string;
   /** Hands control to the map's crosshair. Omitted where there is no map. */
   onPickOnMap?: () => void;
+  /** Extra controls next to the label — used for a stop row's reorder/remove buttons. */
+  headerRight?: ReactNode;
 }) {
   const { colors } = useTheme();
   const [text, setText] = useState(value?.label ?? '');
@@ -1435,14 +1612,17 @@ function LocationField({
 
   return (
     <View>
-      <Label className="mb-1.5 text-muted">{label}</Label>
+      <View className="mb-1.5 flex-row items-center justify-between">
+        <Label className="text-muted">{label}</Label>
+        {headerRight}
+      </View>
       {/* Shell matches TextField/SelectField exactly — min height rather than a
           fixed one, padding on the input rather than a stretched height, and a
           17px icon. It used to be h-12 with a 16px pin, which read a notch low
           against the Client and Vehicle-type rows directly above it. */}
       <View className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}>
         <Icon name="pin" size={17} color={value ? colors.accent : colors.faint} />
-        <TextInput
+        <BottomSheetTextInput
           className="flex-1 text-fg"
           placeholder={placeholder}
           placeholderTextColor={colors.faint}
@@ -1498,6 +1678,7 @@ function LocationField({
             autoCapitalize="none"
             autoCorrect={false}
             error={coordError ?? undefined}
+            bottomSheet
           />
           <View className="flex-row gap-2.5">
             {coordError?.startsWith('That looks like longitude') && (

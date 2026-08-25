@@ -94,7 +94,12 @@ function VehiclesTab() {
     [data, filter, q],
   );
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load vehicles." />;
 
   const ready = data.filter((v) => ['AVAILABLE', 'IN_USE'].includes(v.status)).length;
@@ -163,7 +168,12 @@ function DriversTab() {
     [data, filter, q],
   );
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load drivers." />;
 
   return (
@@ -179,7 +189,9 @@ function DriversTab() {
             <StatCard label="Drivers" value={String(data.length)} />
             <StatCard
               label="On duty"
-              value={String(data.filter((d) => ['ACTIVE', 'ON_DUTY', 'IN_USE'].includes(d.status)).length)}
+              value={String(
+                data.filter((d) => ['ACTIVE', 'ON_DUTY', 'IN_USE'].includes(d.status)).length,
+              )}
             />
           </View>
           <View className="mb-3">
@@ -188,7 +200,9 @@ function DriversTab() {
           <FilterChips options={DRIVER_FILTERS} value={filter} onChange={setFilter} />
         </View>
       }
-      ListEmptyComponent={<EmptyState icon="users" title="No drivers" body="No drivers match this filter." />}
+      ListEmptyComponent={
+        <EmptyState icon="users" title="No drivers" body="No drivers match this filter." />
+      }
       renderItem={({ item }) => (
         <View className="mb-2.5 overflow-hidden rounded-xs border border-line bg-surface">
           <ListRow

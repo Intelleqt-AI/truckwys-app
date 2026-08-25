@@ -129,7 +129,7 @@ export function SectionLabel({
       <Label className="tracking-label">{children as string}</Label>
       {action && (
         <Pressable hitSlop={8} onPress={onAction} accessibilityRole="button">
-          <Mono className="text-micro tracking-label uppercase text-accent">{action}</Mono>
+          <Mono className="text-micro uppercase tracking-label text-accent">{action}</Mono>
         </Pressable>
       )}
     </View>
@@ -159,7 +159,7 @@ export function UnderlineTabs<T extends string>({
             className={`border-b-2 py-3 ${active ? 'border-accent' : 'border-transparent'}`}
           >
             <Mono
-              className={`text-caption tracking-wide uppercase ${
+              className={`text-caption uppercase tracking-wide ${
                 active ? 'font-semibold text-fg' : 'text-muted'
               }`}
             >
@@ -195,13 +195,15 @@ export function FilterChips<T extends string>({
             key={o.value}
             onPress={() => onChange(o.value)}
             accessibilityRole="button"
+
             accessibilityState={{ selected: active }}
             className={`min-h-[34px] justify-center rounded-xs border border-line px-3 ${
               active ? 'bg-accent' : 'bg-surface'
             }`}
           >
             <Mono
-              className={`text-micro tracking-wide uppercase ${
+              numberOfLines={1}
+              className={`text-micro uppercase tracking-wide ${
                 active ? 'text-on-accent' : 'text-muted'
               }`}
             >

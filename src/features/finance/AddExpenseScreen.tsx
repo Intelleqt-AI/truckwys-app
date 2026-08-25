@@ -44,9 +44,7 @@ export function AddExpenseScreen({ route, navigation }: Props) {
   const [litres, setLitres] = useState(asFieldValue(fuelMatch?.[1]));
   const [pricePerLitre, setPricePerLitre] = useState(asFieldValue(fuelMatch?.[2]));
   const [amount, setAmount] = useState(
-    pick(preview, ['amount']) != null
-      ? formatPlain(num(pick(preview, ['amount'])), 2)
-      : '',
+    pick(preview, ['amount']) != null ? formatPlain(num(pick(preview, ['amount'])), 2) : '',
   );
   const [amountError, setAmountError] = useState<string>();
   const [date, setDate] = useState(str(pick(preview, ['expense_date', 'date'])) || today());
@@ -70,7 +68,10 @@ export function AddExpenseScreen({ route, navigation }: Props) {
 
   const vehicleOptions = [
     { label: 'None', value: '' },
-    ...(vehicles ?? []).map((v) => ({ label: `${v.name}${v.plate ? ` · ${v.plate}` : ''}`, value: String(v.id) })),
+    ...(vehicles ?? []).map((v) => ({
+      label: `${v.name}${v.plate ? ` · ${v.plate}` : ''}`,
+      value: String(v.id),
+    })),
   ];
 
   const submit = async () => {
@@ -128,20 +129,50 @@ export function AddExpenseScreen({ route, navigation }: Props) {
       variant="modal"
       onBack={() => navigation.goBack()}
       footer={
-        <Button label={editing ? 'Save changes' : 'Add expense'} loading={busy} onPress={submit} fullWidth />
+        <Button
+          label={editing ? 'Save changes' : 'Add expense'}
+          loading={busy}
+          onPress={submit}
+          fullWidth
+        />
       }
     >
       <View className="gap-4">
-        <SelectField label="Category" icon="dollar" options={EXPENSE_CATEGORIES} value={category} onSelect={setCategory} />
-        <TextField label="Description" placeholder="What was this for?" value={description} onChangeText={setDescription} />
+        <SelectField
+          label="Category"
+          icon="dollar"
+          options={EXPENSE_CATEGORIES}
+          value={category}
+          onSelect={setCategory}
+        />
+        <TextField
+          label="Description"
+          placeholder="What was this for?"
+          value={description}
+          onChangeText={setDescription}
+        />
 
         {isFuel && (
           <View className="flex-row gap-3">
             <View className="flex-1">
-              <TextField label="Litres" placeholder="e.g. 350" keyboardType="decimal-pad" numeric value={litres} onChangeText={setLitres} />
+              <TextField
+                label="Litres"
+                placeholder="e.g. 350"
+                keyboardType="decimal-pad"
+                numeric
+                value={litres}
+                onChangeText={setLitres}
+              />
             </View>
             <View className="flex-1">
-              <TextField label="Price / litre" placeholder="e.g. 23,40" prefix="R" keyboardType="decimal-pad" value={pricePerLitre} onChangeText={setPricePerLitre} />
+              <TextField
+                label="Price / litre"
+                placeholder="e.g. 23,40"
+                prefix="R"
+                keyboardType="decimal-pad"
+                value={pricePerLitre}
+                onChangeText={setPricePerLitre}
+              />
             </View>
           </View>
         )}
@@ -164,10 +195,33 @@ export function AddExpenseScreen({ route, navigation }: Props) {
           editable={!autoAmount}
         />
         <DateField label="Date" value={date} onChange={setDate} />
-        <SelectField label="Vehicle" icon="truck" options={vehicleOptions} value={vehicle} onSelect={setVehicle} placeholder="None" />
-        <TextField label="Vendor" placeholder="e.g. Shell, BP" value={vendor} onChangeText={setVendor} />
-        <TextField label="Receipt #" placeholder="Optional" value={receipt} onChangeText={setReceipt} />
-        <TextField label="Notes" placeholder="Optional note" value={notes} onChangeText={setNotes} multiline />
+        <SelectField
+          label="Vehicle"
+          icon="truck"
+          options={vehicleOptions}
+          value={vehicle}
+          onSelect={setVehicle}
+          placeholder="None"
+        />
+        <TextField
+          label="Vendor"
+          placeholder="e.g. Shell, BP"
+          value={vendor}
+          onChangeText={setVendor}
+        />
+        <TextField
+          label="Receipt #"
+          placeholder="Optional"
+          value={receipt}
+          onChangeText={setReceipt}
+        />
+        <TextField
+          label="Notes"
+          placeholder="Optional note"
+          value={notes}
+          onChangeText={setNotes}
+          multiline
+        />
       </View>
     </SheetScreen>
   );

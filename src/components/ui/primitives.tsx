@@ -21,16 +21,8 @@ import { status as statusHues } from '@/theme/tokens';
 import { formatConfidence } from '@/lib/formatters';
 
 // ── Card: surface fill, hairline border, 2px radius, no shadow (dark) ──────
-export function Card({
-  className = '',
-  ...props
-}: ViewProps & { className?: string }) {
-  return (
-    <View
-      className={`rounded-xs border border-line bg-surface ${className}`}
-      {...props}
-    />
-  );
+export function Card({ className = '', ...props }: ViewProps & { className?: string }) {
+  return <View className={`rounded-xs border border-line bg-surface ${className}`} {...props} />;
 }
 
 // ── Button: primary / secondary / ghost / danger, uppercase mono label ─────
@@ -103,8 +95,13 @@ export function Button({
         <ActivityIndicator size="small" color={iconColor} />
       ) : (
         <>
-          {icon && <Icon name={icon} size={size === 'sm' ? 14 : 17} color={iconColor} strokeWidth={2.2} />}
-          <Mono className={`${size === 'sm' ? 'text-nano' : 'text-micro'} tracking-wide uppercase ${textColor[variant]}`}>
+          {icon && (
+            <Icon name={icon} size={size === 'sm' ? 14 : 17} color={iconColor} strokeWidth={2.2} />
+          )}
+          <Mono
+            numberOfLines={1}
+            className={`${size === 'sm' ? 'text-nano' : 'text-micro'} uppercase tracking-wide ${textColor[variant]}`}
+          >
             {label}
           </Mono>
         </>
@@ -186,7 +183,13 @@ export function Badge({
     >
       {dot && <View style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: t.fg }} />}
       <Mono
-        style={{ fontSize: 10, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase', color: t.fg }}
+        style={{
+          fontSize: 10,
+          fontWeight: '600',
+          letterSpacing: 0.5,
+          textTransform: 'uppercase',
+          color: t.fg,
+        }}
       >
         {label}
       </Mono>
@@ -241,13 +244,25 @@ export function LiveDot({ label }: { label?: string }) {
       false,
     );
   }, [opacity, scale]);
-  const ring = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }], opacity: opacity.value }));
+  const ring = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
 
   return (
     <View className="flex-row items-center gap-1.5">
       <View className="h-2 w-2 items-center justify-center">
         <Animated.View
-          style={[{ position: 'absolute', width: 8, height: 8, borderRadius: 8, backgroundColor: colors.accent }, ring]}
+          style={[
+            {
+              position: 'absolute',
+              width: 8,
+              height: 8,
+              borderRadius: 8,
+              backgroundColor: colors.accent,
+            },
+            ring,
+          ]}
         />
         <View style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: colors.accent }} />
       </View>
@@ -301,7 +316,11 @@ const STATUS_MAP: Record<string, { tone: BadgeTone; label: string }> = {
 };
 
 export const toneForStatus = (status?: string): Tone =>
-  STATUS_MAP[String(status ?? '').toUpperCase().replace(/[\s-]/g, '_')]?.tone ?? 'neutral';
+  STATUS_MAP[
+    String(status ?? '')
+      .toUpperCase()
+      .replace(/[\s-]/g, '_')
+  ]?.tone ?? 'neutral';
 
 // ── StatusPill: square chip with leading dot (design default) ───────────────
 export function StatusPill({
@@ -315,7 +334,9 @@ export function StatusPill({
   shape?: 'square' | 'pill';
   dot?: boolean;
 }) {
-  const key = String(status ?? '').toUpperCase().replace(/[\s-]/g, '_');
+  const key = String(status ?? '')
+    .toUpperCase()
+    .replace(/[\s-]/g, '_');
   const cfg = STATUS_MAP[key] ?? {
     tone: 'neutral' as BadgeTone,
     label: (status ?? '—').replace(/_/g, ' '),
@@ -338,7 +359,7 @@ export function PipelineBadge({ stage }: { stage: string }) {
   return (
     <View className="flex-row items-center gap-1.5 self-start">
       <View style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: hue }} />
-      <Mono className="text-micro tracking-label uppercase" style={{ color: hue }}>
+      <Mono className="text-micro uppercase tracking-label" style={{ color: hue }}>
         {stage.replace(/_/g, ' ')}
       </Mono>
     </View>
@@ -349,7 +370,11 @@ export function PipelineBadge({ stage }: { stage: string }) {
 export function ConfidenceTag({ value }: { value: number }) {
   const level = value >= 0.8 ? 'high' : value >= 0.6 ? 'medium' : 'low';
   const hue =
-    level === 'high' ? statusHues.success : level === 'medium' ? statusHues.warning : statusHues.danger;
+    level === 'high'
+      ? statusHues.success
+      : level === 'medium'
+        ? statusHues.warning
+        : statusHues.danger;
   return (
     <View className="flex-row items-center gap-1">
       <Icon name="gauge" size={12} color={hue} strokeWidth={2} />

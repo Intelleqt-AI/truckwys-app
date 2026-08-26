@@ -432,8 +432,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     >
       <View className="mb-4 flex-row flex-wrap items-center gap-2.5">
         <StatusPill status={status} />
-        {outcome === 'accepted' && <Badge label="✓ Won" tone="success" />}
-        {outcome === 'rejected' && <Badge label="✗ Lost" tone="danger" />}
+        {/* {outcome === 'accepted' && <Badge label="✓ Won" tone="success" />} */}
+        {/* {outcome === 'rejected' && <Badge label="✗ Lost" tone="danger" />} */}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
         {marginPct > 0 && (
           <Mono className="text-micro text-faint">Margin {formatPercent(marginPct)}</Mono>

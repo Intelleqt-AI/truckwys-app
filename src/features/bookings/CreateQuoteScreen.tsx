@@ -164,6 +164,12 @@ function plusDays(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 export function CreateQuoteScreen({ route, navigation }: Props) {
   const prefill = route.params?.prefill as Record<string, unknown> | undefined;
   const editId = route.params?.quoteId;
@@ -196,6 +202,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [weight, setWeight] = useState(str(prefill?.weight));
   const [pickupDate, setPickupDate] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
+  useEffect(() => {
+    if (pickupDate && deliveryDate && deliveryDate < pickupDate) setDeliveryDate('');
+  }, [pickupDate]);
   const [validUntil, setValidUntil] = useState(plusDays(7));
   const [cargo, setCargo] = useState(str(prefill?.cargo_description));
   const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ROUND_TRIP');
@@ -1127,13 +1136,30 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         />
         <View className="flex-row gap-3">
           <View className="flex-1">
-            <DateField label="Pickup date" required value={pickupDate} onChange={setPickupDate} />
+            <DateField
+              label="Pickup date"
+              required
+              value={pickupDate}
+              onChange={setPickupDate}
+              minimumDate={startOfToday()}
+            />
           </View>
           <View className="flex-1">
-            <DateField label="Delivery date" required value={deliveryDate} onChange={setDeliveryDate} />
+            <DateField
+              label="Delivery date"
+              required
+              value={deliveryDate}
+              onChange={setDeliveryDate}
+              minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
+            />
           </View>
         </View>
-        <DateField label="Valid until" value={validUntil} onChange={setValidUntil} />
+        <DateField
+          label="Valid until"
+          value={validUntil}
+          onChange={setValidUntil}
+          minimumDate={startOfToday()}
+        />
         <TextField
           label="Notes"
           placeholder="Anything the client should see"

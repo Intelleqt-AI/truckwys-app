@@ -48,6 +48,9 @@ import {
   TrendingUp,
   Share,
   Mic,
+  Mail,
+  EyeOff,
+  ExternalLink,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -104,6 +107,9 @@ export const icons = {
   download: Download,
   sparkle: Sparkles,
   trend: TrendingUp,
+  mail: Mail,
+  eyeOff: EyeOff,
+  externalLink: ExternalLink,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

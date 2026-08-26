@@ -1,17 +1,10 @@
 import { useState } from 'react';
 import { View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Screen, IconButton } from '@/components/ui';
-import {
-  AuthLayout,
-  AuthGroup,
-  AuthField,
-  AuthButton,
-  AuthError,
-  AuthHeading,
-} from '../components';
+import { AuthScreen, AuthTitle, SignInField, SignInButton, InlineError, useErrorShake } from '../authComponents';
 import { forgotSchema, type ForgotValues } from '../schemas';
 import { authApi } from '../api';
 import { toast } from '@/lib/toast';
@@ -24,63 +17,80 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'ForgotPassword'>;
 // code screen either way.
 export function ForgotPasswordScreen({ navigation }: Props) {
   const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const { shakeStyle, trigger: triggerShake } = useErrorShake();
+
   const { control, handleSubmit, formState } = useForm<ForgotValues>({
     resolver: zodResolver(forgotSchema),
     defaultValues: { email: '' },
+    mode: 'onBlur',
   });
 
   const onSubmit = async (values: ForgotValues) => {
     const email = values.email.trim();
+    setServerError(null);
     setSubmitting(true);
     try {
       await authApi.passwordReset(email);
       navigation.navigate('ResetPassword', { email });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not send reset code');
+      const message = e instanceof Error ? e.message : 'Could not send reset code';
+      setServerError(message);
+      toast.error(message);
+      triggerShake();
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Screen scroll={false} padded={false}>
-      <View className="px-2 pt-1">
-        <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
-      </View>
-      <AuthLayout>
-        <AuthHeading
+    <AuthScreen onBack={() => navigation.goBack()}>
+      <Animated.View entering={FadeInDown.delay(80).duration(400)}>
+        <AuthTitle
           title="Reset password"
           sub="Enter your account email and we'll send you a 6-digit reset code."
         />
+      </Animated.View>
 
-        <AuthGroup>
+      <Animated.View entering={FadeInDown.delay(160).duration(400)} style={{ marginTop: 24 }}>
+        <Animated.View style={shakeStyle}>
           <Controller
             control={control}
             name="email"
             render={({ field: { onChange, onBlur, value } }) => (
-              <AuthField
-                placeholder="Email"
-                accessibilityLabel="Email"
+              <SignInField
+                label="Email"
+                icon="mail"
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
+                error={formState.errors.email?.message}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
                 textContentType="emailAddress"
                 autoComplete="email"
                 returnKeyType="go"
-                onSubmitEditing={handleSubmit(onSubmit)}
-                last
+                onSubmitEditing={handleSubmit(onSubmit, triggerShake)}
               />
             )}
           />
-        </AuthGroup>
+        </Animated.View>
+      </Animated.View>
 
-        <AuthError message={formState.errors.email?.message} />
+      {!!serverError && (
+        <View className="mt-3">
+          <InlineError message={serverError} />
+        </View>
+      )}
 
-        <AuthButton label="Send reset code" onPress={handleSubmit(onSubmit)} loading={submitting} />
-      </AuthLayout>
-    </Screen>
+      <Animated.View entering={FadeInDown.delay(220).duration(400)} style={{ marginTop: 20 }}>
+        <SignInButton
+          label="Send reset code"
+          onPress={handleSubmit(onSubmit, triggerShake)}
+          loading={submitting}
+        />
+      </Animated.View>
+    </AuthScreen>
   );
 }

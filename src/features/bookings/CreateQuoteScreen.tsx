@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { View, Pressable, Modal, ActivityIndicator, useWindowDimensions } from 'react-native';
+import {
+  View,
+  Pressable,
+  Modal,
+  ActivityIndicator,
+  useWindowDimensions,
+  InteractionManager,
+} from 'react-native';
 // Gesture-handler's ScrollView, not react-native's — nested inside
 // BottomSheetScrollView's PanGestureHandler tree, a plain ScrollView loses
 // touch arbitration and never gets to claim a horizontal swipe (documented
@@ -895,8 +902,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       // Also refreshes this quote's own detail cache, which the old
       // quotes-only invalidation missed — reopening an edited quote showed
       // the pre-edit values.
-      invalidateFor(qc, 'quote');
+      //
+      // Deferred until after the pop transition finishes: invalidating
+      // immediately kicks off a background refetch of Home's ['overview']
+      // query (via DASHBOARD) at the same moment the native-stack pop
+      // animation starts, and Home's data landing mid-transition on Android
+      // could commit a corrupted layout (blank Total revenue card, collapsed
+      // gap above Fleet utilisation) that never repaints until the app is
+      // fully restarted.
       navigation.goBack();
+      InteractionManager.runAfterInteractions(() => invalidateFor(qc, 'quote'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save quote');
     } finally {

@@ -1,5 +1,5 @@
-import { useLayoutEffect } from 'react';
-import { View, Alert, Pressable } from 'react-native';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { View, Alert, Pressable, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
   Screen,
@@ -49,6 +49,13 @@ export function MoreScreen() {
   const navigation = useNavigation();
   const { colors } = useTheme();
   const role = useRole();
+  const [signingOut, setSigningOut] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Drop items this role can't reach, then any group left empty.
   const visibleSections = SECTIONS.map((group) =>
@@ -66,10 +73,22 @@ export function MoreScreen() {
 
   const go = (route: string) => nav.navigate(route as never);
 
+  const handleSignOut = async () => {
+    if (signingOut) return; // guard a double tap
+    setSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      // signOut flips status to 'guest', which unmounts this screen — only
+      // reset if we're somehow still mounted (i.e. signOut threw).
+      if (mountedRef.current) setSigningOut(false);
+    }
+  };
+
   const confirmLogout = () =>
     Alert.alert('Sign out', 'Sign out of Truckwys on this device?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
+      { text: 'Sign out', style: 'destructive', onPress: () => void handleSignOut() },
     ]);
 
   return (
@@ -90,9 +109,10 @@ export function MoreScreen() {
             <Pressable
               key={item.label}
               onPress={() => go(item.route)}
+              disabled={signingOut}
               className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
-                i === group.length - 1 ? '' : 'border-b border-line-row'
-              }`}
+                signingOut ? 'opacity-50' : ''
+              } ${i === group.length - 1 ? '' : 'border-b border-line-row'}`}
             >
               <Icon name={item.icon} size={19} color={colors.muted} />
               <Txt className="flex-1 text-body text-fg">{item.label}</Txt>
@@ -105,10 +125,22 @@ export function MoreScreen() {
       <Group>
         <Pressable
           onPress={confirmLogout}
-          className="min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover"
+          disabled={signingOut}
+          accessibilityState={{ disabled: signingOut, busy: signingOut }}
+          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 ${
+            signingOut ? 'opacity-50' : 'active:bg-surface-hover'
+          }`}
         >
-          <Icon name="logout" size={19} color="#FF4949" />
-          <Txt className="flex-1 text-body text-danger">Sign out</Txt>
+          <View className="w-[19px] items-center">
+            {signingOut ? (
+              <ActivityIndicator size="small" color="#FF4949" />
+            ) : (
+              <Icon name="logout" size={19} color="#FF4949" />
+            )}
+          </View>
+          <Txt className="flex-1 text-body text-danger">
+            {signingOut ? 'Signing out…' : 'Sign out'}
+          </Txt>
         </Pressable>
       </Group>
 

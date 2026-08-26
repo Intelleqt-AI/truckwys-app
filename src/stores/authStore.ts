@@ -12,6 +12,14 @@ import type { AuthUser } from '@/types/auth';
 
 type Status = 'loading' | 'authed' | 'guest';
 
+// Both network steps in signOut() are already best-effort (swallowed on
+// failure) — the local session clears either way. Cap the whole phase so a
+// dead connection can't leave the sign-out spinner running for up to two
+// stacked 30s axios timeouts; the user should reach Login promptly regardless.
+const SIGN_OUT_NETWORK_MS = 8000;
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 interface AuthState {
   status: Status;
   token: string | null;
@@ -61,16 +69,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signOut: async () => {
     // Drop the push registration FIRST, while the auth header is still valid —
     // otherwise this handset keeps receiving the previous user's notifications.
-    try {
-      await unregisterPush();
-    } catch {
-      // never block sign-out on it
-    }
-    try {
-      await authApi.logout();
-    } catch {
-      // revoking server-side is best-effort; always clear locally
-    }
+    // Both calls below are best-effort (already swallowed), so race the whole
+    // phase against a timeout — a slow/dead network still clears locally and
+    // lands the user on Login within SIGN_OUT_NETWORK_MS.
+    const networkPhase = (async () => {
+      try {
+        await unregisterPush();
+      } catch {
+        // never block sign-out on it
+      }
+      try {
+        await authApi.logout();
+      } catch {
+        // revoking server-side is best-effort; always clear locally
+      }
+    })();
+    await Promise.race([networkPhase, delay(SIGN_OUT_NETWORK_MS)]);
     setAuthToken(null);
     await storage.clear();
     // Wipe every cached server response. Without this the next user to sign in

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Pressable, Alert, Modal } from 'react-native';
+import { View, Pressable, Alert, Modal, ActivityIndicator } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as WebBrowser from 'expo-web-browser';
@@ -169,6 +169,32 @@ const DATE_FORMATS = [
   { label: 'YYYY-MM-DD', value: 'YYYY-MM-DD' },
 ];
 
+// Swaps the icon+label for a spinner+"Uploading" while an image upload is in
+// flight, then reverts — Button's own `loading` state just blanks to a bare
+// spinner, which reads as "did this button die?" for a multi-second upload.
+function UploadButton({
+  label,
+  icon,
+  uploading,
+  onPress,
+}: {
+  label: string;
+  icon: IconName;
+  uploading: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  if (uploading) {
+    return (
+      <View className="min-h-[48px] flex-row items-center justify-center gap-2 rounded-xs border border-line-active bg-surface px-4">
+        <ActivityIndicator size="small" color={colors.fg} />
+        <Mono className="text-micro uppercase tracking-wide text-fg">Uploading</Mono>
+      </View>
+    );
+  }
+  return <Button label={label} variant="secondary" icon={icon} onPress={onPress} />;
+}
+
 function ProfileSection() {
   const { data: me } = useMe();
   const user = useAuthStore((s) => s.user);
@@ -227,7 +253,12 @@ function ProfileSection() {
   };
 
   const pickAvatar = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
     if (res.canceled || !res.assets?.[0]) return;
     const a = res.assets[0];
     setBusy(true);
@@ -256,7 +287,7 @@ function ProfileSection() {
           uri={mediaUrl(avatar)}
           size={56}
         />
-        <Button label="Change photo" variant="secondary" icon="user" onPress={pickAvatar} />
+        <UploadButton label="Change photo" icon="user" uploading={busy} onPress={pickAvatar} />
       </View>
       <View className="flex-row gap-3">
         <View className="flex-1">
@@ -1217,9 +1248,15 @@ function CompanySection() {
   })();
 
   const uploadLogo = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
     if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
+    setBusy(true);
     try {
       const out = (await updateCompanyLogo({
         uri: asset.uri,
@@ -1232,6 +1269,8 @@ function CompanySection() {
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload logo');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1240,7 +1279,7 @@ function CompanySection() {
       <Label className="text-muted">Company logo</Label>
       <View className="flex-row items-center gap-3">
         <Avatar name={companyName} uri={mediaUrl(logoUrl)} size={56} />
-        <Button label="Upload logo" variant="secondary" icon="download" onPress={uploadLogo} />
+        <UploadButton label="Upload logo" icon="download" uploading={busy} onPress={uploadLogo} />
       </View>
 
       <Label className="mt-1 text-muted">Business information</Label>

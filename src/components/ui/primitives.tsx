@@ -208,11 +208,16 @@ export function Avatar({ name, size = 36, uri }: { name?: string; size?: number;
     .toUpperCase();
   if (uri) {
     return (
-      <Image
-        source={{ uri }}
-        style={{ width: size, height: size, borderRadius: size / 2 }}
-        contentFit="cover"
-      />
+      <View
+        className="overflow-hidden rounded-pill bg-line-active"
+        style={{ width: size, height: size }}
+      >
+        <Image
+          source={{ uri }}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          contentFit="cover"
+        />
+      </View>
     );
   }
   return (

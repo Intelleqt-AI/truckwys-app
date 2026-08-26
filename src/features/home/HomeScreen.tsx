@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, Pressable, Platform } from 'react-native';
 import { format } from 'date-fns';
+import * as Haptics from 'expo-haptics';
 import {
   Screen,
   AppHeader,
@@ -307,7 +308,15 @@ export function HomeScreen() {
           )}
         </View>
       </Screen>
-      <Fab onPress={() => createQuote()} />
+      {/* Long-press for the voice/AI entry point — undiscoverable alone, so
+          it's a second path onto the same screen, not the only one. */}
+      <Fab
+        onPress={() => createQuote()}
+        onLongPress={() => {
+          if (Platform.OS !== 'web') void Haptics.selectionAsync();
+          createQuote(true);
+        }}
+      />
     </View>
   );
 }

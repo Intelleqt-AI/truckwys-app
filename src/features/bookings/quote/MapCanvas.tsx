@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from 'react';
 import { Platform, View } from 'react-native';
 import { Mono } from '@/components/ui';
 import { RouteMap } from '@/components/RouteMap';
@@ -33,8 +33,14 @@ export interface MapCanvasProps {
  * static tile map in Expo Go, where neither native module is compiled in.
  * Callers never branch on which — the only visible difference is that
  * picking is unavailable on the static one, and it says so.
+ *
+ * Memoized (shallow prop compare) — this is a native MapView, and without a
+ * memo boundary it re-renders (and, worse, re-hands a fresh geometry array to
+ * the native Polyline) on every keystroke anywhere in the sheet above it.
+ * Callers must pass stable pickup/delivery/stops/geometry — see the
+ * useMemo'd map* values in CreateQuoteScreen.
  */
-export function MapCanvas({
+function MapCanvasImpl({
   geometry,
   pickup,
   delivery,
@@ -134,6 +140,8 @@ export function MapCanvas({
   );
 }
 
+export const MapCanvas = memo(MapCanvasImpl);
+
 type MapsModule = NonNullable<ReturnType<typeof getMapsLib>>;
 
 /**
@@ -169,9 +177,13 @@ const PIN_VIEWBOX_H = 34;
 /** Rendered pixel height of a marker of `size` (viewBox is 24 wide, 34 tall). */
 const pinHeight = (size: number) => size * (PIN_VIEWBOX_H / 24);
 /** iOS: shift the view up so its tip — not its centre — lands on the coordinate. */
-const pinCenterOffset = (size: number) => ({ x: 0, y: pinHeight(size) / 2 - (pinHeight(size) * PIN_TIP_Y) / PIN_VIEWBOX_H });
+const pinCenterOffset = (size: number) => ({
+  x: 0,
+  y: pinHeight(size) / 2 - (pinHeight(size) * PIN_TIP_Y) / PIN_VIEWBOX_H,
+});
 /** Android/MapLibre: bottom-anchor, then nudge down past the shadow padding below the tip. */
-const pinBottomGap = (size: number) => pinHeight(size) - (pinHeight(size) * PIN_TIP_Y) / PIN_VIEWBOX_H;
+const pinBottomGap = (size: number) =>
+  pinHeight(size) - (pinHeight(size) * PIN_TIP_Y) / PIN_VIEWBOX_H;
 
 function StopMarker({
   Marker,
@@ -231,6 +243,11 @@ function InteractiveMap({
   // every render regardless of whether the marker they gate is drawn.
   const pickupTracking = useSettledTracking(pickup?.lat ?? 0, pickup?.lon ?? 0);
   const deliveryTracking = useSettledTracking(delivery?.lat ?? 0, delivery?.lon ?? 0);
+  // Shared by the Polyline and fitToCoordinates below, so a route of up to
+  // MAX_ROUTE_POINTS points is converted once per route change instead of
+  // once per render — this used to run on every keystroke anywhere in the
+  // sheet above the map.
+  const latLngs = useMemo(() => route.map(toLatLng), [route]);
 
   // The region MapKit reports here is the centre of the area *inside*
   // mapPadding, not necessarily the view's true geometric centre — where the
@@ -269,12 +286,12 @@ function InteractiveMap({
     const edgePadding = { top: topInset + 64, right: 40, bottom: bottomInset + 24, left: 40 };
     if (route.length > 1) {
       // fitToCoordinates honours edgePadding, so it zooms as well as pans.
-      ref.current?.fitToCoordinates(route.map(toLatLng), { edgePadding, animated: true });
+      ref.current?.fitToCoordinates(latLngs, { edgePadding, animated: true });
     } else {
       // One point can't define a span for fitToCoordinates.
       ref.current?.animateToRegion(focus, 450);
     }
-  }, [focus, picking, bottomInset, topInset, route]);
+  }, [focus, picking, bottomInset, topInset, route, latLngs]);
 
   return (
     <View style={{ width, height }}>
@@ -296,7 +313,7 @@ function InteractiveMap({
         onRegionChangeComplete={handleRegionChangeComplete}
       >
         {route.length > 1 && (
-          <Polyline coordinates={route.map(toLatLng)} strokeWidth={4} strokeColor={accent} />
+          <Polyline coordinates={latLngs} strokeWidth={4} strokeColor={accent} />
         )}
         {/* Hidden while picking that end, so the crosshair is the only pin.
             Custom children rather than pinColor: the platform default is a
@@ -323,9 +340,7 @@ function InteractiveMap({
           </Marker>
         )}
         {!picking &&
-          (stops ?? []).map((s, i) => (
-            <StopMarker key={i} Marker={Marker} point={s} index={i} />
-          ))}
+          (stops ?? []).map((s, i) => <StopMarker key={i} Marker={Marker} point={s} index={i} />)}
       </MapView>
     </View>
   );

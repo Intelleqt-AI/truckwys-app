@@ -1,24 +1,29 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   View,
   Pressable,
-  Modal,
-  ActivityIndicator,
+  Platform,
   useWindowDimensions,
   InteractionManager,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from 'react-native';
-// Gesture-handler's ScrollView, not react-native's — nested inside
-// BottomSheetScrollView's PanGestureHandler tree, a plain ScrollView loses
-// touch arbitration and never gets to claim a horizontal swipe (documented
-// gorhom/bottom-sheet gotcha for any scrollable nested in sheet content).
-import { ScrollView } from 'react-native-gesture-handler';
+import * as Haptics from 'expo-haptics';
 import BottomSheet, {
   BottomSheetFooter,
   BottomSheetScrollView,
-  BottomSheetTextInput,
   useBottomSheetInternal,
   KEYBOARD_STATUS,
   type BottomSheetFooterProps,
+  type BottomSheetScrollViewMethods,
 } from '@gorhom/bottom-sheet';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,22 +31,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  Group,
-  DetailRow,
   RoutePreview,
-  ProfitCurve,
   SegmentedControl,
   SelectField,
   TextField,
   DateField,
-  Badge,
   Button,
   Icon,
   Txt,
-  Mono,
   Label,
   type CurvePoint,
-  INPUT_TEXT,
 } from '@/components/ui';
 import {
   useVehicleTypes,
@@ -63,112 +62,69 @@ import { useCustomers } from '@/features/customers/api';
 import type { GeoPoint } from '@/lib/routeGeometry';
 import { MapCanvas } from './quote/MapCanvas';
 import { CrosshairOverlay, type PickTarget } from './quote/CrosshairOverlay';
-import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
-import { VoiceQuoteBar } from './VoiceQuoteBar';
+import { reverseGeocode } from '@/lib/geocode';
 import { VoiceQuoteSheet } from './VoiceQuoteSheet';
-import { Skeleton, WorkingOverlay } from '@/components/feedback';
+import { WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
-import {
-  formatCurrency,
-  formatCurrencyCompact,
-  formatConfidence,
-  formatDuration,
-  formatPlain,
-  formatNumber,
-  formatPercent,
-  parseNum,
-} from '@/lib/formatters';
+import { formatDuration, formatPlain, parseNum } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import type { AppStackParamList } from '@/navigation/types';
+import {
+  type Loc,
+  type StopEntry,
+  type SectionId,
+  roundCoord,
+  extractCode,
+  isForeignCc,
+  plusDays,
+  startOfToday,
+  MAX_PLAUSIBLE_MARKUP_PCT,
+} from './quote/types';
+import { computeCosts } from './quote/costs';
+import { buildQuotePayload } from './quote/payload';
+import { LocationField } from './quote/LocationField';
+import { StopLocationRow } from './quote/StopLocationRow';
+import { NaturalLanguageBar, type NaturalLanguageBarHandle } from './quote/NaturalLanguageBar';
+import { QuoteSection } from './quote/QuoteSection';
+import {
+  QuoteJumpBar,
+  type QuoteJumpBarHandle,
+  type QuoteJumpBarSection,
+} from './quote/QuoteJumpBar';
+import { RouteOptionChips } from './quote/RouteOptionChips';
+import { AiRecommendationCard } from './quote/AiRecommendationCard';
+import { CostBreakdownCard } from './quote/CostBreakdownCard';
+import { CostOverrides } from './quote/CostOverrides';
+import { TollBreakdownModal } from './quote/TollBreakdownModal';
+import { QuoteSentOverlay } from './quote/QuoteSentOverlay';
+import { collectIssues, type QuoteIssue } from './quote/validation';
+import { QuoteFooterActions, type FooterStrip } from './quote/QuoteFooterActions';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
 
-interface Loc {
-  label: string;
-  lat: number;
-  lon: number;
-  cc?: string;
-}
-
-// Native map projections and pasted links can carry 15-17 significant digits
-// of floating-point noise. The backend's lat/lng columns are
-// DecimalField(max_digits=12, decimal_places=7), so anything unrounded blows
-// past max_digits and the save is rejected outright.
-const roundCoord = (n: number) => Number(n.toFixed(7));
-
-interface StopEntry {
-  /** Client-side only — never sent anywhere, just a stable React key. */
-  id: string;
-  loc: Loc | null;
-}
-
-const FUEL_FALLBACK: Record<string, number> = {
-  Flatbed: 32,
-  Tautliner: 33,
-  Refrigerated: 38,
-  Tanker: 35,
-  'Box Truck': 28,
-  'Danger Load': 34,
-};
-
-// Sanity bound on the optimiser's markup-over-cost. Freight does not price at
-// four times cost; a figure past this means the lane benchmark it was derived
-// from is junk (resolve_market_rate averages raw quote totals with no per-km
-// normalisation and no outlier trimming, so one bad row poisons a lane). Past
-// this point we stop presenting the optimiser's price as a recommendation.
-const MAX_PLAUSIBLE_MARKUP_PCT = 300;
-
-// Which company default price applies, keyed by the selected vehicle type's own
-// fuel_type. Company stores one default per fuel type, and fuel_price_per_litre
-// doubles as the Diesel one because it predates the other three.
+// The map sits behind the sheet, so it needs to know how much of itself is
+// covered — both to keep the route clear of it and to place the confirm card.
+// Two stops, and the upper one caps at 70% so the map always keeps ~30%. It
+// used to go to 94%, which left the map as a sliver and made the whole
+// map-first idea pointless. A middle stop made the drag feel indecisive.
 //
-// The mapping lives here rather than server-side because nothing in the backend
-// reads these fields — it still costs everything as diesel — so both clients
-// resolve it themselves and must agree.
-const FUEL_PRICE_FIELD_BY_TYPE: Record<string, string> = {
-  Diesel: 'fuel_price_per_litre',
-  Petrol: 'fuel_price_petrol',
-  Electric: 'fuel_price_electric',
-  Hybrid: 'fuel_price_hybrid',
-};
-
-// Heuristic 3-letter lane code (mirrors web extractCode).
+// keyboardBehavior lifts the sheet past this while a field is focused, which
+// has to stay — otherwise you type into an input under the keyboard. The floor
+// is a constraint on dragging, not on the keyboard.
 //
-// These codes are not cosmetic: analyzeQuote and benchmarkQuote key off them, and
-// an unrecognised address falls through to the first three letters of whatever
-// string arrives — which lands the quote in a junk lane, so the market rate
-// resolves to nothing and AI pricing silently drops to a cost anchor.
-//
-// The municipality names matter for exactly that reason. SA metros are named
-// after their municipality and both the geocoder and TomTom's suggestions return
-// that name, so a pin on Church Square used to arrive as "Tshwane" and score
-// "TSH" rather than PTA.
-function extractCode(s: string): string {
-  const t = s.toLowerCase();
-  if (/johannesburg|joburg|jhb|ekurhuleni/.test(t)) return 'JHB';
-  if (/cape town|cpt/.test(t)) return 'CPT';
-  if (/durban|dbn|dur|ethekwini/.test(t)) return 'DUR';
-  if (/port elizabeth|gqeberha|nelson mandela bay|pe/.test(t)) return 'PE';
-  if (/pretoria|pta|tshwane/.test(t)) return 'PTA';
-  if (/bloemfontein|bfn|mangaung/.test(t)) return 'BFN';
-  return s.trim().slice(0, 3).toUpperCase();
-}
+// Module-level rather than useMemo([]) — the values never change, so there's
+// no reason to spend two hooks re-confirming that every render.
+const SNAP_FRACTIONS = [0.36, 0.7] as const;
+const SNAP = SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`);
 
-function plusDays(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
+// Section order for the jump bar and for the scroll-position → active-chip
+// lookup below. Fixed, so it lives at module scope rather than being
+// recomputed per render.
+const SECTION_ORDER: SectionId[] = ['client', 'route', 'load', 'schedule', 'price'];
 
 export function CreateQuoteScreen({ route, navigation }: Props) {
   const prefill = route.params?.prefill as Record<string, unknown> | undefined;
@@ -210,7 +166,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ROUND_TRIP');
   const [notes, setNotes] = useState('');
   const [nlReply, setNlReply] = useState('');
-  const [nlText, setNlText] = useState('');
+  const nlBarRef = useRef<NaturalLanguageBarHandle>(null);
   const [nlBusy, setNlBusy] = useState(false);
   // Conversation state for the extraction endpoint — see submitNL.
   const [nlHistory, setNlHistory] = useState<AiChatTurn[]>([]);
@@ -227,6 +183,30 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [driverAllowance, setDriverAllowance] = useState('0');
   const [baseRatePerKm, setBaseRatePerKm] = useState('');
   const [serviceCharge, setServiceCharge] = useState(0);
+
+  // Unsaved-changes baseline (Phase 4) — null until captured (see the two
+  // effects below), so isDirty is false rather than a false positive during
+  // the window before either capture point is reached.
+  const baselineRef = useRef<string | null>(null);
+  const snapshotTuple = () =>
+    JSON.stringify([
+      customerId,
+      vehicleType,
+      pickup?.label,
+      delivery?.label,
+      stops.length,
+      weight,
+      cargo,
+      notes,
+      pickupDate,
+      deliveryDate,
+      validUntil,
+      tripType,
+      tollEdited,
+      driverAllowance,
+      baseRatePerKm,
+      serviceCharge,
+    ]);
 
   // Every typed number goes through parseNum once, here, and the rest of the
   // screen reads these. Number() was used inline in eight places and is NaN for
@@ -250,26 +230,38 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [aiBusy, setAiBusy] = useState(false);
   const [tollModal, setTollModal] = useState(false);
   const [busy, setBusy] = useState<'draft' | 'send' | null>(null);
+  // Validation surfacing (Phase 3): never on first paint, Weight shows its
+  // error once the user leaves it, everything else waits for a Send attempt
+  // — and then stays visible (never reset) so it clears live as fields fill.
+  const [weightTouched, setWeightTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  // Send/save confirmation (Phase 4) — replaces the old instant goBack(); see
+  // save() below and QuoteSentOverlay's render near the end of this file.
+  const [sentOverlay, setSentOverlay] = useState<{
+    kind: 'draft' | 'send';
+    emailSent: boolean;
+    total: number;
+    clientName: string;
+    id: string | number;
+  } | null>(null);
+  // True once a save has actually completed — the unsaved-changes guard
+  // (below) reads this so dismissing the confirmation overlay doesn't itself
+  // trigger a "discard this quote?" prompt.
+  const completedRef = useRef(false);
   const savedId = useRef<string | number | null>(null);
   const routeReq = useRef(0);
   const aiReq = useRef(0);
+  // Lane the last benchmark fetch was for ("origin|destination|vehicleType").
+  // Guards benchmarkQuote below so a keystroke in Tolls/Driver/Rate — which
+  // re-fires the AI effect via costs, but changes none of the three benchmark
+  // args — doesn't cost a wasted /benchmark/ round-trip.
+  const benchKey = useRef('');
 
   // ── Map-first shell ──────────────────────────────────────────────────────
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
   const { colors } = useTheme();
   const sheetRef = useRef<BottomSheet>(null);
-  // The map sits behind the sheet, so it needs to know how much of itself is
-  // covered — both to keep the route clear of it and to place the confirm card.
-  // Two stops, and the upper one caps at 70% so the map always keeps ~30%. It
-  // used to go to 94%, which left the map as a sliver and made the whole
-  // map-first idea pointless. A middle stop made the drag feel indecisive.
-  //
-  // keyboardBehavior lifts the sheet past this while a field is focused, which
-  // has to stay — otherwise you type into an input under the keyboard. The floor
-  // is a constraint on dragging, not on the keyboard.
-  const SNAP_FRACTIONS = useMemo(() => [0.36, 0.7], []);
-  const SNAP = useMemo(() => SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`), [SNAP_FRACTIONS]);
   const [snapIndex, setSnapIndex] = useState(0);
   const sheetHeight = screenH * (SNAP_FRACTIONS[Math.max(0, snapIndex)] ?? SNAP_FRACTIONS[0]!);
 
@@ -407,6 +399,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
+  // route.params.ai (Phase 4) — declared in navigation/types.ts and passed by
+  // useAppNavigation().createQuote(true), but never read until now. Written
+  // by the Bookings/Home Fab's onLongPress.
+  useEffect(() => {
+    if (route.params?.ai !== true || editing) return;
+    // One-shot: without clearing it, a remount (or restored nav state)
+    // re-presents the recorder on top of a half-typed form.
+    navigation.setParams({ ai: undefined });
+    sheetRef.current?.snapToIndex(1);
+    const t = setTimeout(() => setVoiceOpen(true), 350); // let the sheet settle first
+    return () => clearTimeout(t);
+  }, [route.params?.ai, editing, navigation]);
+
   // Prefill R/km from the company default only if one is configured — no
   // hard-coded fallback (leave blank so the field isn't pre-filled with a
   // made-up rate). Deferred to avoid sync setState in effect.
@@ -426,11 +431,31 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   }, [company, editing]);
 
+  // Unsaved-changes baseline, fresh-quote case (Phase 4) — captured once,
+  // after the base-rate prefill above has had its own deferred setTimeout(0)
+  // a chance to settle. Without waiting for it, the default R/km landing a
+  // moment later would make every fresh quote register as dirty from the
+  // instant it opens.
+  useEffect(() => {
+    if (editing || baselineRef.current != null || company == null) return;
+    const t = setTimeout(() => {
+      baselineRef.current = snapshotTuple();
+    }, 0);
+    return () => clearTimeout(t);
+    // snapshotTuple intentionally excluded — it's a plain function recreated
+    // every render, and this effect must only fire once, on editing/company,
+    // not on every keystroke that would give it a new identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, company]);
+
   // Cross-border is a company policy, not a per-quote choice (web moved it to
   // Settings → Company Details). The form only reacts to it: an early warning
   // when a picked location is foreign, and a hard block once /route/calculate/
   // refuses the route.
-  const allowCrossBorder = pick(company ?? {}, ['allow_cross_border']) !== false;
+  const allowCrossBorder = useMemo(
+    () => pick(company ?? {}, ['allow_cross_border']) !== false,
+    [company],
+  );
 
   // Hydrate from an existing quote (edit mode).
   useEffect(() => {
@@ -474,6 +499,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }, 0);
     return () => clearTimeout(t);
   }, [editing, hydrated, existing, editId]);
+
+  // Unsaved-changes baseline, edit-mode case (Phase 4) — captured the render
+  // right after hydration writes every field above, so opening an existing
+  // quote to look at it isn't itself "dirty."
+  useEffect(() => {
+    if (!editing || !hydrated || baselineRef.current != null) return;
+    baselineRef.current = snapshotTuple();
+    // snapshotTuple intentionally excluded — same reasoning as the
+    // fresh-quote baseline effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, hydrated]);
 
   const customerOptions = useMemo(
     () => (customers ?? []).map((c) => ({ label: c.name, value: String(c.id) })),
@@ -543,70 +579,44 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     () => (routes[selectedRouteIndex] ?? routes[0] ?? {}) as Record<string, unknown>,
     [routes, selectedRouteIndex],
   );
+  // The response's own pick — RouteOptionChips' RECOMMENDED tag (Phase 5).
+  const bestIndex = num(pick(routeData ?? {}, ['best_index']));
 
   // ── Cost breakdown ──────────────────────────────────────────────────────
-  const costs = useMemo(() => {
-    const distance = num(pick(currentRoute, ['distance_km'])) || num(pick(routeData ?? {}, ['distance_km']));
-    const legs = tripType === 'ROUND_TRIP' ? 2 : 1;
-    const chargeDistance = distance * legs;
-    const surchargePctBase = num(pick(company ?? {}, ['weight_surcharge_pct'])) || 15;
-
-    const selectedVt = (vtypes ?? []).find((v) => v.name === vehicleType);
-    const consumption =
-      selectedVt?.fuel_consumption_l_per_100km ?? FUEL_FALLBACK[vehicleType] ?? 32;
-    // Price the fuel this vehicle type actually burns, at the company's default
-    // for that fuel — it used to always use the live national DIESEL price no
-    // matter what was selected. Falls back to the diesel default when the
-    // company hasn't set a price for that fuel, then to a literal.
-    const fuelField = FUEL_PRICE_FIELD_BY_TYPE[str(selectedVt?.fuel_type, 'Diesel')] ?? 'fuel_price_per_litre';
-    const fuelPrice =
-      num(pick(company ?? {}, [fuelField])) || num(pick(company ?? {}, ['fuel_price_per_litre'])) || 21.7;
-    const fuelCost = Math.round((chargeDistance * consumption * fuelPrice) / 100);
-
-    const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
-    const routeTollOneWay = num(pick(currentRoute, ['toll_cost_zar'])) || num(pick(routeData ?? {}, ['toll_cost_zar'])) || distance * tollRate;
-    const tollCost = tollEdited ? tollOverrideNum : Math.round(routeTollOneWay * legs);
-    const tollBreakdown = (asArray(pick(currentRoute, ['toll_breakdown'])).length
-      ? asArray(pick(currentRoute, ['toll_breakdown']))
-      : asArray(pick(routeData ?? {}, ['toll_breakdown']))) as Record<string, unknown>[];
-
-    const add = (pick(routeData ?? {}, ['additional_costs']) ?? {}) as Record<string, unknown>;
-    const crossBorderCost = Math.round(
-      (num(pick(add, ['border_fees'])) + num(pick(add, ['weighbridge_fees'])) + num(pick(add, ['non_sa_tolls']))) * legs,
-    );
-
-    const threshold = num(pick(company ?? {}, ['weight_surcharge_threshold_kg'])) || 5000;
-    const baseCost = Math.round(chargeDistance * baseRateNum);
-    const weightSurcharge = weightKg > threshold ? Math.round((baseCost * surchargePctBase) / 100) : 0;
-    const driver = driverNum;
-
-    const total = baseCost + fuelCost + tollCost + crossBorderCost + driver + weightSurcharge + serviceCharge;
-    const directCost = total - serviceCharge;
-    const marginPct = total > 0 ? Math.round(((total - directCost) / total) * 100) : 0;
-    const duration = num(pick(currentRoute, ['duration_minutes'])) || num(pick(currentRoute, ['duration_min']));
-
-    return {
-      distance,
-      legs,
-      chargeDistance,
-      consumption,
-      fuelCost,
-      tollCost,
-      tollBreakdownOneWay: Math.round(routeTollOneWay),
-      tollBreakdown,
-      crossBorderCost,
-      baseCost,
-      weightSurcharge,
-      surchargePct: surchargePctBase,
-      driver,
-      total,
-      directCost,
-      marginPct,
-      duration,
-      fuelUsage: Math.round((chargeDistance * consumption) / 100),
-      fuelPrice,
-    };
-  }, [currentRoute, routeData, tripType, vtypes, vehicleType, company, weightKg, baseRateNum, tollEdited, tollOverrideNum, driverNum, serviceCharge]);
+  // computeCosts is the same computation as before, hoisted to quote/costs.ts
+  // (Phase 0 extraction) so it's a pure, testable function — this useMemo and
+  // its dep list are unchanged.
+  const costs = useMemo(
+    () =>
+      computeCosts({
+        currentRoute,
+        routeData,
+        tripType,
+        vtypes,
+        vehicleType,
+        company,
+        weightKg,
+        baseRateNum,
+        tollEdited,
+        tollOverrideNum,
+        driverNum,
+        serviceCharge,
+      }),
+    [
+      currentRoute,
+      routeData,
+      tripType,
+      vtypes,
+      vehicleType,
+      company,
+      weightKg,
+      baseRateNum,
+      tollEdited,
+      tollOverrideNum,
+      driverNum,
+      serviceCharge,
+    ],
+  );
 
   // Drop a stale analysis the moment a real cost input moves, so the card can't
   // go on showing numbers for a quote that no longer exists while the next
@@ -666,35 +676,71 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         setGuard(g);
         setAiBusy(false);
       }
-      benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType)
-        .then((b) => id === aiReq.current && setBenchmark(b))
-        .catch(() => null);
+      // Same lane (origin/destination/vehicle) as the last fetch → the
+      // benchmark can't have changed, so skip it. Without this, every Apply
+      // recommended and every keystroke in Tolls/Driver/Rate — none of which
+      // touch origin/destination/vehicleType — re-fired this network call.
+      const lane = `${extractCode(pickup.label)}|${extractCode(delivery.label)}|${vehicleType}`;
+      if (benchKey.current !== lane) {
+        benchKey.current = lane;
+        benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType)
+          .then((b) => id === aiReq.current && setBenchmark(b))
+          .catch(() => null);
+      }
     }, 700);
     return () => clearTimeout(t);
-    // benchmark intentionally excluded (it's set inside this effect).
+    // benchmark intentionally excluded (it's set inside this effect). weight is
+    // also excluded — weightKg (inside costs.*) is the value that actually
+    // reaches the request; parseNum maps "20" and "20," to the same weightKg,
+    // so keeping weight here fired a byte-identical request on the comma alone.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeData, costs, pickup, delivery, vehicleType, weight, selectedRouteIndex]);
+  }, [
+    routeData,
+    costs.total,
+    costs.directCost,
+    costs.chargeDistance,
+    costs.fuelCost,
+    costs.tollCost,
+    costs.driver,
+    costs.fuelUsage,
+    costs.fuelPrice,
+    pickup,
+    delivery,
+    vehicleType,
+    weightKg,
+    selectedRouteIndex,
+  ]);
 
   const opt = useMemo(
     () => (pick(analysis ?? {}, ['price_optimization']) ?? {}) as Record<string, unknown>,
     [analysis],
   );
-  const winModel = (pick(modelStats ?? {}, ['win_model']) ?? {}) as Record<string, unknown>;
-  const aiLearning = str(pick(winModel, ['mode'])) === 'heuristic';
-  const outcomesLogged = num(pick(winModel, ['outcomes_collected']));
-  const outcomesNeeded = num(pick(winModel, ['outcomes_needed']));
-  // Guarded — a zero threshold would otherwise render a NaN-wide bar.
-  const learnPct = outcomesNeeded > 0 ? Math.min(100, Math.round((outcomesLogged / outcomesNeeded) * 100)) : 0;
+  const { aiLearning, outcomesLogged, outcomesNeeded, learnPct } = useMemo(() => {
+    const winModel = (pick(modelStats ?? {}, ['win_model']) ?? {}) as Record<string, unknown>;
+    const logged = num(pick(winModel, ['outcomes_collected']));
+    const needed = num(pick(winModel, ['outcomes_needed']));
+    return {
+      aiLearning: str(pick(winModel, ['mode'])) === 'heuristic',
+      outcomesLogged: logged,
+      outcomesNeeded: needed,
+      // Guarded — a zero threshold would otherwise render a NaN-wide bar.
+      learnPct: needed > 0 ? Math.min(100, Math.round((logged / needed) * 100)) : 0,
+    };
+  }, [modelStats]);
 
   const optPrice = pick(opt, ['optimal_price']) != null ? num(pick(opt, ['optimal_price'])) : null;
-  const backendSuggested = pick(analysis ?? {}, ['suggested_price']) != null ? num(pick(analysis ?? {}, ['suggested_price'])) : null;
+  const backendSuggested =
+    pick(analysis ?? {}, ['suggested_price']) != null
+      ? num(pick(analysis ?? {}, ['suggested_price']))
+      : null;
   // The optimiser's margin is a markup on COST, not a margin on revenue, and the
   // backend returns it unclamped (margin_optimizer.py:269). When the lane
   // benchmark is junk it comes back in the thousands of percent, which is how a
   // R64k job was recommended at R1.5M. Treat anything past this as "the
   // benchmark behind this is not trustworthy" and fall back to cost-based
   // pricing rather than showing the number.
-  const optMarkupPct = pick(opt, ['optimal_margin_pct']) != null ? num(pick(opt, ['optimal_margin_pct'])) : null;
+  const optMarkupPct =
+    pick(opt, ['optimal_margin_pct']) != null ? num(pick(opt, ['optimal_margin_pct'])) : null;
   const markupImplausible = optMarkupPct != null && optMarkupPct > MAX_PLAUSIBLE_MARKUP_PCT;
   // Cost-based fallback price, and the trained optimiser's price. One value
   // feeds both the number on screen and what Apply actually applies — they used
@@ -718,7 +764,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     () =>
       asArray(pick(opt, ['curve'])).map((c) => {
         const o = c as Record<string, unknown>;
-        const m = pick(o, ['margin_pct']) != null ? num(pick(o, ['margin_pct'])) : num(pick(o, ['margin'])) * 100;
+        const m =
+          pick(o, ['margin_pct']) != null
+            ? num(pick(o, ['margin_pct']))
+            : num(pick(o, ['margin'])) * 100;
         return { margin: Math.round(m), profit: Math.round(num(pick(o, ['expected_profit']))) };
       }),
     [opt],
@@ -727,13 +776,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const guardExplain = asArray<string>(pick(guard ?? {}, ['explanations']))[0] as unknown as string;
   const guardWarn = asArray<string>(pick(guard ?? {}, ['warnings']))[0] as unknown as string;
   const guardFix = asArray<string>(pick(guard ?? {}, ['suggestions']))[0] as unknown as string;
-  const guardMsg = guardExplain || guardWarn || guardFix || 'Margin is below your guardrail — review before sending.';
+  const guardMsg =
+    guardExplain ||
+    guardWarn ||
+    guardFix ||
+    'Margin is below your guardrail — review before sending.';
   // The suggestion is the actionable half ("increase price by ~R… to reach …%"),
   // and it was being dropped whenever an explanation existed.
   const guardHint = guardFix && guardFix !== guardMsg ? guardFix : null;
 
-  const submitNL = async (text?: string) => {
-    const message = (text ?? nlText).trim();
+  const submitNL = async (text: string) => {
+    const message = text.trim();
     if (!message || nlBusy) return;
     setNlBusy(true);
     try {
@@ -752,7 +805,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         valid_until: validUntil || undefined,
         trip_type: tripType,
       };
-      const res = await aiChatQuote(message, nlHistory, currentFields, pendingEntity, declinedEntities);
+      const res = await aiChatQuote(
+        message,
+        nlHistory,
+        currentFields,
+        pendingEntity,
+        declinedEntities,
+      );
 
       // Carry the entity conversation forward: without this the backend's
       // "that client doesn't exist — create it?" question can never be
@@ -798,9 +857,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             cc: str(pick(first, ['country_code'])) || undefined,
           });
       };
-      if (pick(ex, ['pickup_location'])) await geocode(str(pick(ex, ['pickup_location'])), setPickup);
-      if (pick(ex, ['delivery_location'])) await geocode(str(pick(ex, ['delivery_location'])), setDelivery);
-      setNlText('');
+      if (pick(ex, ['pickup_location']))
+        await geocode(str(pick(ex, ['pickup_location'])), setPickup);
+      if (pick(ex, ['delivery_location']))
+        await geocode(str(pick(ex, ['delivery_location'])), setDelivery);
+      nlBarRef.current?.setText('');
       const reply = str(pick(res, ['reply']));
       setNlReply(reply || 'Filled from your description.');
       toast.success();
@@ -823,7 +884,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         toast.error("Didn't catch that — try again");
         return;
       }
-      setNlText(text);
+      nlBarRef.current?.setText(text);
       await submitNL(text);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not transcribe audio');
@@ -843,40 +904,167 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // serviceCharge is only ever written by apply / this / the form reset, so it
   // is purely the AI markup — zeroing it drops the total back to true cost.
-  const useActualPrice = () => setServiceCharge(0);
+  //
+  // Named without a "use" prefix (it was "useActualPrice") — resetAllOverrides
+  // below calls it directly, and eslint's react-hooks/rules-of-hooks treats
+  // any called `useXxx` identifier as a hook regardless of what it actually
+  // is, which flagged this as a hook invoked from a plain function.
+  const resetPriceToActual = () => setServiceCharge(0);
 
-  const buildPayload = (status: 'DRAFT' | 'SENT') => ({
-    customer: Number(customerId),
-    pickup_location: pickup?.label,
-    delivery_location: delivery?.label,
-    pickup_date: pickupDate || null,
-    delivery_date: deliveryDate || null,
-    origin: extractCode(pickup?.label ?? ''),
-    destination: extractCode(delivery?.label ?? ''),
-    pickup_lat: pickup ? roundCoord(pickup.lat) : undefined,
-    pickup_lng: pickup ? roundCoord(pickup.lon) : undefined,
-    delivery_lat: delivery ? roundCoord(delivery.lat) : undefined,
-    delivery_lng: delivery ? roundCoord(delivery.lon) : undefined,
-    cargo_description: cargo || `${weight}t ${vehicleType}`,
-    weight: weightKg,
-    distance: costs.distance,
-    estimated_duration_minutes: costs.duration,
-    vehicle_type: vehicleType,
-    base_rate: costs.baseCost,
-    fuel_surcharge: costs.fuelCost,
-    toll_charges: costs.tollCost,
-    driver_allowance: costs.driver,
-    additional_charges: costs.weightSurcharge + costs.crossBorderCost + serviceCharge,
-    total_amount: costs.total,
-    margin_percentage: costs.marginPct,
-    notes,
-    status,
-    confidence: 'MEDIUM',
-    sla_hours: num(pick(company ?? {}, ['default_sla_hours'])) || 48,
-    valid_until: validUntil,
-    trip_type: tripType,
-    win_probability: winProb ? Math.round(winProb * 100) : null,
-  });
+  // ── Cost overrides: a way back to the calculated/default value (Phase 5) ──
+  // Same field the base-rate prefill effect reads — kept in sync with it so
+  // "Use default" always offers the same figure that effect would have.
+  const companyDefaultRate = num(pick(company ?? {}, ['default_base_rate_per_km']));
+  const overridden =
+    tollEdited ||
+    driverNum !== 0 ||
+    (companyDefaultRate > 0 && baseRatePerKm !== String(companyDefaultRate)) ||
+    serviceCharge !== 0;
+
+  const resetTollToCalculated = () => {
+    setTollEdited(false);
+    setTollOverride('');
+  };
+  const resetRateToDefault = () => setBaseRatePerKm(String(companyDefaultRate));
+  const resetAllOverrides = () => {
+    resetTollToCalculated();
+    setDriverAllowance('0');
+    if (companyDefaultRate > 0) setBaseRatePerKm(String(companyDefaultRate));
+    resetPriceToActual();
+  };
+
+  // ── Jump bar (Phase 2) ───────────────────────────────────────────────────
+  // Sticky chip bar above the scroll — a section's y offset is captured once
+  // by QuoteSection's onLayout and read back here, so jumping to it never
+  // depends on re-measuring anything. Declared before save()/the footer below
+  // (Phase 3) since onSend needs jumpTo's stable identity.
+  const scrollRef = useRef<BottomSheetScrollViewMethods>(null);
+  const jumpBarRef = useRef<QuoteJumpBarHandle>(null);
+  const sectionY = useRef<Partial<Record<SectionId, number>>>({});
+
+  const registerSectionY = useCallback((id: SectionId, y: number) => {
+    sectionY.current[id] = y;
+  }, []);
+
+  const jumpTo = useCallback((id: SectionId) => {
+    sheetRef.current?.snapToIndex(1);
+    const y = sectionY.current[id];
+    if (y != null) scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+  }, []);
+
+  // Highlights the jump bar's active chip from where the user has scrolled
+  // to. Deliberately not a continuous onScroll — this only needs to settle
+  // once the scroll stops, and going through the jump bar's own ref means a
+  // scroll never re-renders the form (see QuoteJumpBar's setActive).
+  const handleScrollSettled = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y + 24;
+    let bestId: SectionId = SECTION_ORDER[0]!;
+    for (const id of SECTION_ORDER) {
+      const sy = sectionY.current[id];
+      if (sy != null && sy <= y) bestId = id;
+    }
+    jumpBarRef.current?.setActive(bestId);
+  }, []);
+
+  // Single source of truth for what's blocking Save/Send (Phase 3) — exactly
+  // the conditions save() below enforces, just surfaced before the user taps
+  // rather than after. save() keeps its own guard clauses as a last line of
+  // defence; once this is wired they're unreachable in practice.
+  const issues = useMemo<QuoteIssue[]>(
+    () =>
+      collectIssues({
+        subscriptionBlocked: subscription.blocked,
+        subscriptionNotice: subscription.notice,
+        customerId,
+        routeBlockedMessage,
+        vehicleType,
+        pickup,
+        delivery,
+        weightInvalid,
+        weightKg,
+        pickupDate,
+        deliveryDate,
+      }),
+    [
+      subscription.blocked,
+      subscription.notice,
+      customerId,
+      routeBlockedMessage,
+      vehicleType,
+      pickup,
+      delivery,
+      weightInvalid,
+      weightKg,
+      pickupDate,
+      deliveryDate,
+    ],
+  );
+  // Read by the []-stable onSend further down, so tapping Send always sees
+  // the latest issues without onSend's own identity ever changing — same
+  // saveRef-style indirection as save() below.
+  const issuesRef = useRef(issues);
+  issuesRef.current = issues;
+
+  const issueFor = (field: QuoteIssue['field']) => issues.find((i) => i.field === field);
+  const showIssue = (field: QuoteIssue['field'], touched: boolean) =>
+    touched || submitAttempted ? issueFor(field)?.message : undefined;
+
+  const jumpSections = useMemo<QuoteJumpBarSection[]>(() => {
+    // Only after a Send attempt (see submitAttempted's tier-3 rule) — a
+    // blank Route section on a fresh quote isn't an "issue", it just hasn't
+    // been filled in yet.
+    const issueSections = submitAttempted
+      ? new Set(
+          issues.filter((i) => i.blocks === 'both' || i.blocks === 'send').map((i) => i.section),
+        )
+      : null;
+    const base: { id: SectionId; label: string; complete: boolean }[] = [
+      { id: 'client', label: 'Client', complete: !!(customerId && vehicleType) },
+      { id: 'route', label: 'Route', complete: !!(pickup?.lat && delivery?.lat) },
+      { id: 'load', label: 'Load', complete: weightKg > 0 && !weightInvalid },
+      { id: 'schedule', label: 'Schedule', complete: !!(pickupDate && deliveryDate) },
+      { id: 'price', label: 'Price', complete: costs.total > 0 },
+    ];
+    return base.map((s) => ({ ...s, hasIssue: issueSections?.has(s.id) }));
+  }, [
+    customerId,
+    vehicleType,
+    pickup?.lat,
+    delivery?.lat,
+    weightKg,
+    weightInvalid,
+    pickupDate,
+    deliveryDate,
+    costs.total,
+    submitAttempted,
+    issues,
+  ]);
+
+  // buildQuotePayload is the same object literal as before (same key order —
+  // it's the DRF contract), hoisted to quote/payload.ts (Phase 0 extraction).
+  const buildPayload = (status: 'DRAFT' | 'SENT') =>
+    buildQuotePayload(
+      {
+        customerId,
+        pickup,
+        delivery,
+        pickupDate,
+        deliveryDate,
+        cargo,
+        weight,
+        weightKg,
+        vehicleType,
+        costs,
+        serviceCharge,
+        notes,
+        company,
+        validUntil,
+        tripType,
+        winProb,
+      },
+      status,
+    );
 
   const save = async (send: boolean) => {
     if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
@@ -902,25 +1090,24 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         id = pick(created, ['id', 'pk']) as string | number;
         savedId.current = id;
       }
+      let emailSent = false;
       if (send && id) {
         const res = await sendQuote(id);
-        toast.success(pick(res, ['email_sent']) ? 'Quote sent to client' : 'Quote saved — email pending');
-      } else {
-        toast.success('Draft saved');
+        emailSent = !!pick(res, ['email_sent']);
       }
-      // Also refreshes this quote's own detail cache, which the old
-      // quotes-only invalidation missed — reopening an edited quote showed
-      // the pre-edit values.
-      //
-      // Deferred until after the pop transition finishes: invalidating
-      // immediately kicks off a background refetch of Home's ['overview']
-      // query (via DASHBOARD) at the same moment the native-stack pop
-      // animation starts, and Home's data landing mid-transition on Android
-      // could commit a corrupted layout (blank Total revenue card, collapsed
-      // gap above Fleet utilisation) that never repaints until the app is
-      // fully restarted.
-      navigation.goBack();
-      InteractionManager.runAfterInteractions(() => invalidateFor(qc, 'quote'));
+      toast.success();
+      completedRef.current = true;
+      // Visible confirmation (Phase 4) — toast.success above is haptic-only
+      // by app-wide policy (src/lib/toast.tsx), so this is what actually
+      // tells the user what happened. Replaces the old instant goBack(); the
+      // overlay's own View quote / Done buttons navigate — see those below.
+      setSentOverlay({
+        kind: send ? 'send' : 'draft',
+        emailSent,
+        total: costs.total,
+        clientName: customerOptions.find((o) => o.value === customerId)?.label ?? '',
+        id: id!,
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save quote');
     } finally {
@@ -934,38 +1121,179 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const saveRef = useRef(save);
   saveRef.current = save;
 
-  const actions = (
-    <View className="flex-row gap-2.5">
-      <View className="flex-1">
-        <Button label="Save draft" variant="secondary" loading={busy === 'draft'} disabled={subscription.blocked} onPress={() => saveRef.current(false)} fullWidth />
-      </View>
-      <View className="flex-1">
-        <Button
-          label="Send to client"
-          icon="send"
-          loading={busy === 'send'}
-          disabled={!ready || !!routeBlockedMessage || subscription.blocked}
-          onPress={() => saveRef.current(true)}
-          fullWidth
-        />
-      </View>
-    </View>
-  );
+  // Shared by both of QuoteSentOverlay's dismissal paths — refreshes this
+  // quote's own detail cache too (the old quotes-only invalidation missed
+  // that, so reopening an edited quote showed the pre-edit values).
+  //
+  // Deferred until after the pop/replace transition finishes: invalidating
+  // immediately kicks off a background refetch of Home's ['overview'] query
+  // (via DASHBOARD) at the same moment the native-stack transition starts,
+  // and Home's data landing mid-transition on Android could commit a
+  // corrupted layout (blank Total revenue card, collapsed gap above Fleet
+  // utilisation) that never repaints until the app is fully restarted.
+  const invalidateQuoteAfterTransition = useCallback(() => {
+    InteractionManager.runAfterInteractions(() => invalidateFor(qc, 'quote'));
+  }, [qc]);
+
+  const onOverlayDone = useCallback(() => {
+    setSentOverlay(null);
+    navigation.goBack();
+    invalidateQuoteAfterTransition();
+  }, [navigation, invalidateQuoteAfterTransition]);
+
+  const onOverlayViewQuote = useCallback(() => {
+    const id = sentOverlay?.id;
+    setSentOverlay(null);
+    // replace, not navigate — back from the detail must not land on this
+    // create form, which is still holding a savedId for the same quote.
+    if (id != null) navigation.replace('QuoteDetail', { id });
+    invalidateQuoteAfterTransition();
+  }, [navigation, invalidateQuoteAfterTransition, sentOverlay]);
+
+  // Unsaved-changes guard (Phase 4) — covers the back chevron (which already
+  // calls goBack() below) and the OS-level back gestures, which don't route
+  // through it.
+  const isDirtyNow = () => {
+    if (busy != null || completedRef.current || baselineRef.current == null) return false;
+    if (snapshotTuple() !== baselineRef.current) return true;
+    // nlBarRef's text lives in a child component precisely so typing there
+    // doesn't re-render this screen — read it fresh here rather than through
+    // any value captured at render time, which could go stale.
+    return (nlBarRef.current?.getText() ?? '').trim() !== '';
+  };
+
+  useUnsavedChangesGuard({
+    navigation,
+    isDirty: isDirtyNow,
+    // While picking a point or recording, "back" closes that mode instead of
+    // asking to discard the whole quote.
+    onIntercept: picking ? endPick : voiceOpen ? () => setVoiceOpen(false) : undefined,
+    title: 'Discard this quote?',
+    message: "You've started this quote. Leaving now loses it.",
+    buttons: [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Save draft', onPress: () => saveRef.current(false) },
+      { text: 'Discard', style: 'destructive', dispatch: true },
+    ],
+  });
+
+  const onSaveDraft = useCallback(() => {
+    saveRef.current(false);
+  }, []);
+
+  const onSend = useCallback(() => {
+    setSubmitAttempted(true);
+    const blocking = issuesRef.current.filter((i) => i.blocks === 'both' || i.blocks === 'send');
+    if (blocking.length) {
+      if (Platform.OS !== 'web')
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      jumpTo(blocking[0]!.section);
+      return;
+    }
+    saveRef.current(true);
+    // jumpTo is []-stable (see its own useCallback above), so this never
+    // needs to change identity across renders.
+  }, [jumpTo]);
+
+  // Footer status strip, by precedence: a suspended subscription (not
+  // tappable — nothing here fixes it) → a route refused by company policy
+  // (tap to review) → outstanding field issues once a Send has been
+  // attempted (tap to jump to the first one) → nothing, the resting state.
+  const footerStrip = useMemo<FooterStrip | null>(() => {
+    if (subscription.blocked) {
+      return { tone: 'danger', message: subscription.notice ?? 'Subscription inactive' };
+    }
+    if (routeBlockedMessage) {
+      return {
+        tone: 'danger',
+        message: 'Route not allowed — tap to review',
+        onPress: () => jumpTo('route'),
+      };
+    }
+    if (!submitAttempted) return null;
+    const blocking = issues.filter((i) => i.blocks === 'send' && i.fixable);
+    if (!blocking.length) return null;
+    return {
+      tone: 'warning',
+      message: `${blocking.length} thing${blocking.length === 1 ? '' : 's'} left before you can send`,
+      onPress: () => jumpTo(blocking[0]!.section),
+    };
+  }, [
+    subscription.blocked,
+    subscription.notice,
+    routeBlockedMessage,
+    submitAttempted,
+    issues,
+    jumpTo,
+  ]);
 
   // Pinned to the sheet's bottom edge via footerComponent rather than sitting at
   // the end of the scroll view, so the primary action is always reachable and
-  // stays above the keyboard.
+  // stays above the keyboard. Every dep below is either a primitive the footer
+  // actually reads or a []-stable callback, so — unlike before — this doesn't
+  // need a hand-trimmed, eslint-disabled dep list to stay correct.
   const renderFooter = useCallback(
     (props: BottomSheetFooterProps) => (
       <BottomSheetFooter {...props} bottomInset={0}>
-        <QuoteFooterBar insetsBottom={insets.bottom}>{actions}</QuoteFooterBar>
+        <QuoteFooterBar insetsBottom={insets.bottom}>
+          <QuoteFooterActions
+            total={costs.total}
+            statsTrusted={statsTrusted}
+            marginPct={costs.marginPct}
+            ready={ready}
+            calculating={routeBusy || aiBusy}
+            strip={footerStrip}
+            busy={busy}
+            saveDisabled={subscription.blocked}
+            sendDisabled={subscription.blocked || !!routeBlockedMessage}
+            onSaveDraft={onSaveDraft}
+            onSend={onSend}
+          />
+        </QuoteFooterBar>
       </BottomSheetFooter>
     ),
-    // Only deps that affect the footer's visual state (loading/disabled) —
-    // onPress goes through saveRef, so save()'s own dependencies (weight,
-    // dates, etc.) don't need to be tracked here.
+    [
+      insets.bottom,
+      costs.total,
+      costs.marginPct,
+      statsTrusted,
+      ready,
+      routeBusy,
+      aiBusy,
+      footerStrip,
+      busy,
+      subscription.blocked,
+      routeBlockedMessage,
+      onSaveDraft,
+      onSend,
+    ],
+  );
+
+  // MapCanvas is memoized (it's a native MapView) — these are its props, kept
+  // stable so a keystroke anywhere else in the sheet doesn't re-render the
+  // map. Keyed on lat/lon primitives rather than pickup/delivery themselves:
+  // submitNL's geocode() (AI/voice fill) calls setPickup with a fresh object
+  // even when the coordinates come out identical to what's already set.
+  const mapGeometry = useMemo(
+    () => asArray(pick(currentRoute, ['geometry'])) as GeoPoint[],
+    [currentRoute],
+  );
+  const mapPickup = useMemo(
+    () => (pickup ? { lat: pickup.lat, lon: pickup.lon } : null),
+    // pickup intentionally excluded — deliberately keyed on its lat/lon, not
+    // the object itself (see comment above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [busy, ready, routeBlockedMessage, subscription.blocked, insets.bottom],
+    [pickup?.lat, pickup?.lon],
+  );
+  const mapDelivery = useMemo(
+    () => (delivery ? { lat: delivery.lat, lon: delivery.lon } : null),
+    // delivery intentionally excluded — same reasoning as mapPickup above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [delivery?.lat, delivery?.lon],
+  );
+  const mapStops = useMemo(
+    () => stops.filter((s) => s.loc).map((s) => ({ lat: s.loc!.lat, lon: s.loc!.lon })),
+    [stops],
   );
 
   return (
@@ -973,10 +1301,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       {/* The map is the page. It fills the screen and the sheet floats over it,
           so dragging the sheet down reveals more map without any relayout. */}
       <MapCanvas
-        geometry={asArray(pick(currentRoute, ['geometry'])) as GeoPoint[]}
-        pickup={pickup ? { lat: pickup.lat, lon: pickup.lon } : null}
-        delivery={delivery ? { lat: delivery.lat, lon: delivery.lon } : null}
-        stops={stops.filter((s) => s.loc).map((s) => ({ lat: s.loc!.lat, lon: s.loc!.lon }))}
+        geometry={mapGeometry}
+        pickup={mapPickup}
+        delivery={mapDelivery}
+        stops={mapStops}
         // 0 while picking, not some peek height, so the route-framing math
         // above the sheet still has room to work with. Coordinate accuracy no
         // longer depends on this: MapCanvas resolves the picked point via
@@ -995,7 +1323,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           chevron in a translucent circle is the iOS pattern for a back control
           over full-bleed content — Apple Maps and Photos both do this, because a
           bare chevron loses contrast as the map moves under it. */}
-      <View className="absolute left-0 right-0 flex-row items-center px-4" style={{ top: insets.top + 6 }}>
+      <View
+        className="absolute left-0 right-0 flex-row items-center px-4"
+        style={{ top: insets.top + 6 }}
+      >
         <Pressable
           onPress={() => navigation.goBack()}
           hitSlop={12}
@@ -1024,7 +1355,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         // and the transition back is instant.
         style={{ opacity: picking ? 0 : 1 }}
       >
+        <QuoteJumpBar ref={jumpBarRef} sections={jumpSections} onPress={jumpTo} />
         <BottomSheetScrollView
+          ref={scrollRef}
           contentContainerStyle={{
             paddingHorizontal: 16,
             // Clears the pinned footer, which overlays the scroll area.
@@ -1033,447 +1366,299 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScrollEndDrag={handleScrollSettled}
+          onMomentumScrollEnd={handleScrollSettled}
         >
-          <View className="gap-4">
-        {subscription.notice && (
-          <View className="flex-row items-start gap-2.5 rounded-xs border border-danger bg-danger-bg p-3">
-            <Icon name="alert" size={17} color="#FF4949" />
-            <Txt className="flex-1 text-sub text-muted">{subscription.notice}</Txt>
-          </View>
-        )}
-        {/* AI voice / natural-language quick fill */}
-        <VoiceQuoteBar
-          value={nlText}
-          onChangeText={(t) => {
-            setNlText(t);
-            if (nlReply) setNlReply('');
-          }}
-          onSubmit={() => submitNL()}
-          busy={nlBusy}
-          onRecord={() => setVoiceOpen(true)}
-          note={nlReply || undefined}
-        />
-
-        <SelectField label="Client" icon="user" placeholder="Select customer" options={customerOptions} value={customerId} onSelect={setCustomerId} />
-        <SelectField label="Vehicle type" icon="truck" placeholder="Select vehicle type" options={vtypeOptions} value={vehicleType} onSelect={setVehicleType} />
-        <LocationField label="Collection" value={pickup} onChange={setPickup} placeholder="Search origin" onPickOnMap={() => beginPick('pickup')} />
-
-        {/* Stops between Collection and Drop-off, in visit order — mirrors the
-            physical route rather than sitting off to the side of it. */}
-        {stops.map((stop, i) => (
-          <LocationField
-            key={stop.id}
-            label={`Stop ${i + 1}`}
-            value={stop.loc}
-            onChange={(l) => updateStop(stop.id, l)}
-            placeholder="Search stop"
-            onPickOnMap={() => beginPick({ stop: stop.id })}
-            headerRight={
-              <View className="flex-row items-center gap-3">
-                <Pressable onPress={() => moveStop(stop.id, -1)} disabled={i === 0} hitSlop={8}>
-                  <Icon name="chevronUp" size={16} color={i === 0 ? colors.faint : colors.muted} />
-                </Pressable>
-                <Pressable onPress={() => moveStop(stop.id, 1)} disabled={i === stops.length - 1} hitSlop={8}>
-                  <Icon name="chevronDown" size={16} color={i === stops.length - 1 ? colors.faint : colors.muted} />
-                </Pressable>
-                <Pressable onPress={() => removeStop(stop.id)} hitSlop={8} accessibilityLabel={`Remove stop ${i + 1}`}>
-                  <Icon name="x" size={16} color={colors.faint} />
-                </Pressable>
+          <View className="gap-6">
+            {subscription.notice && (
+              <View className="flex-row items-start gap-2.5 rounded-xs border border-danger bg-danger-bg p-3">
+                <Icon name="alert" size={17} color="#FF4949" />
+                <Txt className="flex-1 text-sub text-muted">{subscription.notice}</Txt>
               </View>
-            }
-          />
-        ))}
-        {pickup && delivery && (
-          <Button label="Add stop" icon="plus" variant="secondary" size="sm" onPress={addStop} />
-        )}
-
-        <LocationField label="Drop-off" value={delivery} onChange={setDelivery} placeholder="Search destination" onPickOnMap={() => beginPick('dropoff')} />
-
-        {/* Early heads-up the moment a picked location is outside SA, before the
-            rest of the form is filled in. The real enforcement happens once
-            /route/calculate/ runs — see routeBlockedMessage below. */}
-        {!allowCrossBorder && (isForeignCc(pickup?.cc) || isForeignCc(delivery?.cc)) && (
-          <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
-            <Icon name="alert" size={17} color="#F59E0B" />
-            <Txt className="flex-1 text-sub text-muted">
-              This location is outside South Africa, but your company isn&apos;t set up for cross-border
-              routes (Settings → Company details). This quote will be refused once calculated — pick a
-              domestic location or ask an admin to enable cross-border routes.
-            </Txt>
-          </View>
-        )}
-
-        <View>
-          <Label className="mb-2 text-muted">Trip</Label>
-          <SegmentedControl
-            options={[
-              { label: 'Round trip', value: 'ROUND_TRIP' },
-              { label: 'One way', value: 'ONE_WAY' },
-            ]}
-            value={tripType}
-            onChange={(v) => setTripType(v as 'ONE_WAY' | 'ROUND_TRIP')}
-          />
-        </View>
-
-        {/* R/km lives in the overrides section further down, next to the other
-            cost levers — it isn't repeated here. */}
-        <TextField
-          label="Weight (tons)"
-          required
-          placeholder="e.g. 20"
-          keyboardType="decimal-pad"
-          error={weightInvalid ? 'Enter a number, e.g. 1,5' : undefined}
-          value={weight}
-          onChangeText={setWeight}
-          bottomSheet
-        />
-        <TextField
-          label="Cargo"
-          placeholder="e.g. Steel coils"
-          value={cargo}
-          onChangeText={setCargo}
-          bottomSheet
-        />
-        <View className="flex-row gap-3">
-          <View className="flex-1">
-            <DateField
-              label="Pickup date"
-              required
-              value={pickupDate}
-              onChange={setPickupDate}
-              minimumDate={startOfToday()}
+            )}
+            {/* AI voice / natural-language quick fill — stays outside the
+            sections below and always at the top; it's the fast path and the
+            one thing on this screen that fills several sections at once. */}
+            <NaturalLanguageBar
+              ref={nlBarRef}
+              busy={nlBusy}
+              onRecord={() => setVoiceOpen(true)}
+              onSubmit={submitNL}
+              note={nlReply || undefined}
+              onTyped={() => {
+                if (nlReply) setNlReply('');
+              }}
             />
-          </View>
-          <View className="flex-1">
-            <DateField
-              label="Delivery date"
-              required
-              value={deliveryDate}
-              onChange={setDeliveryDate}
-              minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
-            />
-          </View>
-        </View>
-        <DateField
-          label="Valid until"
-          value={validUntil}
-          onChange={setValidUntil}
-          minimumDate={startOfToday()}
-        />
-        <TextField
-          label="Notes"
-          placeholder="Anything the client should see"
-          value={notes}
-          onChangeText={setNotes}
-          multiline
-          bottomSheet
-        />
-      </View>
 
-      {/* Route refused by company policy — replaces the whole estimate block,
-          same as web. */}
-      {ready && routeBlockedMessage && (
-        <View className="mt-5 rounded-xs border border-danger bg-danger-bg p-4">
-          <Txt className="text-callout font-semibold text-danger">Route not allowed</Txt>
-          <Txt className="mt-1.5 text-sub text-muted">{routeBlockedMessage}</Txt>
-        </View>
-      )}
+            {/* Five visible groupings (Phase 2) — still one continuous scroll, no
+            accordion, no wizard. QuoteJumpBar above scrolls to each; the
+            fields themselves keep the exact props/handlers they had before. */}
+            <QuoteSection id="client" label="Client" onLayout={registerSectionY}>
+              <SelectField
+                label="Client"
+                icon="user"
+                placeholder="Select customer"
+                options={customerOptions}
+                value={customerId}
+                onSelect={setCustomerId}
+                error={showIssue('client', false)}
+              />
+              <SelectField
+                label="Vehicle type"
+                icon="truck"
+                placeholder="Select vehicle type"
+                options={vtypeOptions}
+                value={vehicleType}
+                onSelect={setVehicleType}
+                error={showIssue('vehicleType', false)}
+              />
+            </QuoteSection>
 
-      {/* Route + estimate */}
-      {ready && !routeBlockedMessage && (
-        <View className="mt-5 gap-5">
-          <RoutePreview
-            origin={pickup!.label}
-            dest={delivery!.label}
-            stops={stops.filter((s) => s.loc).map((s) => s.loc!.label)}
-            distance={costs.distance ? `${Math.round(costs.chargeDistance)} km` : 'Calculating…'}
-            duration={costs.duration ? formatDuration(costs.duration / 60) : undefined}
-            loading={routeBusy}
-          />
+            <QuoteSection id="route" label="Route" onLayout={registerSectionY}>
+              <LocationField
+                label="Collection"
+                value={pickup}
+                onChange={setPickup}
+                placeholder="Search origin"
+                onPickOnMap={() => beginPick('pickup')}
+              />
 
-          {/* Alternative routes */}
-          {routes.length > 1 && (
-            <View>
-              <Label className="mb-2 text-muted">Alternative routes</Label>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                {routes.map((r, i) => {
-                  const active = i === selectedRouteIndex;
-                  return (
-                    <Pressable
-                      key={i}
-                      onPress={() => {
-                        setSelectedRouteIndex(i);
-                        setAnalysis(null);
-                        setGuard(null);
-                      }}
-                      className={`min-h-[34px] justify-center rounded-xs border px-3 ${active ? 'border-accent bg-accent-dim' : 'border-line bg-surface'}`}
-                    >
-                      <Mono className={`text-micro tracking-wide uppercase ${active ? 'text-accent' : 'text-muted'}`}>
-                        {str(pick(r, ['label', 'summary']), `Route ${i + 1}`)} · {Math.round(num(pick(r, ['distance_km'])))} km
-                      </Mono>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          )}
+              {/* Stops between Collection and Drop-off, in visit order — mirrors the
+              physical route rather than sitting off to the side of it. */}
+              {stops.map((stop, i) => (
+                <StopLocationRow
+                  key={stop.id}
+                  stop={stop}
+                  index={i}
+                  isFirst={i === 0}
+                  isLast={i === stops.length - 1}
+                  updateStop={updateStop}
+                  moveStop={moveStop}
+                  removeStop={removeStop}
+                  beginPick={beginPick}
+                />
+              ))}
+              {pickup && delivery && (
+                <Button
+                  label="Add stop"
+                  icon="plus"
+                  variant="secondary"
+                  size="sm"
+                  onPress={addStop}
+                />
+              )}
 
-          {costs.total > 0 && (
-            <>
-              {/* AI recommendation card */}
-              <Group label="AI recommendation">
-                {estimateLoading ? (
-                  /* One unified skeleton — no piecemeal spinners. */
-                  <View className="p-4">
-                    <View className="mb-3 flex-row items-center gap-2">
-                      <ActivityIndicator size="small" color="#4D9EFF" />
-                      <Mono className="text-caption text-muted">Analysing route & optimising price…</Mono>
-                    </View>
-                    <Skeleton width="55%" height={26} className="mb-4" />
-                    <View className="mb-4 flex-row gap-8">
-                      <View className="flex-1 gap-2">
-                        <Skeleton width="40%" height={10} />
-                        <Skeleton width="60%" height={18} />
-                      </View>
-                      <View className="flex-1 gap-2">
-                        <Skeleton width="55%" height={10} />
-                        <Skeleton width="45%" height={18} />
-                      </View>
-                    </View>
-                    <Skeleton height={56} />
-                  </View>
-                ) : (
-                <View className="p-4">
-                  {/* The price is the hero. Its label and caption say which
-                      basis it came from, so a cost-based figure is never
-                      mistaken for a trained recommendation. */}
-                  <Label className="text-faint">{statsTrusted ? 'Recommended price' : 'Suggested price'}</Label>
-                  <Mono
-                    className={`mt-1 ${statsTrusted ? 'text-accent' : 'text-fg'}`}
-                    style={{ fontSize: 26, fontWeight: '700' }}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                  >
-                    {formatCurrency(suggestedPrice ?? costs.total)}
-                  </Mono>
-                  <Txt className="mt-0.5 text-caption text-faint">
-                    {statsTrusted ? 'to this client' : 'true cost + 25%'}
+              <LocationField
+                label="Drop-off"
+                value={delivery}
+                onChange={setDelivery}
+                placeholder="Search destination"
+                onPickOnMap={() => beginPick('dropoff')}
+              />
+
+              {/* Early heads-up the moment a picked location is outside SA, before the
+              rest of the form is filled in. The real enforcement happens once
+              /route/calculate/ runs — see routeBlockedMessage below. */}
+              {!allowCrossBorder && (isForeignCc(pickup?.cc) || isForeignCc(delivery?.cc)) && (
+                <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+                  <Icon name="alert" size={17} color="#F59E0B" />
+                  <Txt className="flex-1 text-sub text-muted">
+                    This location is outside South Africa, but your company isn&apos;t set up for
+                    cross-border routes (Settings → Company details). This quote will be refused
+                    once calculated — pick a domestic location or ask an admin to enable
+                    cross-border routes.
                   </Txt>
-
-                  {statsTrusted ? (
-                    <>
-                      {/* One compact stat row rather than a tile grid. */}
-                      <View className="mt-4 flex-row gap-8">
-                        <View className="flex-1">
-                          <Label className="text-faint">Margin</Label>
-                          <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
-                            {optMarkupPct != null ? formatPercent(optMarkupPct, 0) : formatPercent(costs.marginPct, 0)}
-                          </Mono>
-                          <Mono className="text-micro text-success">{formatCurrencyCompact(expProfit)} profit</Mono>
-                        </View>
-                        <View className="flex-1">
-                          <Label className="text-faint">Win probability</Label>
-                          <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
-                            {winProb > 0 ? formatConfidence(winProb) : '—'}
-                          </Mono>
-                          <View className="mt-2 h-1 overflow-hidden rounded-pill bg-surface-hover">
-                            <View style={{ width: `${Math.min(100, Math.round(winProb * 100))}%`, height: '100%' }} className="bg-accent" />
-                          </View>
-                        </View>
-                      </View>
-
-                      {curveData.length > 1 && (
-                        <View className="mt-4">
-                          <Label className="mb-1 text-faint">Profit sweet-spot · tap to inspect</Label>
-                          <ProfitCurve
-                            points={curveData}
-                            optimalMargin={optMarkupPct != null ? Math.round(optMarkupPct) : undefined}
-                            height={56}
-                          />
-                        </View>
-                      )}
-                    </>
-                  ) : (
-                    /* One honest line instead of three "unlocks after training"
-                       placeholders — the client asked for less clutter, and
-                       empty tiles are clutter. */
-                    <Txt className="mt-3 text-caption text-faint">
-                      Margin, win probability and the profit curve unlock once the model is trained.
-                    </Txt>
-                  )}
-
-                  {alreadyApplied ? (
-                    <View className="mt-4 gap-2.5">
-                      <View className="flex-row items-center gap-1.5">
-                        <Icon name="check" size={15} color={statusHues.success} />
-                        <Txt className="text-sub text-success">AI price applied</Txt>
-                      </View>
-                      <Button label="Use actual price" variant="secondary" onPress={useActualPrice} fullWidth />
-                    </View>
-                  ) : (
-                    suggestedPrice != null &&
-                    suggestedPrice > 0 && (
-                      <Button label="Apply recommended" variant="secondary" icon="sparkle" onPress={applyRecommended} fullWidth className="mt-4" />
-                    )
-                  )}
                 </View>
-                )}
+              )}
 
-                {riskLevel !== 'SAFE' && (
-                  <View className={`flex-row gap-2.5 border-t border-line p-3 ${riskLevel === 'AT_RISK' ? 'bg-danger-bg' : 'bg-warning-bg'}`}>
-                    <Icon name="alert" size={16} color={riskLevel === 'AT_RISK' ? '#FF4949' : '#F59E0B'} />
-                    <Txt className="flex-1 text-sub text-muted">
-                      <Txt className={`text-sub font-semibold ${riskLevel === 'AT_RISK' ? 'text-danger' : 'text-warning'}`}>
-                        {riskLevel === 'AT_RISK' ? 'At risk' : 'Caution'}
-                      </Txt>
-                      {' · '}
-                      {guardMsg}
-                      {guardHint ? ` — ${guardHint}` : ''}
-                    </Txt>
-                  </View>
-                )}
-
-                {aiLearning && (
-                  <View className="flex-row items-center gap-2.5 border-t border-line bg-warning-bg p-3">
-                    <Icon name="sparkle" size={16} color="#F59E0B" />
-                    <Txt className="flex-1 text-sub text-muted">
-                      <Txt className="text-sub font-semibold text-fg">Still learning your fleet. </Txt>
-                      Priced on true cost + your {vehicleType} base rate for now.
-                    </Txt>
-                    <View className="items-end">
-                      <Mono className="text-micro text-fg">
-                        {formatNumber(outcomesLogged)}/{formatNumber(outcomesNeeded)} logged
-                      </Mono>
-                      <View className="mt-1 h-1 w-16 overflow-hidden rounded-pill bg-surface-hover">
-                        <View style={{ width: `${learnPct}%`, height: '100%', backgroundColor: '#F59E0B' }} />
-                      </View>
-                    </View>
-                  </View>
-                )}
-              </Group>
-
-              {/* Cost breakdown */}
-              <Group label={`Cost breakdown · ${vehicleType || '—'}`}>
-                <DetailRow
-                  label={`Fuel — ${costs.consumption} L/100km @ ${formatCurrency(costs.fuelPrice)}`}
-                  value={formatCurrency(costs.fuelCost)}
+              <View>
+                <Label className="mb-2 text-muted">Trip</Label>
+                <SegmentedControl
+                  options={[
+                    { label: 'Round trip', value: 'ROUND_TRIP' },
+                    { label: 'One way', value: 'ONE_WAY' },
+                  ]}
+                  value={tripType}
+                  onChange={(v) => setTripType(v as 'ONE_WAY' | 'ROUND_TRIP')}
                 />
-                <Pressable onPress={() => setTollModal(true)} className="flex-row items-center justify-between border-b border-line-row px-3.5 py-3">
-                  <View className="flex-row items-center gap-1.5">
-                    <Txt className="text-callout text-muted">Tolls (SA plazas)</Txt>
-                    <Icon name="alert" size={13} color="#888888" />
-                  </View>
-                  <Mono className="text-sub font-medium text-fg">{formatCurrency(costs.tollCost)}</Mono>
-                </Pressable>
-                {costs.crossBorderCost > 0 && <DetailRow label="Cross-border / weighbridge" value={formatCurrency(costs.crossBorderCost)} />}
-                <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} />
-                {costs.weightSurcharge > 0 && <DetailRow label={`Weight surcharge (${formatPercent(costs.surchargePct)})`} value={formatCurrency(costs.weightSurcharge)} />}
-                <DetailRow
-                  label={`Base rate (${vehicleType || '—'} · ${formatCurrency(baseRateNum)}/km)`}
-                  value={formatCurrency(costs.baseCost)}
-                />
-                {serviceCharge !== 0 && <DetailRow label="Service adjustment" value={formatCurrency(serviceCharge)} />}
-                <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
-                  <Txt className="text-callout font-semibold text-fg">Quote total</Txt>
-                  <Mono className="text-heading font-semibold text-accent">{formatCurrency(costs.total)}</Mono>
-                </View>
-                <View className="px-3.5 py-2">
-                  <Mono className="text-micro text-faint">
-                    {formatNumber(Math.round(costs.distance))} km one way ·{' '}
-                    {formatNumber(Math.round(costs.chargeDistance))} km{' '}
-                    {tripType === 'ROUND_TRIP' ? 'round trip' : 'total'}
-                  </Mono>
-                </View>
-              </Group>
+              </View>
 
-              {/* Editable overrides */}
+              {/* Route refused by company policy — replaces the route preview,
+              same as web. */}
+              {ready && routeBlockedMessage && (
+                <View className="mt-5 rounded-xs border border-danger bg-danger-bg p-4">
+                  <Txt className="text-callout font-semibold text-danger">Route not allowed</Txt>
+                  <Txt className="mt-1.5 text-sub text-muted">{routeBlockedMessage}</Txt>
+                </View>
+              )}
+
+              {/* Route preview + alternatives sit right under the addresses that
+              produced them, not ~1000px below (Phase 2's one field move). */}
+              {ready && !routeBlockedMessage && (
+                <View className="mt-5 gap-5">
+                  <RoutePreview
+                    origin={pickup!.label}
+                    dest={delivery!.label}
+                    stops={stops.filter((s) => s.loc).map((s) => s.loc!.label)}
+                    distance={
+                      costs.distance ? `${Math.round(costs.chargeDistance)} km` : 'Calculating…'
+                    }
+                    duration={costs.duration ? formatDuration(costs.duration / 60) : undefined}
+                    loading={routeBusy}
+                  />
+                  <RouteOptionChips
+                    routes={routes}
+                    selectedRouteIndex={selectedRouteIndex}
+                    bestIndex={bestIndex}
+                    onSelect={(i) => {
+                      setSelectedRouteIndex(i);
+                      setAnalysis(null);
+                      setGuard(null);
+                    }}
+                  />
+                </View>
+              )}
+            </QuoteSection>
+
+            <QuoteSection id="load" label="Load" onLayout={registerSectionY}>
+              {/* R/km lives in the overrides section under Price, next to the other
+              cost levers — it isn't repeated here. */}
+              <TextField
+                label="Weight (tons)"
+                required
+                placeholder="e.g. 20"
+                keyboardType="decimal-pad"
+                error={showIssue('weight', weightTouched)}
+                value={weight}
+                onChangeText={setWeight}
+                onBlur={() => setWeightTouched(true)}
+                bottomSheet
+              />
+              <TextField
+                label="Cargo"
+                placeholder="e.g. Steel coils"
+                value={cargo}
+                onChangeText={setCargo}
+                bottomSheet
+              />
+            </QuoteSection>
+
+            <QuoteSection id="schedule" label="Schedule & terms" onLayout={registerSectionY}>
               <View className="flex-row gap-3">
                 <View className="flex-1">
-                  <TextField
-                    label="Tolls"
-                    prefix="R"
-                    placeholder="0"
-                    keyboardType="decimal-pad"
-                    value={tollEdited ? tollOverride : formatPlain(costs.tollCost)}
-                    onChangeText={(v) => {
+                  <DateField
+                    label="Pickup date"
+                    required
+                    value={pickupDate}
+                    onChange={setPickupDate}
+                    minimumDate={startOfToday()}
+                    error={showIssue('pickupDate', false)}
+                  />
+                </View>
+                <View className="flex-1">
+                  <DateField
+                    label="Delivery date"
+                    required
+                    value={deliveryDate}
+                    onChange={setDeliveryDate}
+                    minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
+                    error={showIssue('deliveryDate', false)}
+                  />
+                </View>
+              </View>
+              <DateField
+                label="Valid until"
+                value={validUntil}
+                onChange={setValidUntil}
+                minimumDate={startOfToday()}
+              />
+              <TextField
+                label="Notes"
+                placeholder="Anything the client should see"
+                value={notes}
+                onChangeText={setNotes}
+                multiline
+                bottomSheet
+              />
+            </QuoteSection>
+
+            <QuoteSection id="price" label="Price" onLayout={registerSectionY}>
+              {ready && !routeBlockedMessage && costs.total > 0 ? (
+                <>
+                  <AiRecommendationCard
+                    estimateLoading={estimateLoading}
+                    statsTrusted={statsTrusted}
+                    suggestedPrice={suggestedPrice}
+                    costsTotal={costs.total}
+                    optMarkupPct={optMarkupPct}
+                    marginPct={costs.marginPct}
+                    expProfit={expProfit}
+                    winProb={winProb}
+                    curveData={curveData}
+                    alreadyApplied={alreadyApplied}
+                    onApplyRecommended={applyRecommended}
+                    onUseActualPrice={resetPriceToActual}
+                    riskLevel={riskLevel}
+                    guardMsg={guardMsg}
+                    guardHint={guardHint}
+                    aiLearning={aiLearning}
+                    vehicleType={vehicleType}
+                    outcomesLogged={outcomesLogged}
+                    outcomesNeeded={outcomesNeeded}
+                    learnPct={learnPct}
+                  />
+                  <CostBreakdownCard
+                    costs={costs}
+                    vehicleType={vehicleType}
+                    baseRateNum={baseRateNum}
+                    serviceCharge={serviceCharge}
+                    tripType={tripType}
+                    onTollPress={() => setTollModal(true)}
+                    onRemoveUplift={resetPriceToActual}
+                  />
+                  <CostOverrides
+                    tollValue={tollEdited ? tollOverride : formatPlain(costs.tollCost)}
+                    tollEdited={tollEdited}
+                    tollOverrideNum={tollOverrideNum}
+                    tollCalculated={costs.tollCalculated}
+                    onTollChangeText={(v) => {
                       setTollEdited(true);
                       setTollOverride(v);
                     }}
-                    bottomSheet
+                    onUseCalculatedToll={resetTollToCalculated}
+                    driverAllowance={driverAllowance}
+                    onDriverChangeText={setDriverAllowance}
+                    baseRatePerKm={baseRatePerKm}
+                    companyDefaultRate={companyDefaultRate}
+                    onRateChangeText={setBaseRatePerKm}
+                    onUseCompanyRate={resetRateToDefault}
+                    overridden={overridden}
+                    onResetAll={resetAllOverrides}
                   />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Driver"
-                    prefix="R"
-                    placeholder="0"
-                    keyboardType="decimal-pad"
-                    numeric
-                    decimals={2}
-                    value={driverAllowance}
-                    onChangeText={setDriverAllowance}
-                    bottomSheet
-                  />
-                </View>
-                <View className="flex-1">
-                  <TextField
-                    label="Rate / km"
-                    prefix="R"
-                    placeholder="e.g. 25"
-                    keyboardType="decimal-pad"
-                    value={baseRatePerKm}
-                    onChangeText={setBaseRatePerKm}
-                    bottomSheet
-                  />
-                </View>
-              </View>
-            </>
-          )}
-        </View>
-      )}
+                </>
+              ) : (
+                <Txt className="text-caption text-faint">
+                  Add a route and load details to see pricing.
+                </Txt>
+              )}
+            </QuoteSection>
+          </View>
 
-      {/* Toll plaza breakdown modal */}
-      <Modal visible={tollModal} transparent animationType="fade" onRequestClose={() => setTollModal(false)}>
-        <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={() => setTollModal(false)}>
-          <Pressable className="rounded-md border border-line bg-elevated p-4" onPress={(e) => e.stopPropagation()}>
-            <Label className="mb-3 text-muted">Toll plazas on this route</Label>
-            {costs.tollBreakdown.length === 0 ? (
-              <Txt className="text-callout text-muted">No SANRAL plazas matched on this route.</Txt>
-            ) : (
-              <View>
-                {costs.tollBreakdown.map((b, i) => (
-                  <View key={i} className="flex-row items-center justify-between border-b border-line-row py-2">
-                    <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
-                      {str(pick(b, ['plaza']), 'Plaza')}
-                      {pick(b, ['route']) ? ` (${str(pick(b, ['route']))})` : ''}
-                    </Txt>
-                    <Mono className="text-sub text-muted">{formatCurrency(num(pick(b, ['tariff'])))}</Mono>
-                  </View>
-                ))}
-                <View className="mt-2 flex-row items-center justify-between">
-                  <Txt className="text-callout font-semibold text-fg">One way total</Txt>
-                  <Mono className="text-callout font-semibold text-fg">{formatCurrency(costs.tollBreakdownOneWay)}</Mono>
-                </View>
-                {costs.legs === 2 && (
-                  <Mono className="mt-1 text-micro text-faint">× 2 for round trip = {formatCurrency(costs.tollBreakdownOneWay * 2)}</Mono>
-                )}
-              </View>
-            )}
-            <Button label="Close" variant="secondary" onPress={() => setTollModal(false)} fullWidth className="mt-4" />
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Stays open through the AI step, so the user sees "Building your
+          <TollBreakdownModal
+            visible={tollModal}
+            onClose={() => setTollModal(false)}
+            costs={costs}
+          />
+          {/* Stays open through the AI step, so the user sees "Building your
           quote" rather than being dropped back on a form that's mid-change. */}
-      {voiceOpen && (
-        <VoiceQuoteSheet onCaptured={onVoiceCaptured} onClose={() => setVoiceOpen(false)} />
-      )}
+          {voiceOpen && (
+            <VoiceQuoteSheet onCaptured={onVoiceCaptured} onClose={() => setVoiceOpen(false)} />
+          )}
 
-      {/* Both entry points get this — the voice sheet and the typed
+          {/* Both entry points get this — the voice sheet and the typed
           "Fill from description" button, which previously only spun a small
           button through a multi-second AI call. */}
-      <WorkingOverlay visible={voiceBusy || nlBusy} title="Building your quote" />
+          <WorkingOverlay visible={voiceBusy || nlBusy} title="Building your quote" />
         </BottomSheetScrollView>
       </BottomSheet>
 
@@ -1493,19 +1678,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           bottomInset={insets.bottom + 8}
         />
       )}
+
+      {/* Same tree position as CrosshairOverlay, for the same reason (see
+          above) — needs to paint over the sheet's footer. */}
+      <QuoteSentOverlay
+        visible={sentOverlay != null}
+        kind={sentOverlay?.kind ?? 'draft'}
+        total={sentOverlay?.total ?? 0}
+        clientName={sentOverlay?.clientName ?? ''}
+        emailSent={sentOverlay?.emailSent ?? false}
+        onViewQuote={onOverlayViewQuote}
+        onDone={onOverlayDone}
+      />
     </View>
   );
 }
-
-
-// A location is cross-border when its country code isn't South Africa.
-const isForeignCc = (cc?: string) => {
-  if (!cc) return false;
-  const c = cc.replace(/\s/g, '').toUpperCase();
-  return c !== '' && !['ZA', 'ZAF', 'SOUTHAFRICA'].includes(c);
-};
-
-type LocSuggest = Loc & { foreign: boolean; country: string };
 
 // ── Sticky footer bar, shrinking its own bottom padding while the keyboard
 // is up ──────────────────────────────────────────────────────────────────────
@@ -1532,247 +1719,5 @@ function QuoteFooterBar({ insetsBottom, children }: { insetsBottom: number; chil
     <Animated.View className="border-t border-line bg-surface px-4 pt-3" style={style}>
       {children}
     </Animated.View>
-  );
-}
-
-// ── Location autocomplete with coordinates ──────────────────────────────────
-function LocationField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  onPickOnMap,
-  headerRight,
-}: {
-  label: string;
-  value: Loc | null;
-  onChange: (l: Loc) => void;
-  placeholder: string;
-  /** Hands control to the map's crosshair. Omitted where there is no map. */
-  onPickOnMap?: () => void;
-  /** Extra controls next to the label — used for a stop row's reorder/remove buttons. */
-  headerRight?: ReactNode;
-}) {
-  const { colors } = useTheme();
-  const [text, setText] = useState(value?.label ?? '');
-  // Coordinate entry, matching what the web builder offers — but as one
-  // paste-friendly field rather than two number boxes, because the useful case
-  // is a pin someone shared over WhatsApp, and because a browser number input
-  // silently rejects the comma in "-33.9249, 18.4241".
-  const [coordMode, setCoordMode] = useState(false);
-  const [coordText, setCoordText] = useState('');
-  const [coordBusy, setCoordBusy] = useState(false);
-  const [coordError, setCoordError] = useState<string | null>(null);
-
-  const applyCoords = async (swap = false) => {
-    setCoordError(null);
-    const parsed = parseCoordinates(coordText);
-    if (!parsed) {
-      setCoordError('Enter coordinates as "-33.9249, 18.4241", or paste a map link');
-      return;
-    }
-    const point = swap ? { lat: parsed.lon, lon: parsed.lat } : parsed;
-    if (!swap && looksSwapped(point)) {
-      setCoordError('That looks like longitude first. Tap Swap if you meant the other way round.');
-      return;
-    }
-    setCoordBusy(true);
-    try {
-      const place = await reverseGeocode(point);
-      onChange({ label: place.label, lat: roundCoord(point.lat), lon: roundCoord(point.lon), cc: place.cc || undefined });
-      setText(place.label);
-      setCoordMode(false);
-      setCoordText('');
-    } catch (e) {
-      setCoordError(e instanceof Error ? e.message : "Couldn't find that point");
-    } finally {
-      setCoordBusy(false);
-    }
-  };
-  const [focused, setFocused] = useState(false);
-  const [results, setResults] = useState<LocSuggest[]>([]);
-  // One ref per timer. These used to share a slot, so the clear-results timeout
-  // and the search timeout cancelled each other at random.
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // The label the field is already settled on — either tapped from the list or
-  // filled in from outside. While text still equals it, the user isn't
-  // searching, so we must not look it up. Without this, picking "Durban" set
-  // the text to "Durban…", which re-armed the debounce below and reopened the
-  // dropdown a couple of seconds later on top of the completed selection.
-  const chosen = useRef<string | null>(value?.label ?? null);
-  // Monotonic request id, same pattern as routeReq/aiReq above: a reply that is
-  // no longer the newest must not write results. Covers the other half of the
-  // reopen — the in-flight lookup from the last keystroke landing after the tap.
-  const reqId = useRef(0);
-
-  useEffect(
-    () => () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-      if (clearTimer.current) clearTimeout(clearTimer.current);
-      if (blurTimer.current) clearTimeout(blurTimer.current);
-    },
-    [],
-  );
-
-  // Reflect an externally-set value (edit-mode hydration, or the AI/voice fill
-  // path via geocode → setPickup) into the input. Marked as chosen so an
-  // address we filled in ourselves doesn't trigger a lookup either.
-  useEffect(() => {
-    if (!value?.label || value.label === text) return;
-    chosen.current = value.label;
-    const t = setTimeout(() => setText(value.label), 0);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value?.label]);
-
-  useEffect(() => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (!focused || text.length < 2 || chosen.current === text) {
-      clearTimer.current = setTimeout(() => setResults([]), 0);
-      return () => {
-        if (clearTimer.current) clearTimeout(clearTimer.current);
-      };
-    }
-    searchTimer.current = setTimeout(async () => {
-      const mine = ++reqId.current;
-      try {
-        const raw = await suggestLocations(text);
-        if (mine !== reqId.current) return;
-        const list = asArray(raw)
-          .map((r) => {
-            const o = r as Record<string, unknown>;
-            const cc = str(pick(o, ['country_code', 'country'])) || undefined;
-            const foreign = Boolean(pick(o, ['cross_border'])) || isForeignCc(cc);
-            return {
-              label: str(pick(o, ['label', 'name', 'description', 'address'])),
-              lat: num(pick(o, ['lat', 'latitude'])),
-              lon: num(pick(o, ['lon', 'lng', 'longitude'])),
-              cc,
-              foreign,
-              country: str(pick(o, ['country', 'country_name'])),
-            } as LocSuggest;
-          })
-          .filter((l) => l.label && l.lat && l.lon)
-          .slice(0, 6);
-        setResults(list);
-      } catch {
-        if (mine === reqId.current) setResults([]);
-      }
-    }, 300);
-    return () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current);
-    };
-  }, [text, focused]);
-
-  return (
-    <View>
-      <View className="mb-1.5 flex-row items-center justify-between">
-        <Label className="text-muted">{label}</Label>
-        {headerRight}
-      </View>
-      {/* Shell matches TextField/SelectField exactly — min height rather than a
-          fixed one, padding on the input rather than a stretched height, and a
-          17px icon. It used to be h-12 with a 16px pin, which read a notch low
-          against the Client and Vehicle-type rows directly above it. */}
-      <View className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}>
-        <Icon name="pin" size={17} color={value ? colors.accent : colors.faint} />
-        <BottomSheetTextInput
-          className="flex-1 text-fg"
-          placeholder={placeholder}
-          placeholderTextColor={colors.faint}
-          value={text}
-          onChangeText={(t) => {
-            // A real keystroke means the settled value no longer applies, so
-            // searching is wanted again.
-            chosen.current = null;
-            setText(t);
-          }}
-          onFocus={() => setFocused(true)}
-          onBlur={() => {
-            // Delayed so a tap on a suggestion row still registers before the
-            // list unmounts. Tracked so it can't fire into an unmounted field.
-            if (blurTimer.current) clearTimeout(blurTimer.current);
-            blurTimer.current = setTimeout(() => setFocused(false), 150);
-          }}
-          style={[INPUT_TEXT, { paddingVertical: 12 }]}
-        />
-      </View>
-      {/* Two ways in besides typing: the map, and raw coordinates. */}
-      <View className="mt-2 flex-row items-center gap-2">
-        {onPickOnMap && (
-          <Button label="Set on map" icon="pin" variant="secondary" size="sm" onPress={onPickOnMap} />
-        )}
-        <Button
-          label={coordMode ? 'Search instead' : 'Coordinates'}
-          icon={coordMode ? 'search' : 'gauge'}
-          variant="secondary"
-          size="sm"
-          onPress={() => {
-            setCoordError(null);
-            setCoordMode((m) => !m);
-          }}
-        />
-        {value?.cc && isForeignCc(value.cc) ? (
-          <View className="ml-auto">
-            <Badge label="Cross-border" tone="warning" />
-          </View>
-        ) : null}
-      </View>
-
-      {coordMode && (
-        <View className="mt-2 gap-2 rounded-xs border border-line bg-surface p-3">
-          <TextField
-            label="Latitude, longitude"
-            placeholder="-33.9249, 18.4241"
-            value={coordText}
-            onChangeText={(t) => {
-              setCoordText(t);
-              setCoordError(null);
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            error={coordError ?? undefined}
-            bottomSheet
-          />
-          <View className="flex-row gap-2.5">
-            {coordError?.startsWith('That looks like longitude') && (
-              <View className="flex-1">
-                <Button label="Swap" variant="secondary" onPress={() => applyCoords(true)} fullWidth />
-              </View>
-            )}
-            <View className="flex-[1.4]">
-              <Button label="Use these" icon="check" loading={coordBusy} onPress={() => applyCoords()} fullWidth />
-            </View>
-          </View>
-        </View>
-      )}
-      {focused && results.length > 0 && (
-        <View className="mt-2 overflow-hidden rounded-xs border border-line bg-surface">
-          {results.map((r, i) => (
-            <Pressable
-              key={`${r.label}-${i}`}
-              onPress={() => {
-                // Settle on this label and discard any reply still in flight,
-                // so nothing can refill the list behind the selection.
-                chosen.current = r.label;
-                reqId.current++;
-                onChange(r);
-                setText(r.label);
-                setResults([]);
-              }}
-              className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3 active:bg-surface-hover"
-            >
-              <Icon name="pin" size={15} color={r.foreign ? '#F59E0B' : colors.faint} />
-              <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
-                {r.label}
-              </Txt>
-              {r.foreign && <Badge label={r.country || 'Cross-border'} tone="warning" />}
-            </Pressable>
-          ))}
-        </View>
-      )}
-    </View>
   );
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { View, Pressable, Modal, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, FieldLabel } from './Text';
@@ -13,8 +13,10 @@ export interface Option {
 }
 
 // Field that opens a searchable modal list. Used for client + vehicle-type
-// pickers in the quote builder and elsewhere.
-export function SelectField({
+// pickers in the quote builder and elsewhere. Memoized — renders a Modal +
+// FlatList, so it's worth skipping on a parent re-render that doesn't touch
+// its own props.
+function SelectFieldImpl({
   label,
   value,
   placeholder = 'Select',
@@ -60,23 +62,35 @@ export function SelectField({
         }`}
       >
         {icon && <Icon name={icon} size={17} color={selected ? colors.accent : colors.faint} />}
-        <Txt className={`flex-1 text-body ${selected ? 'text-fg' : 'text-faint'}`} numberOfLines={1}>
+        <Txt
+          className={`flex-1 text-body ${selected ? 'text-fg' : 'text-faint'}`}
+          numberOfLines={1}
+        >
           {selected?.label ?? placeholder}
         </Txt>
         <Icon name="chevronDown" size={16} color={colors.faint} />
       </Pressable>
       {error && <Mono className="mt-1 text-micro text-danger">{error}</Mono>}
 
-      <Modal visible={open} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setOpen(false)}>
+      <Modal
+        visible={open}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setOpen(false)}
+      >
         <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top + 8 }}>
           <View className="flex-row items-center justify-between px-screen pb-3">
             <Txt className="text-heading font-semibold text-fg">{label ?? 'Select'}</Txt>
             <Pressable hitSlop={8} onPress={() => setOpen(false)}>
-              <Mono className="text-micro tracking-wide uppercase text-accent">Close</Mono>
+              <Mono className="text-micro uppercase tracking-wide text-accent">Close</Mono>
             </Pressable>
           </View>
           <View className="px-screen pb-2">
-            <SearchField value={q} onChangeText={setQ} placeholder={`Search ${label ?? ''}`.trim()} />
+            <SearchField
+              value={q}
+              onChangeText={setQ}
+              placeholder={`Search ${label ?? ''}`.trim()}
+            />
           </View>
           <FlatList
             data={filtered}
@@ -96,9 +110,13 @@ export function SelectField({
                 >
                   <View className="flex-1">
                     <Txt className="text-body text-fg">{item.label}</Txt>
-                    {item.sub ? <Txt className="mt-0.5 text-caption text-muted">{item.sub}</Txt> : null}
+                    {item.sub ? (
+                      <Txt className="mt-0.5 text-caption text-muted">{item.sub}</Txt>
+                    ) : null}
                   </View>
-                  {active && <Icon name="check" size={18} color={colors.accent} strokeWidth={2.4} />}
+                  {active && (
+                    <Icon name="check" size={18} color={colors.accent} strokeWidth={2.4} />
+                  )}
                 </Pressable>
               );
             }}
@@ -108,3 +126,5 @@ export function SelectField({
     </View>
   );
 }
+
+export const SelectField = memo(SelectFieldImpl);

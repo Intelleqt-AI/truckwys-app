@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { View, Pressable, Modal, Platform } from 'react-native';
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from '@react-native-community/datetimepicker';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label, FieldLabel } from './Text';
 import { Icon } from './icons';
@@ -27,6 +25,7 @@ export function DateField({
   maximumDate,
   minimumDate,
   required,
+  error,
 }: {
   label?: string;
   value: string;
@@ -38,6 +37,7 @@ export function DateField({
   minimumDate?: Date;
   /** Renders a danger-coloured * after the label. Presentational only. */
   required?: boolean;
+  error?: string;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -50,7 +50,9 @@ export function DateField({
       <FieldLabel label={label} required={required} />
       <Pressable
         onPress={() => setOpen(true)}
-        className="min-h-[48px] flex-row items-center gap-2 rounded-xs border border-line bg-surface px-3"
+        className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${
+          error ? 'border-danger' : 'border-line'
+        }`}
       >
         <Icon name="calendar" size={17} color={value ? colors.accent : colors.faint} />
         <Txt className={`flex-1 text-body ${value ? 'text-fg' : 'text-faint'}`}>
@@ -62,6 +64,7 @@ export function DateField({
           </Pressable>
         ) : null}
       </Pressable>
+      {error && <Mono className="mt-1 text-micro text-danger">{error}</Mono>}
 
       {open && Platform.OS === 'ios' && (
         <Modal transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -87,7 +90,7 @@ export function DateField({
                     setOpen(false);
                   }}
                 >
-                  <Mono className="text-micro tracking-wide uppercase text-accent">Done</Mono>
+                  <Mono className="text-micro uppercase tracking-wide text-accent">Done</Mono>
                 </Pressable>
               </View>
               <DateTimePicker

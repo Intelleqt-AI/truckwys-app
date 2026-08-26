@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Button, Label, Txt } from '@/components/ui';
 import { MapPin, MapReticle } from './MapPin';
@@ -28,8 +29,10 @@ const PIN_LIFT = PIN_SIZE * (PIN_VIEWBOX_H / 24) * (PIN_TIP_Y / PIN_VIEWBOX_H - 
  * the user is looking.
  *
  * Purely presentational; the caller owns the map centre and the lookup.
+ * Memoized — cheap on its own, but it's free and it's mounted for the
+ * duration of a pick, which spans several map-drag re-renders.
  */
-export function CrosshairOverlay({
+function CrosshairOverlayImpl({
   target,
   address,
   resolving,
@@ -85,7 +88,9 @@ export function CrosshairOverlay({
           ) : error ? (
             // Still confirmable — this is just "no address name found here",
             // not "no pin". Confirming falls back to the coordinates.
-            <Txt className="text-sub text-warning">No address here — will use the exact coordinates</Txt>
+            <Txt className="text-sub text-warning">
+              No address here — will use the exact coordinates
+            </Txt>
           ) : (
             <Txt className="text-callout text-fg" numberOfLines={2}>
               {address || 'Move the map to place the pin'}
@@ -110,3 +115,5 @@ export function CrosshairOverlay({
     </>
   );
 }
+
+export const CrosshairOverlay = memo(CrosshairOverlayImpl);

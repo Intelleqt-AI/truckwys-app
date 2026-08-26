@@ -217,12 +217,23 @@ export function FilterChips<T extends string>({
 }
 
 // ── Fab: floating action button (create) ───────────────────────────────────
-export function Fab({ onPress, icon = 'plus' }: { onPress: () => void; icon?: IconName }) {
+export function Fab({
+  onPress,
+  onLongPress,
+  icon = 'plus',
+}: {
+  onPress: () => void;
+  /** Optional secondary entry point (e.g. "New quote by voice") — undiscoverable
+      on its own, so callers pair it with a more visible entry point too. */
+  onLongPress?: () => void;
+  icon?: IconName;
+}) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityLabel="Create"
       className="absolute right-4 h-14 w-14 items-center justify-center rounded-sm bg-accent active:opacity-90"

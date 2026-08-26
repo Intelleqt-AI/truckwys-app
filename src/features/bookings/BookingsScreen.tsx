@@ -107,7 +107,12 @@ function QuotesTab() {
     }
   };
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load quotes." />;
 
   const list = data.filter((q) => filter === 'ALL' || q.status === filter);
@@ -117,6 +122,7 @@ function QuotesTab() {
       <FlashList
         data={list}
         keyExtractor={(q) => String(q.id)}
+        showsVerticalScrollIndicator={false}
         onRefresh={onRefresh}
         refreshing={refreshing}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
@@ -126,7 +132,9 @@ function QuotesTab() {
             <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
           </View>
         }
-        ListEmptyComponent={<EmptyState icon="file" title="No quotes" body="No quotes match this filter." />}
+        ListEmptyComponent={
+          <EmptyState icon="file" title="No quotes" body="No quotes match this filter." />
+        }
         renderItem={({ item }) => (
           <QuoteCard
             quote={item}
@@ -186,7 +194,9 @@ function QuoteCard({
           onPress={onConvert}
           className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
         >
-          <Mono className="text-micro tracking-label uppercase text-accent">Convert to booking</Mono>
+          <Mono className="text-micro uppercase tracking-label text-accent">
+            Convert to booking
+          </Mono>
           <Icon name="arrowRight" size={14} color="#4D9EFF" />
         </Pressable>
       )}
@@ -201,7 +211,12 @@ function OrdersTab() {
   const [filter, setFilter] = useState('ALL');
   const { openLoad } = useAppNavigation();
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load orders." />;
 
   const active = data.filter((l) => ACTIVE.includes(l.status));
@@ -216,7 +231,10 @@ function OrdersTab() {
       refreshing={refreshing}
       stats={[
         { label: 'Active orders', value: String(active.length) },
-        { label: 'In transit', value: String(active.filter((l) => l.status === 'IN_TRANSIT').length) },
+        {
+          label: 'In transit',
+          value: String(active.filter((l) => l.status === 'IN_TRANSIT').length),
+        },
         { label: 'Loading', value: String(active.filter((l) => l.status === 'LOADING').length) },
         { label: 'Revenue', value: formatCurrencyCompact(revenue) },
       ]}
@@ -240,7 +258,12 @@ function HistoryTab() {
   const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load history." />;
 
   const done = data.filter((l) => DONE.includes(l.status));
@@ -303,25 +326,32 @@ function LoadList({
       keyExtractor={(l) => String(l.id)}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
-          <View className="mb-3 flex-row flex-wrap gap-2.5">
+          <View className="mb-3 flex-row flex-wrap justify-between">
             {stats.map((s) => (
-              <View key={s.label} style={{ width: '47.5%' }}>
+              <View key={s.label} style={{ width: '48%', marginBottom: 10 }}>
                 <StatCard label={s.label} value={s.value} />
               </View>
             ))}
           </View>
           {search && (
             <View className="mb-3">
-              <SearchField value={search.value} onChangeText={search.onChange} placeholder="Search history…" />
+              <SearchField
+                value={search.value}
+                onChangeText={search.onChange}
+                placeholder="Search history…"
+              />
             </View>
           )}
           <FilterChips options={filters} value={filter} onChange={onFilter} />
         </View>
       }
-      ListEmptyComponent={<EmptyState icon="truck" title="No loads" body="No loads match this filter." />}
+      ListEmptyComponent={
+        <EmptyState icon="truck" title="No loads" body="No loads match this filter." />
+      }
       renderItem={({ item }) => (
         <View className="overflow-hidden rounded-xs border border-line bg-surface">
           <ListRow

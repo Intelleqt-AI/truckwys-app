@@ -533,7 +533,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         {confidence ? (
           <DetailRow label="Confidence" value={titleCase(confidence)} mono={false} />
         ) : null}
-        <DetailRow label="Margin" value={formatPercent(marginPct || 0)} />
+        {/* <DetailRow label="Margin" value={formatPercent(marginPct || 0)} /> */}
         {validUntil ? <DetailRow label="Valid until" value={formatDate(validUntil)} /> : null}
         {createdAt ? <DetailRow label="Created" value={formatDate(createdAt)} last /> : null}
       </Group>

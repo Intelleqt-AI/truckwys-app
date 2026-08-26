@@ -87,6 +87,12 @@ interface Loc {
   cc?: string;
 }
 
+// Native map projections and pasted links can carry 15-17 significant digits
+// of floating-point noise. The backend's lat/lng columns are
+// DecimalField(max_digits=12, decimal_places=7), so anything unrounded blows
+// past max_digits and the save is rejected outright.
+const roundCoord = (n: number) => Number(n.toFixed(7));
+
 interface StopEntry {
   /** Client-side only — never sent anywhere, just a stable React key. */
   id: string;
@@ -227,7 +233,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [routeBusy, setRouteBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [tollModal, setTollModal] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'draft' | 'send' | null>(null);
   const savedId = useRef<string | number | null>(null);
   const routeReq = useRef(0);
   const aiReq = useRef(0);
@@ -354,8 +360,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // themselves rather than blocking the confirm on a name existing at all.
     const loc: Loc = {
       label: pinPlace?.label ?? `${centre.lat.toFixed(5)}, ${centre.lon.toFixed(5)}`,
-      lat: centre.lat,
-      lon: centre.lon,
+      lat: roundCoord(centre.lat),
+      lon: roundCoord(centre.lon),
       cc: pinPlace?.cc || undefined,
     };
     const wasPicking = picking;
@@ -831,10 +837,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     delivery_date: deliveryDate || null,
     origin: extractCode(pickup?.label ?? ''),
     destination: extractCode(delivery?.label ?? ''),
-    pickup_lat: pickup?.lat,
-    pickup_lng: pickup?.lon,
-    delivery_lat: delivery?.lat,
-    delivery_lng: delivery?.lon,
+    pickup_lat: pickup ? roundCoord(pickup.lat) : undefined,
+    pickup_lng: pickup ? roundCoord(pickup.lon) : undefined,
+    delivery_lat: delivery ? roundCoord(delivery.lat) : undefined,
+    delivery_lng: delivery ? roundCoord(delivery.lon) : undefined,
     cargo_description: cargo || `${weight}t ${vehicleType}`,
     weight: weightKg,
     distance: costs.distance,
@@ -870,7 +876,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       if (!deliveryDate) missing.push('delivery date');
       if (missing.length) return toast.error(`Add ${missing.join(', ')} before sending`);
     }
-    setBusy(true);
+    setBusy(send ? 'send' : 'draft');
     try {
       const payload = buildPayload(send ? 'SENT' : 'DRAFT');
       let id = savedId.current;
@@ -894,22 +900,28 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save quote');
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+
+  // Always points at the save() closure from the latest render, so the
+  // footer's memoized onPress handlers (below) never validate against
+  // stale form state even when renderFooter itself hasn't re-memoized.
+  const saveRef = useRef(save);
+  saveRef.current = save;
 
   const actions = (
     <View className="flex-row gap-2.5">
       <View className="flex-1">
-        <Button label="Save draft" variant="secondary" loading={busy} disabled={subscription.blocked} onPress={() => save(false)} fullWidth />
+        <Button label="Save draft" variant="secondary" loading={busy === 'draft'} disabled={subscription.blocked} onPress={() => saveRef.current(false)} fullWidth />
       </View>
       <View className="flex-1">
         <Button
           label="Send to client"
           icon="send"
-          loading={busy}
+          loading={busy === 'send'}
           disabled={!ready || !!routeBlockedMessage || subscription.blocked}
-          onPress={() => save(true)}
+          onPress={() => saveRef.current(true)}
           fullWidth
         />
       </View>
@@ -925,7 +937,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         <QuoteFooterBar insetsBottom={insets.bottom}>{actions}</QuoteFooterBar>
       </BottomSheetFooter>
     ),
-    // actions closes over busy/ready/subscription, which is what should re-render it.
+    // Only deps that affect the footer's visual state (loading/disabled) —
+    // onPress goes through saveRef, so save()'s own dependencies (weight,
+    // dates, etc.) don't need to be tracked here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [busy, ready, routeBlockedMessage, subscription.blocked, insets.bottom],
   );
@@ -993,6 +1007,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             paddingBottom: insets.bottom + 96,
             gap: 16,
           }}
+          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           <View className="gap-4">
@@ -1523,7 +1538,7 @@ function LocationField({
     setCoordBusy(true);
     try {
       const place = await reverseGeocode(point);
-      onChange({ label: place.label, lat: point.lat, lon: point.lon, cc: place.cc || undefined });
+      onChange({ label: place.label, lat: roundCoord(point.lat), lon: roundCoord(point.lon), cc: place.cc || undefined });
       setText(place.label);
       setCoordMode(false);
       setCoordText('');

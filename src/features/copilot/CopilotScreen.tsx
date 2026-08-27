@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { View, TextInput, Pressable } from 'react-native';
+import { View, TextInput, Pressable, Platform, TouchableOpacity } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -103,15 +103,62 @@ export function CopilotScreen({ navigation }: Props) {
     [colors.accent],
   );
 
+  // iOS 26: the legacy headerRight above wraps its custom view in a native
+  // "shared background" Liquid Glass group, whose capsule is sized natively
+  // rather than hugged to our RN content — that's what stretched it into an
+  // oversized pill with both icons pinned left (same root cause documented in
+  // src/components/ui/Sheet.tsx). unstable_headerRightItems renders through
+  // react-native-screens' native item path instead, sizing correctly. iOS
+  // only — Android keeps renderRight above, which already renders fine there.
+  const iosRightItems = useCallback(
+    () => [
+      {
+        type: 'custom' as const,
+        element: (
+          <TouchableOpacity
+            onPress={() => startNewChat()}
+            hitSlop={8}
+            activeOpacity={0.5}
+            accessibilityRole="button"
+            accessibilityLabel="New chat"
+            className="h-9 w-9 items-center justify-center"
+          >
+            <Icon name="plus" size={21} color={colors.accent} strokeWidth={2} />
+          </TouchableOpacity>
+        ),
+      },
+      {
+        type: 'custom' as const,
+        element: (
+          <TouchableOpacity
+            onPress={() => setHistoryOpen(true)}
+            hitSlop={8}
+            activeOpacity={0.5}
+            accessibilityRole="button"
+            accessibilityLabel="Conversation history"
+            className="h-9 w-9 items-center justify-center"
+          >
+            <Icon name="clock" size={20} color={colors.accent} strokeWidth={2} />
+          </TouchableOpacity>
+        ),
+      },
+    ],
+    // startNewChat is stable enough for a header button; it only reads refs/setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [colors.accent],
+  );
+
   useLayoutEffect(() => {
+    const isIOS = Platform.OS === 'ios';
     navigation.setOptions({
       title: 'AI Copilot',
       headerLargeTitle: false,
       headerTransparent: false,
       headerStyle: { backgroundColor: colors.bgDeep },
-      headerRight: renderRight,
+      headerRight: isIOS ? undefined : renderRight,
+      unstable_headerRightItems: isIOS ? iosRightItems : undefined,
     });
-  }, [navigation, colors.bgDeep, renderRight]);
+  }, [navigation, colors.bgDeep, renderRight, iosRightItems]);
 
   // ── Turn lifecycle ────────────────────────────────────────────────────────
   /** Move the finished live turn into the cached transcript. */

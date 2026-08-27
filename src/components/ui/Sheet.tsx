@@ -1,5 +1,5 @@
 import { type ReactNode, useLayoutEffect, useCallback, useEffect, useRef, useState } from 'react';
-import { View, Pressable, RefreshControl } from 'react-native';
+import { View, Pressable, RefreshControl, Platform, TouchableOpacity } from 'react-native';
 import { KeyboardAwareScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,62 @@ const ICON_BTN = {
 const pressDim = ({ pressed }: { pressed: boolean }) => [ICON_BTN, { opacity: pressed ? 0.4 : 1 }];
 // Text actions size to their label (auto-width pill), not the icon square.
 const pressDimText = ({ pressed }: { pressed: boolean }) => ({ opacity: pressed ? 0.4 : 1 });
+
+// iOS 26 header items: the legacy headerRight/headerLeft render-prop wraps
+// custom views in a native "shared background" Liquid Glass group, and that
+// group's capsule is sized natively — not hugged to our RN content. That's
+// what stretched the button into an oversized oval with the icon pinned
+// left (see the header comment above). unstable_headerRightItems/
+// unstable_headerLeftItems render through react-native-screens' native item
+// path instead, and hidesSharedBackground opts each item out of that shared
+// grouping so its glass capsule sizes to its own content. iOS only — Android
+// isn't affected by this bug, so it keeps using headerRight/headerLeft below.
+function HeaderItemIcon({
+  icon,
+  label,
+  onPress,
+  color,
+  size = 21,
+}: {
+  icon: IconName;
+  label?: string;
+  onPress: () => void;
+  color: string;
+  size?: number;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      hitSlop={8}
+      activeOpacity={0.4}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={ICON_BTN}
+    >
+      <Icon name={icon} size={size} color={color} strokeWidth={2} />
+    </TouchableOpacity>
+  );
+}
+
+function HeaderItemLabel({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity onPress={onPress} hitSlop={8} activeOpacity={0.4} accessibilityRole="button">
+      <Mono
+        numberOfLines={1}
+        className="px-1 text-micro uppercase tracking-wide text-accent"
+        style={{ fontWeight: '600' }}
+      >
+        {label}
+      </Mono>
+    </TouchableOpacity>
+  );
+}
 
 // Full-screen detail screen. Drives the NATIVE iOS header: the system back
 // button (chevron + previous screen name), a large collapsing title, and a
@@ -138,17 +194,77 @@ export function SheetScreen({
     [colors.accent],
   );
 
+  const iosRightItems = useCallback(
+    () => [
+      {
+        type: 'custom' as const,
+        element: actionIcon ? (
+          <HeaderItemIcon
+            icon={actionIcon}
+            label={actionLabel}
+            onPress={() => actionRef.current?.()}
+            color={colors.accent}
+          />
+        ) : (
+          <HeaderItemLabel label={actionLabel ?? ''} onPress={() => actionRef.current?.()} />
+        ),
+        hidesSharedBackground: true,
+      },
+    ],
+    [actionLabel, actionIcon, colors.accent],
+  );
+
+  const iosLeftItems = useCallback(
+    () => [
+      {
+        type: 'custom' as const,
+        element: (
+          <HeaderItemIcon
+            icon="x"
+            label="Close"
+            size={22}
+            onPress={() => backRef.current?.()}
+            color={colors.accent}
+          />
+        ),
+        hidesSharedBackground: true,
+      },
+    ],
+    [colors.accent],
+  );
+
   // A boolean, not onAction itself — the function's identity changes every
   // render and would re-run this effect each time. Only whether there IS an
   // action matters here.
   const hasAction = !!onAction;
+  const isIOS = Platform.OS === 'ios';
   useLayoutEffect(() => {
     navigation.setOptions({
       headerTitle: title ?? '',
-      headerRight: actionLabel && hasAction ? renderAction : undefined,
-      ...(variant === 'modal' ? { headerLeft: renderClose } : {}),
+      // unstable_headerRightItems/unstable_headerLeftItems only exist on iOS;
+      // Android keeps the plain headerRight/headerLeft it already renders fine
+      // with. Setting both would have the items option silently win on iOS
+      // per react-navigation's own precedence rule, so only one is ever set.
+      headerRight: !isIOS && actionLabel && hasAction ? renderAction : undefined,
+      unstable_headerRightItems: isIOS && actionLabel && hasAction ? iosRightItems : undefined,
+      ...(variant === 'modal'
+        ? isIOS
+          ? { unstable_headerLeftItems: iosLeftItems }
+          : { headerLeft: renderClose }
+        : {}),
     });
-  }, [navigation, title, actionLabel, hasAction, variant, renderAction, renderClose]);
+  }, [
+    navigation,
+    title,
+    actionLabel,
+    hasAction,
+    variant,
+    isIOS,
+    renderAction,
+    renderClose,
+    iosRightItems,
+    iosLeftItems,
+  ]);
 
   return (
     <View className="flex-1 bg-bg-deep">

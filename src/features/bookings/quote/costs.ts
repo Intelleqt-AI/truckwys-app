@@ -35,6 +35,10 @@ export interface CostBreakdown {
   tollCalculated: number;
   tollBreakdownOneWay: number;
   tollBreakdown: Record<string, unknown>[];
+  /** The selected route reported an itemised toll of exactly zero — it
+      genuinely has no plazas, as opposed to no route data having arrived
+      yet (in which case there's nothing to report either way). */
+  tollFree: boolean;
   crossBorderCost: number;
   baseCost: number;
   weightSurcharge: number;
@@ -82,11 +86,15 @@ export function computeCosts({
     21.7;
   const fuelCost = Math.round((chargeDistance * consumption * fuelPrice) / 100);
 
-  const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
-  const routeTollOneWay =
-    num(pick(currentRoute, ['toll_cost_zar'])) ||
-    num(pick(routeData ?? {}, ['toll_cost_zar'])) ||
-    distance * tollRate;
+  // A route that matched no plazas reports toll_cost_zar: 0 and means it —
+  // the backend has deliberately no "found 0 → estimate" fallback (e.g.
+  // Pretoria↔Johannesburg = R0). So take the first *defined* value rather
+  // than the first truthy one; `||` used to read an authoritative zero as
+  // "missing" and invent a distance × rate toll that doesn't exist.
+  const rawToll =
+    pick(currentRoute, ['toll_cost_zar']) ?? pick(routeData ?? {}, ['toll_cost_zar']);
+  const routeTollOneWay = num(rawToll);
+  const tollFree = rawToll != null && routeTollOneWay === 0;
   const tollCost = tollEdited ? tollOverrideNum : Math.round(routeTollOneWay * legs);
   const tollBreakdown = (
     asArray(pick(currentRoute, ['toll_breakdown'])).length
@@ -125,6 +133,7 @@ export function computeCosts({
     tollCalculated: Math.round(routeTollOneWay * legs),
     tollBreakdownOneWay: Math.round(routeTollOneWay),
     tollBreakdown,
+    tollFree,
     crossBorderCost,
     baseCost,
     weightSurcharge,

@@ -30,22 +30,40 @@ function CostBreakdownCardImpl({
 }) {
   return (
     <Group label={`Cost breakdown · ${vehicleType || '—'}`}>
+      {/* The rate maths goes on DetailRow's `hint` line rather than inside the
+          label. Concatenated in, it grew with the numbers it described and
+          squeezed out the amount it was explaining. */}
       <DetailRow
-        label={`Fuel — ${costs.consumption} L/100km @ ${formatCurrency(costs.fuelPrice)}`}
+        label="Fuel"
+        hint={`${costs.consumption} L/100km @ ${formatCurrency(costs.fuelPrice)}`}
         value={formatCurrency(costs.fuelCost)}
       />
       <Pressable
         onPress={onTollPress}
         accessibilityRole="button"
-        accessibilityLabel={`Tolls, ${formatCurrency(costs.tollCost)}. Show toll plaza breakdown`}
+        accessibilityLabel={`Tolls, ${formatCurrency(costs.tollCost)}.${
+          costs.tollFree && costs.tollCost === 0 ? ' No plazas on this route.' : ''
+        } Show toll plaza breakdown`}
         className="flex-row items-center justify-between border-b border-line-row px-3.5 py-3"
       >
-        <View className="flex-row items-center gap-1.5">
-          <Txt className="text-callout text-muted">Tolls (SA plazas)</Txt>
-          <Mono className="text-micro text-faint">Details</Mono>
+        <View className="shrink flex-1">
+          <View className="flex-row items-center gap-1.5">
+            <Txt className="shrink text-callout text-muted" numberOfLines={1}>
+              Tolls (SA plazas)
+            </Txt>
+            <Mono className="shrink-0 text-micro text-faint">Details</Mono>
+          </View>
+          {costs.tollFree && costs.tollCost === 0 && (
+            <Txt className="text-micro text-faint">No plazas on this route</Txt>
+          )}
         </View>
-        <View className="flex-row items-center gap-1">
-          <Mono className="text-sub font-medium text-fg">{formatCurrency(costs.tollCost)}</Mono>
+        {/* shrink-0: RN's Yoga defaults flexShrink to 0, so without this the
+            amount and chevron were free to overflow and be clipped by Group's
+            overflow-hidden Card instead of the label giving way. */}
+        <View className="shrink-0 flex-row items-center gap-1">
+          <Mono className="text-sub font-medium text-fg" numberOfLines={1}>
+            {formatCurrency(costs.tollCost)}
+          </Mono>
           <Icon name="chevronRight" size={14} color="#888888" />
         </View>
       </Pressable>
@@ -58,12 +76,14 @@ function CostBreakdownCardImpl({
       <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} />
       {costs.weightSurcharge > 0 && (
         <DetailRow
-          label={`Weight surcharge (${formatPercent(costs.surchargePct)})`}
+          label="Weight surcharge"
+          hint={formatPercent(costs.surchargePct)}
           value={formatCurrency(costs.weightSurcharge)}
         />
       )}
       <DetailRow
-        label={`Base rate (${vehicleType || '—'} · ${formatCurrency(baseRateNum)}/km)`}
+        label="Base rate"
+        hint={`${vehicleType || '—'} · ${formatCurrency(baseRateNum)}/km`}
         value={formatCurrency(costs.baseCost)}
       />
       {serviceCharge !== 0 && (
@@ -77,15 +97,23 @@ function CostBreakdownCardImpl({
             <Txt className="text-callout text-muted">Price uplift</Txt>
             <Txt className="text-micro text-faint">From AI recommendation</Txt>
           </View>
-          <View className="flex-row items-center gap-2">
-            <Mono className="text-sub font-medium text-fg">{formatCurrency(serviceCharge)}</Mono>
+          <View className="shrink-0 flex-row items-center gap-2">
+            <Mono className="text-sub font-medium text-fg" numberOfLines={1}>
+              {formatCurrency(serviceCharge)}
+            </Mono>
             <Icon name="x" size={15} color="#888888" />
           </View>
         </Pressable>
       )}
-      <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
-        <Txt className="text-callout font-semibold text-fg">Quote total</Txt>
-        <Mono className="text-heading font-semibold text-accent">
+      {/* numberOfLines matters here for a reason that isn't obvious: en-ZA
+          groups thousands with a space, which is a legal line break, so an
+          unconstrained total could wrap as `R 1 234` / `567,89`. shrink-0 on the
+          amount plus shrink on the label makes the words give way instead. */}
+      <View className="flex-row items-center justify-between gap-3 bg-surface-hover px-3.5 py-3.5">
+        <Txt className="shrink text-callout font-semibold text-fg" numberOfLines={1}>
+          Quote total
+        </Txt>
+        <Mono className="shrink-0 text-heading font-semibold text-accent" numberOfLines={1}>
           {formatCurrency(costs.total)}
         </Mono>
       </View>

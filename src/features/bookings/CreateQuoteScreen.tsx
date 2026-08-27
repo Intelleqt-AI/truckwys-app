@@ -101,7 +101,7 @@ import { CostBreakdownCard } from './quote/CostBreakdownCard';
 import { CostOverrides } from './quote/CostOverrides';
 import { TollBreakdownModal } from './quote/TollBreakdownModal';
 import { QuoteSentOverlay } from './quote/QuoteSentOverlay';
-import { collectIssues, type QuoteIssue } from './quote/validation';
+import { collectIssues, missingPriceInputs, type QuoteIssue } from './quote/validation';
 import { QuoteFooterActions, type FooterStrip } from './quote/QuoteFooterActions';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
@@ -163,7 +163,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   }, [pickupDate]);
   const [validUntil, setValidUntil] = useState(plusDays(7));
   const [cargo, setCargo] = useState(str(prefill?.cargo_description));
-  const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ROUND_TRIP');
+  const [tripType, setTripType] = useState<'ONE_WAY' | 'ROUND_TRIP'>('ONE_WAY');
   const [notes, setNotes] = useState('');
   const [nlReply, setNlReply] = useState('');
   const nlBarRef = useRef<NaturalLanguageBarHandle>(null);
@@ -234,7 +234,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // error once the user leaves it, everything else waits for a Send attempt
   // — and then stays visible (never reset) so it clears live as fields fill.
   const [weightTouched, setWeightTouched] = useState(false);
-  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState<'draft' | 'send' | null>(null);
   // Send/save confirmation (Phase 4) — replaces the old instant goBack(); see
   // save() below and QuoteSentOverlay's render near the end of this file.
   const [sentOverlay, setSentOverlay] = useState<{
@@ -523,7 +523,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       .map((v) => ({ label: v.name, value: v.name }));
   }, [vtypes]);
 
-  const ready = !!(customerId && vehicleType && pickup?.lat && delivery?.lat);
+  // Same four prerequisites as before, but as a list rather than a boolean, so
+  // the footer and the Price section can name the one that's actually missing
+  // instead of both saying "a route" whatever the user has left blank.
+  const priceGaps = useMemo(
+    () => missingPriceInputs({ customerId, vehicleType, pickup, delivery }),
+    [customerId, vehicleType, pickup, delivery],
+  );
+  const ready = priceGaps.length === 0;
 
   // Route calc (debounced 500ms, stale-guarded).
   useEffect(() => {
@@ -1007,18 +1014,32 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   issuesRef.current = issues;
 
   const issueFor = (field: QuoteIssue['field']) => issues.find((i) => i.field === field);
-  const showIssue = (field: QuoteIssue['field'], touched: boolean) =>
-    touched || submitAttempted ? issueFor(field)?.message : undefined;
+  const showIssue = (field: QuoteIssue['field'], touched: boolean) => {
+    if (touched) return issueFor(field)?.message;
+    const issue = issueFor(field);
+    if (!issue) return undefined;
+    // A Draft attempt only surfaces 'both'-blocking issues — 'send'-only ones
+    // (vehicle type, weight, dates) aren't required for a draft, so flagging
+    // them here would be misleading.
+    if (submitAttempted === 'send') return issue.message;
+    if (submitAttempted === 'draft' && issue.blocks === 'both') return issue.message;
+    return undefined;
+  };
 
   const jumpSections = useMemo<QuoteJumpBarSection[]>(() => {
-    // Only after a Send attempt (see submitAttempted's tier-3 rule) — a
-    // blank Route section on a fresh quote isn't an "issue", it just hasn't
-    // been filled in yet.
-    const issueSections = submitAttempted
-      ? new Set(
-          issues.filter((i) => i.blocks === 'both' || i.blocks === 'send').map((i) => i.section),
-        )
-      : null;
+    // Only after a Send or Draft attempt — a blank Route section on a fresh
+    // quote isn't an "issue", it just hasn't been filled in yet. Which
+    // issues count depends on which action was attempted: Draft only cares
+    // about 'both'-blocking issues, Send cares about all of them.
+    const issueSections = !submitAttempted
+      ? null
+      : new Set(
+          issues
+            .filter((i) =>
+              submitAttempted === 'send' ? i.blocks === 'both' || i.blocks === 'send' : i.blocks === 'both',
+            )
+            .map((i) => i.section),
+        );
     const base: { id: SectionId; label: string; complete: boolean }[] = [
       { id: 'client', label: 'Client', complete: !!(customerId && vehicleType) },
       { id: 'route', label: 'Route', complete: !!(pickup?.lat && delivery?.lat) },
@@ -1068,8 +1089,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   const save = async (send: boolean) => {
     if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
-    // Draft can be saved any time (just needs a client to attach to).
+    // Draft can be saved any time (just needs a client to attach to) — except
+    // pickup/dropoff, which the backend requires unconditionally (no
+    // draft-specific relaxation for pickup_location/delivery_location).
     if (!customerId) return toast.error('Select a client');
+    if (!pickup?.lat || !delivery?.lat) return toast.error('Set a collection point and drop-off first');
     if (routeBlockedMessage) return toast.error(routeBlockedMessage);
     if (send) {
       if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
@@ -1178,11 +1202,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   });
 
   const onSaveDraft = useCallback(() => {
+    setSubmitAttempted('draft');
+    const blocking = issuesRef.current.filter((i) => i.blocks === 'both');
+    if (blocking.length) {
+      if (Platform.OS !== 'web')
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      jumpTo(blocking[0]!.section);
+      return;
+    }
     saveRef.current(false);
-  }, []);
+  }, [jumpTo]);
 
   const onSend = useCallback(() => {
-    setSubmitAttempted(true);
+    setSubmitAttempted('send');
     const blocking = issuesRef.current.filter((i) => i.blocks === 'both' || i.blocks === 'send');
     if (blocking.length) {
       if (Platform.OS !== 'web')
@@ -1194,6 +1226,32 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // jumpTo is []-stable (see its own useCallback above), so this never
     // needs to change identity across renders.
   }, [jumpTo]);
+
+  // The footer's left half while the quote can't be priced yet. Only the first
+  // gap is named: the strip is one 26px line with numberOfLines={1}, and the
+  // jump bar's per-section dots already carry "how much is left overall".
+  // Kept as two primitives + a callback so QuoteFooterActions stays memo-safe.
+  const priceHint = priceGaps[0] ? `${priceGaps[0].action} to price this` : '';
+  const priceHintSection = priceGaps[0]?.section ?? null;
+  const onPriceHintPress = useCallback(() => {
+    if (priceHintSection) jumpTo(priceHintSection);
+  }, [priceHintSection, jumpTo]);
+
+  // The Price section's empty state. Unlike the footer strip this can wrap, so
+  // it names every gap — and it separates the three cases the one old sentence
+  // ("Add a route and load details to see pricing.") lumped together, one of
+  // which — load details — isn't even a pricing prerequisite.
+  const priceEmptyMessage = useMemo(() => {
+    if (priceGaps.length) {
+      const nouns = priceGaps.map((g) => g.noun);
+      const list =
+        nouns.length > 1 ? `${nouns.slice(0, -1).join(', ')} and ${nouns.at(-1)}` : nouns[0];
+      return `Add ${list} to see pricing.`;
+    }
+    if (routeBlockedMessage) return "This route isn't allowed, so there's nothing to price.";
+    if (routeBusy) return 'Working out the price…';
+    return 'No route found between these points yet.';
+  }, [priceGaps, routeBlockedMessage, routeBusy]);
 
   // Footer status strip, by precedence: a suspended subscription (not
   // tappable — nothing here fixes it) → a route refused by company policy
@@ -1211,11 +1269,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       };
     }
     if (!submitAttempted) return null;
-    const blocking = issues.filter((i) => i.blocks === 'send' && i.fixable);
+    const blocking = issues.filter(
+      (i) =>
+        (submitAttempted === 'send' ? i.blocks === 'both' || i.blocks === 'send' : i.blocks === 'both') &&
+        i.fixable,
+    );
     if (!blocking.length) return null;
     return {
       tone: 'warning',
-      message: `${blocking.length} thing${blocking.length === 1 ? '' : 's'} left before you can send`,
+      message: `${blocking.length} thing${blocking.length === 1 ? '' : 's'} left before you can ${submitAttempted === 'send' ? 'send' : 'save'}`,
       onPress: () => jumpTo(blocking[0]!.section),
     };
   }, [
@@ -1241,6 +1303,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             statsTrusted={statsTrusted}
             marginPct={costs.marginPct}
             ready={ready}
+            priceHint={priceHint}
+            onPriceHintPress={onPriceHintPress}
             calculating={routeBusy || aiBusy}
             strip={footerStrip}
             busy={busy}
@@ -1258,6 +1322,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       costs.marginPct,
       statsTrusted,
       ready,
+      priceHint,
+      onPriceHintPress,
       routeBusy,
       aiBusy,
       footerStrip,
@@ -1360,8 +1426,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           ref={scrollRef}
           contentContainerStyle={{
             paddingHorizontal: 16,
-            // Clears the pinned footer, which overlays the scroll area.
-            paddingBottom: insets.bottom + 96,
+            // Clears the pinned footer, which overlays the scroll area. Extra
+            // margin beyond the footer's own measured height (border + pt-3 +
+            // 26px strip row + 8px gap + 48px button row + bottom inset) so the
+            // last section's content never sits flush against it.
+            paddingBottom: insets.bottom + 112,
             gap: 16,
           }}
           showsVerticalScrollIndicator={false}
@@ -1421,6 +1490,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onChange={setPickup}
                 placeholder="Search origin"
                 onPickOnMap={() => beginPick('pickup')}
+                error={showIssue('pickup', false)}
               />
 
               {/* Stops between Collection and Drop-off, in visit order — mirrors the
@@ -1454,6 +1524,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onChange={setDelivery}
                 placeholder="Search destination"
                 onPickOnMap={() => beginPick('dropoff')}
+                error={showIssue('dropoff', false)}
               />
 
               {/* Early heads-up the moment a picked location is outside SA, before the
@@ -1475,8 +1546,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <Label className="mb-2 text-muted">Trip</Label>
                 <SegmentedControl
                   options={[
-                    { label: 'Round trip', value: 'ROUND_TRIP' },
                     { label: 'One way', value: 'ONE_WAY' },
+                    { label: 'Round trip', value: 'ROUND_TRIP' },
                   ]}
                   value={tripType}
                   onChange={(v) => setTripType(v as 'ONE_WAY' | 'ROUND_TRIP')}
@@ -1637,9 +1708,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   />
                 </>
               ) : (
-                <Txt className="text-caption text-faint">
-                  Add a route and load details to see pricing.
-                </Txt>
+                <Txt className="text-caption text-faint">{priceEmptyMessage}</Txt>
               )}
             </QuoteSection>
           </View>

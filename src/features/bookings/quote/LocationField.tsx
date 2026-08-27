@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { View, Pressable } from 'react-native';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
-import { Icon, Badge, Button, TextField, Txt, Label, INPUT_TEXT } from '@/components/ui';
+import { Icon, Badge, Button, TextField, Txt, Label, Mono, INPUT_TEXT } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
@@ -18,6 +18,7 @@ function LocationFieldImpl({
   placeholder,
   onPickOnMap,
   headerRight,
+  error,
 }: {
   label: string;
   value: Loc | null;
@@ -27,6 +28,7 @@ function LocationFieldImpl({
   onPickOnMap?: () => void;
   /** Extra controls next to the label — used for a stop row's reorder/remove buttons. */
   headerRight?: ReactNode;
+  error?: string;
 }) {
   const { colors } = useTheme();
   const [text, setText] = useState(value?.label ?? '');
@@ -157,7 +159,9 @@ function LocationFieldImpl({
           17px icon. It used to be h-12 with a 16px pin, which read a notch low
           against the Client and Vehicle-type rows directly above it. */}
       <View
-        className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${focused ? 'border-accent' : 'border-line'}`}
+        className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${
+          error ? 'border-danger' : focused ? 'border-accent' : 'border-line'
+        }`}
       >
         <Icon name="pin" size={17} color={value ? colors.accent : colors.faint} />
         <BottomSheetTextInput
@@ -181,6 +185,7 @@ function LocationFieldImpl({
           style={[INPUT_TEXT, { paddingVertical: 12 }]}
         />
       </View>
+      {error && <Mono className="mt-1 text-micro text-danger">{error}</Mono>}
       {/* Two ways in besides typing: the map, and raw coordinates. */}
       <View className="mt-2 flex-row items-center gap-2">
         {onPickOnMap && (

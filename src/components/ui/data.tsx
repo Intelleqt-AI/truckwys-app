@@ -114,14 +114,41 @@ export function Group({
 }
 
 // ── DetailRow: read-only key/value ─────────────────────────────────────────
+/**
+ * The value is the row's reason for existing — an amount, a date, a count — so
+ * the LABEL is what yields when the row runs out of width. This used to be the
+ * other way round (`shrink-0` label, `flex-1` value carrying the tail ellipsis),
+ * which meant an unbounded label ate the number: the quote breakdown's
+ * `Base rate (Superlink 34t · R 25,00/km)` left ~31pt of a ~297pt row, so its
+ * amount rendered as `R 1…` at default text size.
+ *
+ * Two things keep the inversion honest:
+ *
+ * - The label block is `shrink`, NOT `flex-1`. `flex-1` sets `flex-basis: 0%`,
+ *   which zeroes a child's shrink weight — it would be unshrinkable again, just
+ *   in the other direction. The basis has to stay `auto`.
+ * - The value keeps a `max-w-[62%]` cap, because plenty of callers are the
+ *   mirror case: a short label and a long value (CustomerDetailScreen's Email,
+ *   Address, Billing address). Uncapped, `shrink-0` would push those past the
+ *   row and Group's `overflow-hidden` Card would slice them with no ellipsis.
+ *   ~184pt at that cap is about double the widest realistic ZAR amount, so a
+ *   number never reaches it and prose still truncates the way it always did.
+ *
+ * `hint` is the escape hatch for a label that carries its own arithmetic: put
+ * the words in `label` and the maths on the second line, rather than
+ * concatenating them into one string the row can't fit.
+ */
 export function DetailRow({
   label,
+  hint,
   value,
   mono = true,
   valueColor,
   last,
 }: {
   label: string;
+  /** Second line under the label — a rate basis, a reference, a breakdown. */
+  hint?: string;
   value: string;
   mono?: boolean;
   valueColor?: string;
@@ -134,11 +161,20 @@ export function DetailRow({
         last ? '' : 'border-b border-line-row'
       }`}
     >
-      <Txt className="shrink-0 text-callout text-muted">{label}</Txt>
+      <View className="shrink">
+        <Txt className="text-callout text-muted" numberOfLines={1} ellipsizeMode="tail">
+          {label}
+        </Txt>
+        {hint && (
+          <Txt className="mt-0.5 text-micro text-faint" numberOfLines={1} ellipsizeMode="tail">
+            {hint}
+          </Txt>
+        )}
+      </View>
       <ValueCmp
         numberOfLines={1}
         ellipsizeMode="tail"
-        className="flex-1 text-right text-sub font-medium text-fg"
+        className="max-w-[62%] shrink-0 text-right text-sub font-medium text-fg"
         style={valueColor ? { color: valueColor } : undefined}
       >
         {value}

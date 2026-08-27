@@ -100,11 +100,16 @@ function AiRecommendationCardImpl({
           <Label className="text-faint">
             {statsTrusted ? 'Recommended price' : 'Suggested price'}
           </Label>
+          {/* minimumFontScale is the point here: RN defaults it to 0.01, so
+              adjustsFontSizeToFit would shrink a seven-figure total toward
+              illegibility rather than clip it. Below 0.6 a tail ellipsis is the
+              more honest failure. */}
           <Mono
             className={`mt-1 ${statsTrusted ? 'text-accent' : 'text-fg'}`}
             style={{ fontSize: 26, fontWeight: '700' }}
             numberOfLines={1}
             adjustsFontSizeToFit
+            minimumFontScale={0.6}
           >
             {formatCurrency(suggestedPrice ?? costsTotal)}
           </Mono>
@@ -115,21 +120,34 @@ function AiRecommendationCardImpl({
           {statsTrusted ? (
             <>
               {/* One compact stat row rather than a tile grid. */}
-              <View className="mt-4 flex-row gap-8">
+              {/* gap-6, and numberOfLines on every figure: none of these had it,
+                  so at larger text sizes they wrapped instead of clipping and
+                  silently changed the card's height. gap-8 was also spending
+                  32pt of a ~311pt row on empty space between two flex-1
+                  columns. */}
+              <View className="mt-4 flex-row gap-6">
                 <View className="flex-1">
                   <Label className="text-faint">Margin</Label>
-                  <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
+                  <Mono
+                    className="mt-1 text-fg"
+                    style={{ fontSize: 18, fontWeight: '600' }}
+                    numberOfLines={1}
+                  >
                     {optMarkupPct != null
                       ? formatPercent(optMarkupPct, 0)
                       : formatPercent(marginPct, 0)}
                   </Mono>
-                  <Mono className="text-micro text-success">
+                  <Mono className="text-micro text-success" numberOfLines={1}>
                     {formatCurrencyCompact(expProfit)} profit
                   </Mono>
                 </View>
                 <View className="flex-1">
                   <Label className="text-faint">Win probability</Label>
-                  <Mono className="mt-1 text-fg" style={{ fontSize: 18, fontWeight: '600' }}>
+                  <Mono
+                    className="mt-1 text-fg"
+                    style={{ fontSize: 18, fontWeight: '600' }}
+                    numberOfLines={1}
+                  >
                     {winProb > 0 ? formatConfidence(winProb) : '—'}
                   </Mono>
                   <View className="mt-2 h-1 overflow-hidden rounded-pill bg-surface-hover">

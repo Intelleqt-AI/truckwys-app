@@ -101,7 +101,7 @@ import { CostBreakdownCard } from './quote/CostBreakdownCard';
 import { CostOverrides } from './quote/CostOverrides';
 import { TollBreakdownModal } from './quote/TollBreakdownModal';
 import { QuoteSentOverlay } from './quote/QuoteSentOverlay';
-import { collectIssues, missingPriceInputs, type QuoteIssue } from './quote/validation';
+import { collectIssues, formatGapList, missingPriceInputs, type QuoteIssue } from './quote/validation';
 import { QuoteFooterActions, type FooterStrip } from './quote/QuoteFooterActions';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
@@ -527,8 +527,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // the footer and the Price section can name the one that's actually missing
   // instead of both saying "a route" whatever the user has left blank.
   const priceGaps = useMemo(
-    () => missingPriceInputs({ customerId, vehicleType, pickup, delivery }),
-    [customerId, vehicleType, pickup, delivery],
+    () => missingPriceInputs({ customerId, vehicleType, pickup, delivery, weightKg }),
+    [customerId, vehicleType, pickup, delivery, weightKg],
   );
   const ready = priceGaps.length === 0;
 
@@ -549,9 +549,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           dest_lon: delivery.lon,
           dest_country: delivery.cc,
           vehicle_type: vehicleType || 'Flatbed',
-          // Default only for an empty field. It used to also catch a failed
-          // parse, so a comma weight estimated tolls for a 20-ton load.
-          weight_kg: weightKg || 20000,
+          // No fallback needed: this effect only runs once `ready`, and
+          // weight is now one of the priceGaps, so weightKg is guaranteed
+          // positive here.
+          weight_kg: weightKg,
           // Unresolved rows (no coords yet) are omitted rather than blocking
           // the calc — same shape RouteCalculatorView already parses for web.
           stops: stops.filter((s) => s.loc).map((s) => ({ lat: s.loc!.lat, lon: s.loc!.lon })),
@@ -1227,11 +1228,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // needs to change identity across renders.
   }, [jumpTo]);
 
-  // The footer's left half while the quote can't be priced yet. Only the first
-  // gap is named: the strip is one 26px line with numberOfLines={1}, and the
-  // jump bar's per-section dots already carry "how much is left overall".
-  // Kept as two primitives + a callback so QuoteFooterActions stays memo-safe.
-  const priceHint = priceGaps[0] ? `${priceGaps[0].action} to price this` : '';
+  // The footer's left half while the quote can't be priced yet. Deliberately
+  // generic rather than naming each gap: with up to four possible gaps
+  // (client, vehicle type, route, weight) the full list got long and
+  // truncated on the strip's single 26px line, and implied one field was the
+  // last thing needed right after it was filled. The Price section below
+  // still names every gap since it has room to wrap. Kept as two primitives +
+  // a callback so QuoteFooterActions stays memo-safe.
+  const priceHint = priceGaps.length ? 'Complete the form to see the price' : '';
   const priceHintSection = priceGaps[0]?.section ?? null;
   const onPriceHintPress = useCallback(() => {
     if (priceHintSection) jumpTo(priceHintSection);
@@ -1242,12 +1246,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // ("Add a route and load details to see pricing.") lumped together, one of
   // which — load details — isn't even a pricing prerequisite.
   const priceEmptyMessage = useMemo(() => {
-    if (priceGaps.length) {
-      const nouns = priceGaps.map((g) => g.noun);
-      const list =
-        nouns.length > 1 ? `${nouns.slice(0, -1).join(', ')} and ${nouns.at(-1)}` : nouns[0];
-      return `Add ${list} to see pricing.`;
-    }
+    if (priceGaps.length) return `Add ${formatGapList(priceGaps)} to see pricing.`;
     if (routeBlockedMessage) return "This route isn't allowed, so there's nothing to price.";
     if (routeBusy) return 'Working out the price…';
     return 'No route found between these points yet.';

@@ -144,6 +144,7 @@ export function DetailRow({
   value,
   mono = true,
   valueColor,
+  boldValue,
   last,
 }: {
   label: string;
@@ -152,6 +153,8 @@ export function DetailRow({
   value: string;
   mono?: boolean;
   valueColor?: string;
+  /** Bumps the value from font-medium to font-semibold, e.g. for a price. */
+  boldValue?: boolean;
   last?: boolean;
 }) {
   const ValueCmp = mono ? Mono : Txt;
@@ -174,7 +177,7 @@ export function DetailRow({
       <ValueCmp
         numberOfLines={1}
         ellipsizeMode="tail"
-        className="max-w-[62%] shrink-0 text-right text-sub font-medium text-fg"
+        className={`max-w-[62%] shrink-0 text-right text-sub text-fg ${boldValue ? 'font-semibold' : 'font-medium'}`}
         style={valueColor ? { color: valueColor } : undefined}
       >
         {value}

@@ -45,18 +45,16 @@ export interface CollectIssuesInput {
   deliveryDate: string;
 }
 
-// The four inputs `ready` gates pricing on, as a list rather than a boolean, so
+// The five inputs `ready` gates pricing on, as a list rather than a boolean, so
 // the footer strip and the Price section can say *which* of them is missing
 // instead of both guessing "a route". Separate from collectIssues because these
 // are pricing prerequisites, not save/send blockers — vehicleType, for one,
 // only blocks Send but is needed before a price can be worked out at all.
 export interface PriceGap {
-  field: 'client' | 'vehicleType' | 'route';
+  field: 'client' | 'vehicleType' | 'route' | 'weight';
   /** Where the footer hint jumps to when tapped. */
   section: SectionId;
-  /** Sentence-leading, for the footer: "Pick a client to price this". */
-  action: string;
-  /** List item, for the Price section: "Add a client and a route to see pricing." */
+  /** List item, joined by formatGapList: "Add a client and a route to see pricing." */
   noun: string;
 }
 
@@ -65,6 +63,7 @@ export interface MissingPriceInputsArg {
   vehicleType: string;
   pickup: Loc | null;
   delivery: Loc | null;
+  weightKg: number;
 }
 
 /**
@@ -78,27 +77,39 @@ export function missingPriceInputs({
   vehicleType,
   pickup,
   delivery,
+  weightKg,
 }: MissingPriceInputsArg): PriceGap[] {
   const gaps: PriceGap[] = [];
 
   if (!customerId) {
-    gaps.push({ field: 'client', section: 'client', action: 'Pick a client', noun: 'a client' });
+    gaps.push({ field: 'client', section: 'client', noun: 'a client' });
   }
   if (!vehicleType) {
-    gaps.push({
-      field: 'vehicleType',
-      section: 'client',
-      action: 'Pick a vehicle type',
-      noun: 'a vehicle type',
-    });
+    gaps.push({ field: 'vehicleType', section: 'client', noun: 'a vehicle type' });
   }
   // Collection and drop-off collapse into one gap: the strip is a single line,
   // and the inline LocationField errors already tell the two apart.
   if (!pickup?.lat || !delivery?.lat) {
-    gaps.push({ field: 'route', section: 'route', action: 'Add a route', noun: 'a route' });
+    gaps.push({ field: 'route', section: 'route', noun: 'a route' });
+  }
+  // Weight changes the price itself (surcharge above threshold, plus the
+  // toll/route estimate), so an unset weight isn't just a Send-blocker like
+  // pickup/delivery dates — it's a genuine pricing prerequisite.
+  if (!(weightKg > 0)) {
+    gaps.push({ field: 'weight', section: 'load', noun: 'the load weight' });
   }
 
   return gaps;
+}
+
+/**
+ * Joins gap nouns into one English list: "a client, a vehicle type and a
+ * route". Shared by the footer hint and the Price section's empty state so
+ * both name every outstanding requirement, not just the first.
+ */
+export function formatGapList(gaps: PriceGap[]): string {
+  const nouns = gaps.map((g) => g.noun);
+  return nouns.length > 1 ? `${nouns.slice(0, -1).join(', ')} and ${nouns.at(-1)}` : (nouns[0] ?? '');
 }
 
 export function collectIssues({

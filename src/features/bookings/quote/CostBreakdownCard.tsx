@@ -37,6 +37,7 @@ function CostBreakdownCardImpl({
         label="Fuel"
         hint={`${costs.consumption} L/100km @ ${formatCurrency(costs.fuelPrice)}`}
         value={formatCurrency(costs.fuelCost)}
+        boldValue
       />
       <Pressable
         onPress={onTollPress}
@@ -46,12 +47,12 @@ function CostBreakdownCardImpl({
         } Show toll plaza breakdown`}
         className="flex-row items-center justify-between border-b border-line-row px-3.5 py-3"
       >
-        <View className="shrink flex-1">
+        <View className="flex-1 shrink">
           <View className="flex-row items-center gap-1.5">
             <Txt className="shrink text-callout text-muted" numberOfLines={1}>
               Tolls (SA plazas)
             </Txt>
-            <Mono className="shrink-0 text-micro text-faint">Details</Mono>
+            <Icon name="alert" size={13} color="#888888" />
           </View>
           {costs.tollFree && costs.tollCost === 0 && (
             <Txt className="text-micro text-faint">No plazas on this route</Txt>
@@ -61,7 +62,7 @@ function CostBreakdownCardImpl({
             amount and chevron were free to overflow and be clipped by Group's
             overflow-hidden Card instead of the label giving way. */}
         <View className="shrink-0 flex-row items-center gap-1">
-          <Mono className="text-sub font-medium text-fg" numberOfLines={1}>
+          <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
             {formatCurrency(costs.tollCost)}
           </Mono>
           <Icon name="chevronRight" size={14} color="#888888" />
@@ -71,20 +72,23 @@ function CostBreakdownCardImpl({
         <DetailRow
           label="Cross-border / weighbridge"
           value={formatCurrency(costs.crossBorderCost)}
+          boldValue
         />
       )}
-      <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} />
+      <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} boldValue />
       {costs.weightSurcharge > 0 && (
         <DetailRow
           label="Weight surcharge"
           hint={formatPercent(costs.surchargePct)}
           value={formatCurrency(costs.weightSurcharge)}
+          boldValue
         />
       )}
       <DetailRow
         label="Base rate"
         hint={`${vehicleType || '—'} · ${formatCurrency(baseRateNum)}/km`}
         value={formatCurrency(costs.baseCost)}
+        boldValue
       />
       {serviceCharge !== 0 && (
         <Pressable
@@ -98,7 +102,7 @@ function CostBreakdownCardImpl({
             <Txt className="text-micro text-faint">From AI recommendation</Txt>
           </View>
           <View className="shrink-0 flex-row items-center gap-2">
-            <Mono className="text-sub font-medium text-fg" numberOfLines={1}>
+            <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
               {formatCurrency(serviceCharge)}
             </Mono>
             <Icon name="x" size={15} color="#888888" />
@@ -113,7 +117,7 @@ function CostBreakdownCardImpl({
         <Txt className="shrink text-callout font-semibold text-fg" numberOfLines={1}>
           Quote total
         </Txt>
-        <Mono className="shrink-0 text-heading font-semibold text-accent" numberOfLines={1}>
+        <Mono className="shrink-0 text-heading font-bold text-accent" numberOfLines={1}>
           {formatCurrency(costs.total)}
         </Mono>
       </View>

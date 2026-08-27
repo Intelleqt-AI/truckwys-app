@@ -111,9 +111,9 @@ function QuoteFooterActionsImpl({
               {calculating && <ActivityIndicator size="small" />}
             </>
           ) : (
-            // Tappable for the same reason the strip on the right is: the hint
-            // names one specific missing field, so it may as well take the user
-            // there. Chevron only when there's somewhere to go.
+            // Tappable for the same reason the strip on the right is: the
+            // hint itself is generic, but tapping still jumps to the first
+            // outstanding gap. Chevron only when there's somewhere to go.
             <Pressable
               onPress={onPriceHintPress}
               disabled={!onPriceHintPress}

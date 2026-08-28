@@ -48,3 +48,4 @@ export {
 export { SheetScreen } from './Sheet';
 export { SaveSuccessOverlay } from './SaveSuccessOverlay';
 export { Logo } from './Logo';
+export { LogoMark } from './LogoMark';

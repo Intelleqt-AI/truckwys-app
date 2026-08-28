@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
 import { View, Modal } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
-import { Screen, EmptyState, Button, Txt, Icon } from '@/components/ui';
-import { useTheme } from '@/theme/ThemeProvider';
+import { Screen, EmptyState, Button, Txt, LogoMark } from '@/components/ui';
 
 // ── Shimmer block ──────────────────────────────────────────────────────────
 export function Skeleton({
@@ -100,7 +99,7 @@ export function WorkingOverlay({ visible, title }: { visible: boolean; title: st
     <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View className="flex-1 items-center justify-center bg-black/70 px-10">
         <View className="w-full max-w-[300px] items-center rounded-sm border border-line bg-surface px-6 py-8">
-          <BreathingSparkle />
+          <BreathingLogo />
           <Txt className="mt-5 text-center text-callout font-medium text-fg">{title}</Txt>
           <Txt className="mt-1.5 text-center text-caption text-faint">This takes a few seconds</Txt>
         </View>
@@ -109,20 +108,21 @@ export function WorkingOverlay({ visible, title }: { visible: boolean; title: st
   );
 }
 
-/** Slow opacity+scale loop. Reads as "thinking" without implying progress. */
-function BreathingSparkle() {
-  const { colors } = useTheme();
+/** Slow opacity+scale breathing loop plus a slow continuous spin. Reads as "thinking" without implying progress. */
+function BreathingLogo() {
   const t = useSharedValue(0);
+  const spin = useSharedValue(0);
   useEffect(() => {
     t.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
-  }, [t]);
+    spin.value = withRepeat(withTiming(1, { duration: 4000, easing: Easing.linear }), -1, false);
+  }, [t, spin]);
   const style = useAnimatedStyle(() => ({
     opacity: 0.45 + t.value * 0.55,
-    transform: [{ scale: 0.88 + t.value * 0.24 }],
+    transform: [{ scale: 0.88 + t.value * 0.24 }, { rotate: `${spin.value * 360}deg` }],
   }));
   return (
     <Animated.View style={style}>
-      <Icon name="sparkle" size={34} color={colors.accent} />
+      <LogoMark size={34} />
     </Animated.View>
   );
 }

@@ -436,6 +436,23 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   }, [company, editing]);
 
+  // Selecting a vehicle type prefills R/km from that type's own configured
+  // rate, falling back to the company default if it has none set — mirrors
+  // web's applyVehicleType. Only fires on an actual dropdown selection, never
+  // as a passive effect keyed on vehicleType, so it can't re-fire and clobber
+  // the saved rate when an existing quote is loaded for editing.
+  const handleVehicleTypeSelect = (name: string) => {
+    setVehicleType(name);
+    const vt = (vtypes ?? []).find((v) => v.name === name);
+    const vtRate = Number(vt?.base_rate) || 0;
+    if (vtRate > 0) {
+      setBaseRatePerKm(String(vtRate));
+      return;
+    }
+    const def = num(pick(company ?? {}, ['default_base_rate_per_km']));
+    if (def > 0) setBaseRatePerKm(String(def));
+  };
+
   // Unsaved-changes baseline, fresh-quote case (Phase 4) — captured once,
   // after the base-rate prefill above has had its own deferred setTimeout(0)
   // a chance to settle. Without waiting for it, the default R/km landing a
@@ -928,21 +945,29 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // Same field the base-rate prefill effect reads — kept in sync with it so
   // "Use default" always offers the same figure that effect would have.
   const companyDefaultRate = num(pick(company ?? {}, ['default_base_rate_per_km']));
+  // The selected vehicle type's own rate wins over the company-wide default —
+  // same precedence as handleVehicleTypeSelect above — so reverting a quote
+  // that has a vehicle type with its own rate doesn't throw that away.
+  const effectiveDefaultRate = (() => {
+    const vt = (vtypes ?? []).find((v) => v.name === vehicleType);
+    const vtRate = Number(vt?.base_rate) || 0;
+    return vtRate > 0 ? vtRate : companyDefaultRate;
+  })();
   const overridden =
     tollEdited ||
     driverNum !== 0 ||
-    (companyDefaultRate > 0 && baseRatePerKm !== String(companyDefaultRate)) ||
+    (effectiveDefaultRate > 0 && baseRatePerKm !== String(effectiveDefaultRate)) ||
     serviceCharge !== 0;
 
   const resetTollToCalculated = () => {
     setTollEdited(false);
     setTollOverride('');
   };
-  const resetRateToDefault = () => setBaseRatePerKm(String(companyDefaultRate));
+  const resetRateToDefault = () => setBaseRatePerKm(String(effectiveDefaultRate));
   const resetAllOverrides = () => {
     resetTollToCalculated();
     setDriverAllowance('0');
-    if (companyDefaultRate > 0) setBaseRatePerKm(String(companyDefaultRate));
+    if (effectiveDefaultRate > 0) setBaseRatePerKm(String(effectiveDefaultRate));
     resetPriceToActual();
   };
 
@@ -1486,7 +1511,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 placeholder="Select vehicle type"
                 options={vtypeOptions}
                 value={vehicleType}
-                onSelect={setVehicleType}
+                onSelect={handleVehicleTypeSelect}
                 error={showIssue('vehicleType', false)}
               />
             </QuoteSection>
@@ -1708,9 +1733,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     driverAllowance={driverAllowance}
                     onDriverChangeText={setDriverAllowance}
                     baseRatePerKm={baseRatePerKm}
-                    companyDefaultRate={companyDefaultRate}
                     onRateChangeText={setBaseRatePerKm}
-                    onUseCompanyRate={resetRateToDefault}
                     overridden={overridden}
                     onResetAll={resetAllOverrides}
                   />

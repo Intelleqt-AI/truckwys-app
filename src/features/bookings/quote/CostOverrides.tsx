@@ -31,9 +31,7 @@ function CostOverridesImpl({
   driverAllowance,
   onDriverChangeText,
   baseRatePerKm,
-  companyDefaultRate,
   onRateChangeText,
-  onUseCompanyRate,
   overridden,
   onResetAll,
 }: {
@@ -46,18 +44,13 @@ function CostOverridesImpl({
   driverAllowance: string;
   onDriverChangeText: (v: string) => void;
   baseRatePerKm: string;
-  /** 0 when the company hasn't configured a default rate. */
-  companyDefaultRate: number;
   onRateChangeText: (v: string) => void;
-  onUseCompanyRate: () => void;
   /** Whether anything (tolls, driver, rate, or the AI price uplift) has
       actually been changed away from its calculated/default value. */
   overridden: boolean;
   onResetAll: () => void;
 }) {
   const tollDiffersFromCalculated = tollEdited && Math.round(tollOverrideNum) !== tollCalculated;
-  const rateDiffersFromDefault =
-    companyDefaultRate > 0 && baseRatePerKm.trim() !== String(companyDefaultRate);
 
   return (
     <Group
@@ -115,12 +108,6 @@ function CostOverridesImpl({
           onChangeText={onRateChangeText}
           bottomSheet
         />
-        {rateDiffersFromDefault && (
-          <RevertHint
-            label={`Company default: ${formatCurrency(companyDefaultRate)}`}
-            onPress={onUseCompanyRate}
-          />
-        )}
       </View>
     </Group>
   );

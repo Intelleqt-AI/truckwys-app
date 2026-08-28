@@ -91,10 +91,15 @@ export function computeCosts({
   // Pretoria↔Johannesburg = R0). So take the first *defined* value rather
   // than the first truthy one; `||` used to read an authoritative zero as
   // "missing" and invent a distance × rate toll that doesn't exist.
+  //
+  // When the route has no toll_cost_zar field at all (genuinely missing, not
+  // an authoritative zero), estimate it the same way web does: distance ×
+  // the company's default toll rate per km, falling back to a literal.
   const rawToll =
     pick(currentRoute, ['toll_cost_zar']) ?? pick(routeData ?? {}, ['toll_cost_zar']);
-  const routeTollOneWay = num(rawToll);
-  const tollFree = rawToll != null && routeTollOneWay === 0;
+  const tollFree = rawToll != null && num(rawToll) === 0;
+  const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
+  const routeTollOneWay = rawToll != null ? num(rawToll) : distance * tollRate;
   const tollCost = tollEdited ? tollOverrideNum : Math.round(routeTollOneWay * legs);
   const tollBreakdown = (
     asArray(pick(currentRoute, ['toll_breakdown'])).length

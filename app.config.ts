@@ -13,6 +13,12 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // mismatch (see extra.eas.projectId below, @intelleqt/truckwys).
   slug: 'truckwys',
   version: '1.0.0',
+  updates: {
+    url: 'https://u.expo.dev/0ef68ce5-03e0-46d7-b4c4-6fc1a9c5f170',
+  },
+  runtimeVersion: {
+    policy: 'fingerprint',
+  },
   orientation: 'portrait',
   icon: './assets/icon.png',
   scheme: 'truckwys',

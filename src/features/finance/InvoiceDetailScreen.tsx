@@ -41,6 +41,10 @@ type Props = NativeStackScreenProps<AppStackParamList, 'InvoiceDetail'>;
 const CAN_SEND = ['DRAFT', 'SENT', 'VIEWED'];
 const CAN_REMIND = ['SENT', 'VIEWED', 'OVERDUE'];
 const CAN_PAY = ['SENT', 'VIEWED', 'OVERDUE', 'PARTIALLY_PAID'];
+// Editing is only offered pre-send: once an invoice is SENT/VIEWED/PAID/etc.
+// the customer has already seen or paid it, so changing the customer/amount
+// afterward would be misleading.
+const CAN_EDIT = ['DRAFT'];
 
 export function InvoiceDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
@@ -184,10 +188,17 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
       // A draft has no business being shared — it isn't finalised, and its
       // view_token isn't minted until it's first sent, so the link wouldn't
-      // work anyway. Hide the action entirely rather than let it fail.
-      actionLabel={status === 'DRAFT' ? undefined : 'Share'}
-      actionIcon={status === 'DRAFT' ? undefined : 'share'}
-      onAction={status === 'DRAFT' ? undefined : share}
+      // work anyway. The header action slot is otherwise idle exactly when
+      // DRAFT, so Edit takes it over there instead (same actionLabel/
+      // actionIcon/onAction pattern as VehicleDetailScreen/DriverDetailScreen/
+      // CustomerDetailScreen's Edit button).
+      actionLabel={CAN_EDIT.includes(status) ? 'Edit' : 'Share'}
+      actionIcon={CAN_EDIT.includes(status) ? 'edit' : 'share'}
+      onAction={
+        CAN_EDIT.includes(status)
+          ? () => navigation.navigate('CreateInvoice', { id, preview: inv })
+          : share
+      }
       footer={
         <View className="gap-2.5">
           <View className="flex-row gap-2.5">

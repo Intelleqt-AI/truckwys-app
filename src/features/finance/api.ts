@@ -24,12 +24,27 @@ export function useExpenses() {
   });
 }
 
-export function useInvoice(id: string | number, preview?: Record<string, unknown>) {
+export function useInvoice(id: string | number, preview?: Record<string, unknown>, enabled = true) {
   return useQuery<Record<string, unknown>>({
     queryKey: ['invoice', id],
     queryFn: () => fetchData(`invoices/${id}/`),
     // See bookings/api.ts useQuote — placeholderData, not initialData.
     placeholderData: preview,
+    // `enabled` gated so CreateInvoiceScreen can call this unconditionally on
+    // both create and edit without firing GET invoices// when there's no id.
+    enabled: enabled && !!id,
+  });
+}
+
+/** Single-record expense fetch — used by AddExpenseScreen's edit-mode refetch
+ * so a stale `preview` can't clobber fresher data (same fix as fleet's
+ * useVehicle/useDriver). */
+export function useExpense(id: string | number, preview?: Record<string, unknown>, enabled = true) {
+  return useQuery<Record<string, unknown>>({
+    queryKey: ['expense', id],
+    queryFn: () => fetchData(`expenses/${id}/`),
+    initialData: preview,
+    enabled: enabled && !!id,
   });
 }
 
@@ -83,6 +98,9 @@ export interface FinanceReports {
 // ── Mutations / actions ─────────────────────────────────────────────────────
 export const createInvoice = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'invoices/', data });
+
+export const updateInvoice = (id: string | number, data: Record<string, unknown>) =>
+  patchData<Record<string, unknown>>({ url: `invoices/${id}/`, data });
 
 export const generateInvoicePdf = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `invoices/${id}/generate_pdf/`, data: {} });

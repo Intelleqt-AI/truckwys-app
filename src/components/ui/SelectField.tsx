@@ -1,10 +1,12 @@
 import { memo, useMemo, useState } from 'react';
 import { View, Pressable, Modal, FlatList } from 'react-native';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, FieldLabel } from './Text';
 import { Icon, type IconName } from './icons';
-import { SearchField } from './forms';
+import { SearchField, FieldMessage } from './forms';
 import { useTheme } from '@/theme/ThemeProvider';
+import { status as statusHues, motion } from '@/theme/tokens';
 
 export interface Option {
   label: string;
@@ -24,6 +26,7 @@ function SelectFieldImpl({
   onSelect,
   icon,
   error,
+  warning,
   required,
 }: {
   label?: string;
@@ -33,6 +36,8 @@ function SelectFieldImpl({
   onSelect: (value: string) => void;
   icon?: IconName;
   error?: string;
+  /** Amber advisory message — shown only when `error` is absent, never blocks. */
+  warning?: string;
   /** Renders a danger-coloured * after the label. Presentational only. */
   required?: boolean;
 }) {
@@ -52,25 +57,31 @@ function SelectFieldImpl({
     [unique, q],
   );
 
+  const borderStyle = useAnimatedStyle(() => ({
+    borderColor: withTiming(error ? statusHues.danger : warning ? statusHues.warning : colors.line, {
+      duration: motion.fast,
+    }),
+  }));
+
   return (
     <View>
       <FieldLabel label={label} required={required} />
-      <Pressable
-        onPress={() => setOpen(true)}
-        className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${
-          error ? 'border-danger' : 'border-line'
-        }`}
-      >
-        {icon && <Icon name={icon} size={17} color={selected ? colors.accent : colors.faint} />}
-        <Txt
-          className={`flex-1 text-body ${selected ? 'text-fg' : 'text-faint'}`}
-          numberOfLines={1}
+      <Pressable onPress={() => setOpen(true)}>
+        <Animated.View
+          className="min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3"
+          style={borderStyle}
         >
-          {selected?.label ?? placeholder}
-        </Txt>
-        <Icon name="chevronDown" size={16} color={colors.faint} />
+          {icon && <Icon name={icon} size={17} color={selected ? colors.accent : colors.faint} />}
+          <Txt
+            className={`flex-1 text-body ${selected ? 'text-fg' : 'text-faint'}`}
+            numberOfLines={1}
+          >
+            {selected?.label ?? placeholder}
+          </Txt>
+          <Icon name="chevronDown" size={16} color={colors.faint} />
+        </Animated.View>
       </Pressable>
-      {error && <Mono className="mt-1 text-micro text-danger">{error}</Mono>}
+      <FieldMessage error={error} warning={warning} />
 
       <Modal
         visible={open}

@@ -1,6 +1,10 @@
-import { type ReactNode, useLayoutEffect, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useLayoutEffect, useCallback, useEffect, useRef, useState } from 'react';
 import { View, Pressable, RefreshControl, Platform, TouchableOpacity } from 'react-native';
-import { KeyboardAwareScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
+import {
+  KeyboardAwareScrollView,
+  KeyboardStickyView,
+  type KeyboardAwareScrollViewRef,
+} from 'react-native-keyboard-controller';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Mono, Label } from './Text';
@@ -94,6 +98,7 @@ export function SheetScreen({
   variant = 'push',
   onRefresh,
   refreshing,
+  scrollRef,
 }: {
   eyebrow?: string;
   title?: string;
@@ -108,6 +113,10 @@ export function SheetScreen({
   // Opt-in pull-to-refresh. Screens whose data can change server-side (the
   // notification inbox, detail screens) should pass this.
   onRefresh?: () => void;
+  // Lets a form scroll a failed-validation field into view (useFieldAnchors).
+  // Optional — most SheetScreen callers have no need to reach into the scroll
+  // view themselves.
+  scrollRef?: RefObject<KeyboardAwareScrollViewRef | null>;
   refreshing?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -270,6 +279,7 @@ export function SheetScreen({
     <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
       <KeyboardAwareScrollView
+        ref={scrollRef}
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={{

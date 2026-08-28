@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { forwardRef, useId, useState } from 'react';
 import {
   View,
   TextInput,
@@ -8,11 +8,26 @@ import {
   InputAccessoryView,
   type TextInputProps,
 } from 'react-native';
+import Animated, { FadeInDown, FadeOut, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { Txt, Mono, Label, FieldLabel, INPUT_TEXT } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
+import { status as statusHues, motion } from '@/theme/tokens';
 import { parseNum, formatNumber, formatPlain } from '@/lib/formatters';
+
+// Shared by TextField/SelectField/DateField: the error-or-warning message row,
+// with its own enter/exit so the field settles in one motion instead of the
+// text popping in and the border flipping colour at different beats.
+export function FieldMessage({ error, warning }: { error?: string; warning?: string }) {
+  const message = error ?? warning;
+  if (!message) return null;
+  return (
+    <Animated.View entering={FadeInDown.duration(motion.fast)} exiting={FadeOut.duration(120)}>
+      <Mono className={`mt-1 text-micro ${error ? 'text-danger' : 'text-warning'}`}>{message}</Mono>
+    </Animated.View>
+  );
+}
 
 /**
  * A Done bar over the keyboard.
@@ -49,23 +64,13 @@ export function KeyboardDoneBar({ nativeID }: { nativeID: string }) {
 }
 
 // ── TextField: label + input + error, 2px radius, 44px min height ──────────
-export function TextField({
-  label,
-  error,
-  icon,
-  prefix,
-  numeric,
-  decimals,
-  secureTextEntry,
-  required,
-  className = '',
-  bottomSheet,
-  ...props
-}: TextInputProps & {
+export interface TextFieldProps extends TextInputProps {
   label?: string;
   /** Renders a danger-coloured * after the label. Presentational only. */
   required?: boolean;
   error?: string;
+  /** Amber advisory message — shown only when `error` is absent, never blocks. */
+  warning?: string;
   icon?: IconName;
   /** Leading unit, e.g. `R` for money. Rendered in Mono so it lines up with the digits. */
   prefix?: string;
@@ -80,7 +85,29 @@ export function TextField({
    * sheet can't track focus to keep the field above the keyboard.
    */
   bottomSheet?: boolean;
-}) {
+}
+
+// Forwards a ref to the underlying input so a form can call `.focus()` on the
+// first invalid field after a failed submit (see useFieldAnchors). Typed
+// against RN's TextInput — BottomSheetTextInput exposes the same instance
+// methods, it just isn't declared as a TextInput subclass.
+export const TextField = forwardRef<TextInput, TextFieldProps>(function TextField(
+  {
+    label,
+    error,
+    warning,
+    icon,
+    prefix,
+    numeric,
+    decimals,
+    secureTextEntry,
+    required,
+    className = '',
+    bottomSheet,
+    ...props
+  },
+  ref,
+) {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(!!secureTextEntry);
@@ -119,17 +146,26 @@ export function TextField({
 
   const Input = bottomSheet ? BottomSheetTextInput : TextInput;
 
+  // Border colour eases between states instead of snapping, so a field that
+  // fails validation on blur reads as a soft rejection rather than a jump-cut.
+  const borderStyle = useAnimatedStyle(() => ({
+    borderColor: withTiming(
+      error ? statusHues.danger : warning ? statusHues.warning : focused ? colors.accent : colors.line,
+      { duration: motion.fast },
+    ),
+  }));
+
   return (
     <View className={className}>
       <FieldLabel label={label} required={required} />
-      <View
-        className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${
-          error ? 'border-danger' : focused ? 'border-accent' : 'border-line'
-        }`}
+      <Animated.View
+        className="min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3"
+        style={borderStyle}
       >
         {icon && <Icon name={icon} size={17} color={colors.faint} />}
         {prefix && <Mono className="text-body text-muted">{prefix}</Mono>}
         <Input
+          ref={ref as never}
           className="flex-1 text-fg"
           placeholderTextColor={colors.faint}
           secureTextEntry={hidden}
@@ -151,12 +187,12 @@ export function TextField({
             <Icon name="eye" size={18} color={colors.faint} />
           </Pressable>
         )}
-      </View>
-      {error && <Mono className="mt-1 text-micro text-danger">{error}</Mono>}
+      </Animated.View>
+      <FieldMessage error={error} warning={warning} />
       <KeyboardDoneBar nativeID={accessoryID} />
     </View>
   );
-}
+});
 
 // ── SearchField ────────────────────────────────────────────────────────────
 export function SearchField({

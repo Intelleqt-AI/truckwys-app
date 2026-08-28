@@ -15,7 +15,6 @@ import Animated, {
   interpolateColor,
   useAnimatedStyle,
   useSharedValue,
-  withSequence,
   withSpring,
   withTiming,
   type SharedValue,
@@ -39,6 +38,7 @@ import {
 } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
+import { useErrorShake } from '@/hooks/useErrorShake';
 
 // Shared sign-in-flow primitives — the flat, no-card dark look with animated
 // focus/press/shake and staggered entrance, used by every screen in the auth
@@ -238,26 +238,11 @@ export function AuthTextLink({
   );
 }
 
-// ── useErrorShake: one motion cue for "this didn't go through" ─────────────
-// Shared by every form in the auth stack — a rejected submit (validation or
-// API) shakes the field stack and fires an error haptic.
-export function useErrorShake() {
-  const shakeX = useSharedValue(0);
-  const shakeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: shakeX.value }] }));
-
-  const trigger = () => {
-    shakeX.value = withSequence(
-      withTiming(-6, { duration: 45 }),
-      withTiming(6, { duration: 90 }),
-      withTiming(-4, { duration: 90 }),
-      withTiming(0, { duration: 60 }),
-    );
-    if (Platform.OS !== 'web')
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-  };
-
-  return { shakeStyle, trigger };
-}
+// useErrorShake moved to `src/hooks/useErrorShake.ts` (Fleet's forms need it
+// too, without importing from features/auth). Re-exported here so the four
+// existing auth-stack imports (LoginScreen, ResetPasswordScreen,
+// ForgotPasswordScreen, VerifyOtpScreen) keep working unchanged.
+export { useErrorShake };
 
 // ── SignInField: boxed input with animated focus border + ring ─────────────
 export function SignInField({

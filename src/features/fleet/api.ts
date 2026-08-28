@@ -22,11 +22,14 @@ export function useDrivers() {
   });
 }
 
-export function useVehicle(id: string | number, preview?: Record<string, unknown>) {
+export function useVehicle(id: string | number, preview?: Record<string, unknown>, enabled = true) {
   return useQuery<Record<string, unknown>>({
     queryKey: ['vehicle', id],
     queryFn: () => fetchData(`vehicles/${id}/`),
     initialData: preview,
+    // Matches useDriver's gate — AddVehicleScreen calls this unconditionally
+    // (create or edit) and must not fire `GET vehicles//` when there's no id.
+    enabled: enabled && !!id,
   });
 }
 

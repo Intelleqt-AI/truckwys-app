@@ -49,6 +49,15 @@ export function useDriver(id: string | number, preview?: Record<string, unknown>
   });
 }
 
+// Loads for one driver — powers the driver-detail Recent loads block.
+export function useDriverLoads(id: string | number) {
+  return useQuery<Record<string, unknown>[]>({
+    queryKey: ['driver-loads', id],
+    queryFn: async () => asArray(await fetchData(`loads/?driver=${id}&page_size=50`)),
+    enabled: !!id,
+  });
+}
+
 /** capacity is in tons here — the Vehicle form displays tons and sends kg. */
 export interface VehicleTypeOption {
   id: number | string;
@@ -70,6 +79,8 @@ export const VEHICLE_STATUSES = [
   'OUT_OF_SERVICE',
   'INACTIVE',
 ] as const;
+
+export const DRIVER_STATUSES = ['ACTIVE', 'INACTIVE', 'ON_LEAVE'] as const;
 
 export const createVehicle = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'vehicles/', data });

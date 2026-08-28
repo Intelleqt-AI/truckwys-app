@@ -235,16 +235,16 @@ function ExpensesTab() {
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3 flex-row flex-wrap gap-3">
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Total (MTD)" value={formatCurrencyCompact(totalMtd)} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Pending approval" value={`${pending.length} · ${formatCurrencyCompact(pendingAmount)}`} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Fuel (MTD)" value={formatCurrencyCompact(fuelMtd)} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard
                 label="Top category"
                 value={topEntry ? `${expenseCategoryLabel(topEntry[0])}` : 'N/A'}
@@ -308,16 +308,16 @@ function ReportsTab() {
       }
     >
       <View className="mb-5 flex-row flex-wrap gap-3">
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Total revenue" value={formatCurrencyCompact(f.totalRevenue)} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Net margin" value={formatPercent(f.netMarginPct)} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Outstanding" value={formatCurrencyCompact(f.outstanding)} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="DSO" value={`${formatNumber(f.dso, { maximumFractionDigits: 1 })}d`} />
         </View>
       </View>

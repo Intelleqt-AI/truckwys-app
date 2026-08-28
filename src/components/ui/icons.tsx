@@ -51,6 +51,8 @@ import {
   Mail,
   EyeOff,
   ExternalLink,
+  IdCard,
+  IdCardLanyard,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -110,6 +112,8 @@ export const icons = {
   mail: Mail,
   eyeOff: EyeOff,
   externalLink: ExternalLink,
+  idCard: IdCard,
+  idCardLanyard: IdCardLanyard,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

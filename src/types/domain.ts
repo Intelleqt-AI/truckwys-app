@@ -111,18 +111,45 @@ export const normalizeVehicle = (v: Raw): VehicleLite => {
 export interface DriverLite {
   id: string | number;
   name: string;
+  phone?: string;
+  licenseNumber?: string;
+  avatar?: string;
   status: string;
   safetyScore?: number;
   raw: Raw;
 }
 
-export const normalizeDriver = (d: Raw): DriverLite => ({
-  id: (pick(d, ['id', 'pk']) as string | number) ?? '',
-  name: str(pick(d, ['name', 'full_name', 'driver_name']), 'Driver'),
-  status: str(pick(d, ['status']), 'ACTIVE').toUpperCase(),
-  safetyScore: pick(d, ['safety_score']) != null ? num(pick(d, ['safety_score'])) : undefined,
-  raw: d,
-});
+// The drivers endpoint carries no top-level name — DriverSerializer exposes it
+// only inside nested user_details, and `name` there is Django's get_full_name(),
+// which is "" when both name parts are blank. Reading top-level keys made every
+// row fall through to a bare 'Driver' fallback.
+export const resolveDriverName = (d: Raw): string => {
+  const u = (pick(d, ['user_details']) ?? {}) as Raw;
+  const full = [str(pick(u, ['first_name'])), str(pick(u, ['last_name']))]
+    .filter(Boolean)
+    .join(' ');
+  return (
+    str(pick(u, ['name'])) ||
+    full ||
+    str(pick(u, ['username'])) ||
+    str(pick(d, ['name', 'full_name', 'driver_name'])) ||
+    `Driver #${str(pick(d, ['id', 'pk']), '—')}`
+  );
+};
+
+export const normalizeDriver = (d: Raw): DriverLite => {
+  const u = (pick(d, ['user_details']) ?? {}) as Raw;
+  return {
+    id: (pick(d, ['id', 'pk']) as string | number) ?? '',
+    name: resolveDriverName(d),
+    phone: str(pick(u, ['phone'])) || undefined,
+    licenseNumber: str(pick(d, ['license_number'])) || undefined,
+    avatar: str(pick(u, ['avatar'])) || undefined,
+    status: str(pick(d, ['status']), 'ACTIVE').toUpperCase(),
+    safetyScore: pick(d, ['safety_score']) != null ? num(pick(d, ['safety_score'])) : undefined,
+    raw: d,
+  };
+};
 
 export interface InvoiceLite {
   id: string | number;

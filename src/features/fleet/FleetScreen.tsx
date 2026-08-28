@@ -14,6 +14,7 @@ import {
   ListRow,
   IconButton,
   Icon,
+  Avatar,
   Mono,
   EmptyState,
 } from '@/components/ui';
@@ -38,7 +39,7 @@ const VEHICLE_FILTERS = [
 const DRIVER_FILTERS = [
   { label: 'All', value: 'ALL' },
   { label: 'Active', value: 'ACTIVE' },
-  { label: 'On duty', value: 'ON_DUTY' },
+  { label: 'On leave', value: 'ON_LEAVE' },
   { label: 'Inactive', value: 'INACTIVE' },
 ];
 
@@ -134,6 +135,7 @@ function VehiclesTab() {
             leading={<Icon name="truck" size={22} color={colors.muted} />}
             title={item.name}
             subtitle={item.plate}
+            subtitleIcon="idCard"
             trailing={
               <View className="items-end gap-1">
                 {item.aiHealthScore != null && (
@@ -163,7 +165,10 @@ function DriversTab() {
       (data ?? []).filter(
         (d) =>
           (filter === 'ALL' || d.status === filter) &&
-          (!q || d.name.toLowerCase().includes(q.toLowerCase())),
+          (!q ||
+            `${d.name} ${d.phone ?? ''} ${d.licenseNumber ?? ''}`
+              .toLowerCase()
+              .includes(q.toLowerCase())),
       ),
     [data, filter, q],
   );
@@ -188,10 +193,8 @@ function DriversTab() {
           <View className="mb-3 flex-row gap-3">
             <StatCard label="Drivers" value={String(data.length)} />
             <StatCard
-              label="On duty"
-              value={String(
-                data.filter((d) => ['ACTIVE', 'ON_DUTY', 'IN_USE'].includes(d.status)).length,
-              )}
+              label="Active"
+              value={String(data.filter((d) => d.status === 'ACTIVE').length)}
             />
           </View>
           <View className="mb-3">
@@ -206,8 +209,10 @@ function DriversTab() {
       renderItem={({ item }) => (
         <View className="mb-2.5 overflow-hidden rounded-xs border border-line bg-surface">
           <ListRow
-            leading={<Icon name="user" size={22} color="#888888" />}
+            leading={<Avatar name={item.name} uri={item.avatar} size={36} />}
             title={item.name}
+            subtitle={item.phone || item.licenseNumber}
+            subtitleIcon={item.phone ? 'phone' : 'idCardLanyard'}
             trailing={
               <View className="items-end gap-1">
                 {item.safetyScore != null && (

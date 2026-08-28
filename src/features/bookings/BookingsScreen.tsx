@@ -341,7 +341,11 @@ function LoadList({
         <View className="mb-3">
           <View className="mb-3 flex-row flex-wrap justify-between">
             {stats.map((s) => (
-              <View key={s.label} style={{ width: '48%', marginBottom: 10 }}>
+              <View
+                key={s.label}
+                className="flex-row"
+                style={{ width: '48%', marginBottom: 10 }}
+              >
                 <StatCard label={s.label} value={s.value} />
               </View>
             ))}

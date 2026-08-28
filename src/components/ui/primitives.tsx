@@ -290,6 +290,7 @@ const STATUS_MAP: Record<string, { tone: BadgeTone; label: string }> = {
   MAINTENANCE: { tone: 'warning', label: 'Maintenance' },
   INACTIVE: { tone: 'neutral', label: 'Inactive' },
   OUT_OF_SERVICE: { tone: 'neutral', label: 'Out of Service' },
+  ON_LEAVE: { tone: 'warning', label: 'On Leave' },
   // Load / job
   PENDING: { tone: 'warning', label: 'Pending' },
   ASSIGNED: { tone: 'info', label: 'Assigned' },

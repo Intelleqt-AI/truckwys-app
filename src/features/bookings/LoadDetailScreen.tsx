@@ -238,19 +238,19 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Metrics */}
       <View className="mb-5 flex-row flex-wrap gap-3">
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Total amount" value={formatCurrency(total, { maximumFractionDigits: 0 })} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Distance" value={`${formatNumber(distance)} km`} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard
             label="Weight"
             value={`${formatNumber(num(pick(l, ['weight'])) / 1000, { maximumFractionDigits: 0 })} t`}
           />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Rate / km" value={formatCurrency(ratePerKm)} />
         </View>
       </View>

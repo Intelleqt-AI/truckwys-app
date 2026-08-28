@@ -7,6 +7,19 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
 
 // ── StatCard / KPI tile: mono caps label + big mono value + delta ──────────
+/**
+ * The root `Card` is `flex-1` (`flex: 1 1 0%`), so this MUST sit directly
+ * inside a `flex-row` parent — that's where `flexBasis: 0` means "equal
+ * widths, height auto", which is what every stat grid wants.
+ *
+ * A fixed-width `<View style={{ width: '48%' }}>` column wrapper breaks this:
+ * it's column-direction with `height: auto`, so the `flexBasis: 0` lands on
+ * the vertical axis instead. CSS would clamp that back up via
+ * `min-height: auto`, but Yoga has no such clamp, so the tile collapses to
+ * its padding and the label/value render outside the box. Give the wrapper
+ * `className="flex-row"` alongside its fixed width to keep flex-1 meaning
+ * "fill this width" rather than "collapse this height".
+ */
 export function StatCard({
   label,
   value,
@@ -44,6 +57,7 @@ export function StatCard({
 export function ListRow({
   title,
   subtitle,
+  subtitleIcon,
   leading,
   trailing,
   onPress,
@@ -51,6 +65,7 @@ export function ListRow({
 }: {
   title: string;
   subtitle?: string;
+  subtitleIcon?: IconName;
   leading?: ReactNode;
   trailing?: ReactNode;
   onPress?: () => void;
@@ -72,9 +87,12 @@ export function ListRow({
           {title}
         </Txt>
         {subtitle && (
-          <Txt className="mt-0.5 text-caption text-muted" numberOfLines={1}>
-            {subtitle}
-          </Txt>
+          <View className="mt-0.5 flex-row items-center gap-1.5">
+            {subtitleIcon && <Icon name={subtitleIcon} size={14} color={colors.faint} />}
+            <Txt className="flex-1 text-caption text-muted" numberOfLines={1}>
+              {subtitle}
+            </Txt>
+          </View>
         )}
       </View>
       {trailing ?? (onPress && <Icon name="chevronRight" size={16} color={colors.faint} />)}

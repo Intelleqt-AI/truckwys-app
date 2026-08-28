@@ -101,16 +101,16 @@ function Cashflow() {
       showsVerticalScrollIndicator={false}
     >
       <View className="flex-row flex-wrap gap-3">
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Inflow" value={formatCurrencyCompact(num(pick(data, ['inflow', 'total_inflow'])))} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Outflow" value={formatCurrencyCompact(num(pick(data, ['outflow', 'total_outflow'])))} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Net position" value={formatCurrencyCompact(num(pick(data, ['net', 'net_position'])))} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Projected" value={formatCurrencyCompact(num(pick(data, ['projected', 'forecast'])))} />
         </View>
       </View>

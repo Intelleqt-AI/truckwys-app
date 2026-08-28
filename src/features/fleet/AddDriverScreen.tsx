@@ -11,6 +11,7 @@ import {
   updateVehicle,
   useDriver,
   useVehicles,
+  DRIVER_STATUSES,
 } from './api';
 import { str, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
@@ -20,7 +21,7 @@ import type { AppStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<AppStackParamList, 'AddDriver'>;
 
 const PROVINCES = ['GP', 'WC', 'KZN', 'EC', 'MP', 'LP', 'NW', 'FS', 'NC'].map((v) => ({ label: v, value: v }));
-const STATUSES = ['ACTIVE', 'INACTIVE', 'ON_LEAVE'].map((v) => ({ label: v.replace(/_/g, ' '), value: v }));
+const STATUSES = DRIVER_STATUSES.map((v) => ({ label: v.replace(/_/g, ' '), value: v }));
 
 export function AddDriverScreen({ route, navigation }: Props) {
   const editId = route.params?.id;

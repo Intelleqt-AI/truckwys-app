@@ -151,16 +151,16 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
       {tab === 'overview' ? (
         <>
           <View className="mb-5 flex-row flex-wrap gap-3">
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="AI health score" value={`${num(pick(v, ['ai_health_score', 'health_score']))}/100`} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Fuel efficiency" value={`${num(pick(v, ['fuel_efficiency_score']))}/100`} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Uptime" value={formatPercent(num(pick(v, ['uptime_percentage'])))} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Mileage" value={`${formatNumber(mileage)} km`} />
             </View>
           </View>
@@ -208,16 +208,16 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
       ) : (
         <>
           <View className="mb-5 flex-row flex-wrap gap-3">
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Revenue" value={formatCurrencyCompact(totalRevenue)} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Avg / trip" value={formatCurrencyCompact(avgRevPerTrip)} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Revenue / km" value={formatCurrency(revPerKm)} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="AI health" value={`${num(pick(v, ['ai_health_score']))}/100`} />
             </View>
           </View>

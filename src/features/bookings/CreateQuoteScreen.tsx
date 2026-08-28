@@ -101,7 +101,12 @@ import { CostBreakdownCard } from './quote/CostBreakdownCard';
 import { CostOverrides } from './quote/CostOverrides';
 import { TollBreakdownModal } from './quote/TollBreakdownModal';
 import { QuoteSentOverlay } from './quote/QuoteSentOverlay';
-import { collectIssues, formatGapList, missingPriceInputs, type QuoteIssue } from './quote/validation';
+import {
+  collectIssues,
+  formatGapList,
+  missingPriceInputs,
+  type QuoteIssue,
+} from './quote/validation';
 import { QuoteFooterActions, type FooterStrip } from './quote/QuoteFooterActions';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
@@ -1037,7 +1042,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       : new Set(
           issues
             .filter((i) =>
-              submitAttempted === 'send' ? i.blocks === 'both' || i.blocks === 'send' : i.blocks === 'both',
+              submitAttempted === 'send'
+                ? i.blocks === 'both' || i.blocks === 'send'
+                : i.blocks === 'both',
             )
             .map((i) => i.section),
         );
@@ -1094,7 +1101,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // pickup/dropoff, which the backend requires unconditionally (no
     // draft-specific relaxation for pickup_location/delivery_location).
     if (!customerId) return toast.error('Select a client');
-    if (!pickup?.lat || !delivery?.lat) return toast.error('Set a collection point and drop-off first');
+    if (!pickup?.lat || !delivery?.lat)
+      return toast.error('Set a collection point and drop-off first');
     if (routeBlockedMessage) return toast.error(routeBlockedMessage);
     if (send) {
       if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
@@ -1270,8 +1278,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!submitAttempted) return null;
     const blocking = issues.filter(
       (i) =>
-        (submitAttempted === 'send' ? i.blocks === 'both' || i.blocks === 'send' : i.blocks === 'both') &&
-        i.fixable,
+        (submitAttempted === 'send'
+          ? i.blocks === 'both' || i.blocks === 'send'
+          : i.blocks === 'both') && i.fixable,
     );
     if (!blocking.length) return null;
     return {
@@ -1461,7 +1470,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             {/* Five visible groupings (Phase 2) — still one continuous scroll, no
             accordion, no wizard. QuoteJumpBar above scrolls to each; the
             fields themselves keep the exact props/handlers they had before. */}
-            <QuoteSection id="client" label="Client" onLayout={registerSectionY}>
+            <QuoteSection id="client" label="" onLayout={registerSectionY}>
               <SelectField
                 label="Client"
                 icon="user"

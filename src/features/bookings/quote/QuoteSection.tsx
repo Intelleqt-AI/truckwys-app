@@ -29,7 +29,7 @@ export function QuoteSection({
   );
   return (
     <View onLayout={onLayout ? handleLayout : undefined} className="gap-4">
-      <SectionLabel>{label}</SectionLabel>
+      {label && <SectionLabel>{label}</SectionLabel>}
       {children}
     </View>
   );

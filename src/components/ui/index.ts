@@ -43,6 +43,7 @@ export {
   DetailRow,
   EmptyState,
   Timeline,
+  type TimelineStep,
   RoutePreview,
 } from './data';
 export { SheetScreen } from './Sheet';

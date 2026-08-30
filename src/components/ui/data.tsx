@@ -1,10 +1,17 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useEffect, type ReactNode } from 'react';
 import { View, Pressable, ActivityIndicator } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { Txt, Mono, Label } from './Text';
 import { Card } from './primitives';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
+import { status as statusHues, motion } from '@/theme/tokens';
 
 // ── StatCard / KPI tile: mono caps label + big mono value + delta ──────────
 /**
@@ -229,50 +236,125 @@ export function EmptyState({
   );
 }
 
-// ── Timeline: vertical status steps ────────────────────────────────────────
-export function Timeline({
-  steps,
-}: {
-  steps: { label: string; time?: string; done?: boolean; color?: string }[];
-}) {
-  const { colors } = useTheme();
+// ── Timeline: vertical status steps (done / current / upcoming) ────────────
+export type TimelineStep = {
+  label: string;
+  time?: string;
+  /** Prose second line instead of a mono timestamp — a driver name, an invoice number. */
+  meta?: string;
+  done?: boolean;
+  /** The in-progress step: a ring instead of a fill, plus a pulsing halo. */
+  current?: boolean;
+  color?: string;
+};
+
+export function Timeline({ steps }: { steps: TimelineStep[] }) {
   return (
     <View>
-      {steps.map((s, i) => {
-        const last = i === steps.length - 1;
-        const color = s.done ? (s.color ?? statusHues.success) : colors.faint;
-        return (
-          <View key={`${s.label}-${i}`} className="flex-row gap-3.5" style={{ minHeight: last ? 32 : 56 }}>
-            <View className="items-center">
-              <View
-                className="items-center justify-center"
-                style={{
+      {steps.map((s, i) => (
+        <TimelineRow key={`${s.label}-${i}`} step={s} last={i === steps.length - 1} />
+      ))}
+    </View>
+  );
+}
+
+function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
+  const { colors } = useTheme();
+  const color = s.color ?? statusHues.success;
+  const ringColor = s.done || s.current ? color : colors.faint;
+
+  // The one allowed loop (see LiveDot) — scales a halo ring behind the marker
+  // while this step is the current one, then stops as soon as it isn't.
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    if (!s.current) {
+      pulse.value = 0;
+      return;
+    }
+    pulse.value = withRepeat(
+      withSequence(withTiming(1, { duration: 900 }), withTiming(0, { duration: 900 })),
+      -1,
+      false,
+    );
+  }, [pulse, s.current]);
+  const halo = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + pulse.value * 0.7 }],
+    opacity: (1 - pulse.value) * 0.6,
+  }));
+
+  const ringStyle = useAnimatedStyle(() => ({
+    borderColor: withTiming(ringColor, { duration: motion.smooth }),
+  }));
+
+  return (
+    <View className="flex-row gap-3.5" style={{ minHeight: last ? 28 : 44 }}>
+      <View className="items-center">
+        <View className="items-center justify-center" style={{ width: 22, height: 22 }}>
+          {s.current && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                {
+                  position: 'absolute',
                   width: 22,
                   height: 22,
                   borderRadius: 22,
-                  borderWidth: 2,
-                  borderColor: color,
-                  backgroundColor: s.done ? color : 'transparent',
-                }}
-              >
-                {s.done && <Icon name="check" size={12} color={colors.bgDeep} strokeWidth={3} />}
-              </View>
-              {!last && (
-                <View
-                  className="flex-1"
-                  style={{ width: 2, marginTop: 2, backgroundColor: s.done ? color : colors.line }}
-                />
-              )}
-            </View>
-            <View className="flex-1" style={{ paddingBottom: last ? 0 : 12 }}>
-              <Txt className={`text-callout font-medium ${s.done ? 'text-fg' : 'text-muted'}`}>
-                {s.label}
-              </Txt>
-              {s.time && <Mono className="mt-0.5 text-micro text-faint">{s.time}</Mono>}
-            </View>
-          </View>
-        );
-      })}
+                  backgroundColor: colors.pulse,
+                },
+                halo,
+              ]}
+            />
+          )}
+          <Animated.View
+            className="items-center justify-center"
+            style={[
+              {
+                width: 22,
+                height: 22,
+                borderRadius: 22,
+                borderWidth: 2,
+                backgroundColor: s.done ? color : 'transparent',
+              },
+              ringStyle,
+            ]}
+          >
+            {s.done && <Icon name="check" size={12} color={colors.bgDeep} strokeWidth={3} />}
+          </Animated.View>
+        </View>
+        {!last &&
+          (s.done ? (
+            <View className="flex-1" style={{ width: 2, marginTop: 2, backgroundColor: color }} />
+          ) : (
+            <View
+              className="flex-1"
+              style={{
+                width: 0,
+                marginTop: 2,
+                borderLeftWidth: 2,
+                borderStyle: 'dashed',
+                borderColor: colors.line,
+              }}
+            />
+          ))}
+      </View>
+      <View className="flex-1" style={{ paddingBottom: last ? 0 : 10 }}>
+        <View className="flex-row items-center justify-between gap-2">
+          <Txt
+            className={`text-callout ${
+              s.current ? 'font-semibold text-fg' : s.done ? 'font-medium text-fg' : 'text-muted'
+            }`}
+          >
+            {s.label}
+          </Txt>
+          {s.current && (
+            <Mono className="text-nano uppercase tracking-label" style={{ color }}>
+              Current
+            </Mono>
+          )}
+        </View>
+        {s.time && <Mono className="mt-0.5 text-micro text-faint">{s.time}</Mono>}
+        {s.meta && <Txt className="mt-0.5 text-micro text-muted">{s.meta}</Txt>}
+      </View>
     </View>
   );
 }

@@ -24,6 +24,7 @@ import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, parseNum, formatPlain } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { dismissKeyboard } from '@/lib/keyboard';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
@@ -231,6 +232,9 @@ export function CreateInvoiceScreen({ route, navigation }: Props) {
 
   const onValid = async (v: InvoiceFormValues) => {
     if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
+    // Starts closing the keyboard the instant Save is tapped, rather than
+    // leaving it up behind SaveSuccessOverlay.
+    void dismissKeyboard();
     setBusy(true);
     const subN = parseNum(v.subtotal) ?? 0;
     const vatN = Math.round(subN * 0.15 * 100) / 100;
@@ -249,6 +253,9 @@ export function CreateInvoiceScreen({ route, navigation }: Props) {
       else await createInvoice(payload);
       invalidateFor(qc, 'invoice');
       toast.success(editing ? 'Invoice updated' : 'Invoice created');
+      // Guarantee it's gone before the overlay shows — covers a fast/cached
+      // response where the tap-time dismiss above hasn't finished yet.
+      await dismissKeyboard();
       setSaved(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save invoice');

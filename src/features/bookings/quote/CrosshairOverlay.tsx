@@ -3,9 +3,11 @@ import { View, ActivityIndicator } from 'react-native';
 import { Button, Label, Txt } from '@/components/ui';
 import { MapPin, MapReticle } from './MapPin';
 import { status as statusHues } from '@/theme/tokens';
+import type { PickTarget } from './types';
 
-/** A stop target carries which stop it is, so confirming writes back to the right row. */
-export type PickTarget = 'pickup' | 'dropoff' | { stop: string };
+// Lives in types.ts (this file's stated home for shared quote-builder types),
+// re-exported here so existing importers of this file keep working.
+export type { PickTarget };
 
 // MapPin's teardrop tip sits at (12, 29.6) of its 0..34 viewBox (see the
 // comment on its Path — walked out from the SVG's own bezier commands), not

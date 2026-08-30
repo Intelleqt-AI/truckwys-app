@@ -34,6 +34,7 @@ import {
 import { str, pick } from '@/lib/api/list';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { dismissKeyboard } from '@/lib/keyboard';
 import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
@@ -283,6 +284,9 @@ export function AddDriverScreen({ route, navigation }: Props) {
   });
 
   const onValid = async (v: DriverFormValues) => {
+    // Starts closing the keyboard the instant Save is tapped, rather than
+    // leaving it up behind SaveSuccessOverlay.
+    void dismissKeyboard();
     setBusy(true);
     const driverFields = {
       license_number: v.license_number.trim(),
@@ -321,6 +325,9 @@ export function AddDriverScreen({ route, navigation }: Props) {
       // invalidated — the Settings team list stayed stale.
       invalidateFor(qc, 'driver');
       toast.success(editing ? 'Driver updated' : 'Driver added');
+      // Guarantee it's gone before the overlay shows — covers a fast/cached
+      // response where the tap-time dismiss above hasn't finished yet.
+      await dismissKeyboard();
       setSaved(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save driver');

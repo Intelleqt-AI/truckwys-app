@@ -26,6 +26,7 @@ import { str, num, pick } from '@/lib/api/list';
 import { parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { dismissKeyboard } from '@/lib/keyboard';
 import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
@@ -295,6 +296,9 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   });
 
   const onValid = async (v: VehicleFormValues) => {
+    // Starts closing the keyboard the instant Save is tapped, rather than
+    // leaving it up behind SaveSuccessOverlay.
+    void dismissKeyboard();
     setBusy(true);
     const typeId = (types ?? []).find((t) => t.name === v.type)?.id;
     const capacityTons = parseNum(v.capacity);
@@ -320,6 +324,9 @@ export function AddVehicleScreen({ route, navigation }: Props) {
       else await createVehicle(payload);
       invalidateFor(qc, 'vehicle');
       toast.success(editing ? 'Vehicle updated' : 'Vehicle added');
+      // Guarantee it's gone before the overlay shows — covers a fast/cached
+      // response where the tap-time dismiss above hasn't finished yet.
+      await dismissKeyboard();
       setSaved(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save vehicle');

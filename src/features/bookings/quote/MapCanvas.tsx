@@ -6,19 +6,32 @@ import { getMapLibreLib, getMapsLib, IS_EXPO_GO, MAPTILER_KEY } from '@/lib/mapN
 import { decimate, regionFor, toLatLng, type GeoPoint } from '@/lib/routeGeometry';
 import { status as statusHues } from '@/theme/tokens';
 import { MapPin, NumberedMapPin } from './MapPin';
+import type { PickTarget } from './types';
 import { useTheme } from '@/theme/ThemeProvider';
+
+/** A stop on the map: carries its id (so the one being picked can be excluded
+    from the render) and its true 1-based position in the form's stop list
+    (not its index in this, possibly-filtered, array — see mapStops in
+    CreateQuoteScreen). */
+export interface MapStop extends GeoPoint {
+  id: string;
+  index: number;
+}
 
 export interface MapCanvasProps {
   geometry?: GeoPoint[];
   pickup?: GeoPoint | null;
   delivery?: GeoPoint | null;
   /** Intermediate points, in visit order, between pickup and delivery. */
-  stops?: GeoPoint[];
+  stops?: MapStop[];
   /** Keeps the route clear of the sheet overlapping the bottom of the map. */
   bottomInset?: number;
   /** While picking, the map reports its centre so the caller can resolve it. */
   onCentreSettled?: (point: GeoPoint) => void;
-  picking?: boolean;
+  /** The point currently being placed, if any. Its own pin is hidden so the
+      crosshair isn't shadowed by a stale duplicate; every other pin (and the
+      route) stays up for context — see the marker guards below. */
+  picking?: PickTarget | null;
   width: number;
   height: number;
   /** Safe-area top, so the route isn't fitted under the floating back button. */
@@ -47,7 +60,7 @@ function MapCanvasImpl({
   stops = [],
   bottomInset = 0,
   onCentreSettled,
-  picking = false,
+  picking = null,
   width,
   height,
   topInset = 0,
@@ -192,17 +205,19 @@ function StopMarker({
 }: {
   Marker: MapsModule['Marker'];
   point: GeoPoint;
+  /** 1-based position in the form's stop list (already resolved by the caller —
+      not this array's own, possibly-filtered, position). */
   index: number;
 }) {
   const tracking = useSettledTracking(point.lat, point.lon);
   return (
     <Marker
       coordinate={toLatLng(point)}
-      title={`Stop ${index + 1}`}
+      title={`Stop ${index}`}
       centerOffset={pinCenterOffset(30)}
       tracksViewChanges={tracking}
     >
-      <NumberedMapPin index={index + 1} color={statusHues.info} size={30} />
+      <NumberedMapPin index={index} color={statusHues.info} size={30} />
     </Marker>
   );
 }
@@ -227,10 +242,10 @@ function InteractiveMap({
   focus: ReturnType<typeof regionFor>;
   pickup?: GeoPoint | null;
   delivery?: GeoPoint | null;
-  stops?: GeoPoint[];
+  stops?: MapStop[];
   bottomInset: number;
   onCentreSettled?: (point: GeoPoint) => void;
-  picking: boolean;
+  picking: PickTarget | null;
   width: number;
   height: number;
   accent: string;
@@ -243,6 +258,11 @@ function InteractiveMap({
   // every render regardless of whether the marker they gate is drawn.
   const pickupTracking = useSettledTracking(pickup?.lat ?? 0, pickup?.lon ?? 0);
   const deliveryTracking = useSettledTracking(delivery?.lat ?? 0, delivery?.lon ?? 0);
+  // The point being placed right now, if any — only its own pin is hidden
+  // below; everything else stays up as context for where it sits.
+  const hidePickup = picking === 'pickup';
+  const hideDelivery = picking === 'dropoff';
+  const hiddenStopId = picking && typeof picking === 'object' ? picking.stop : null;
   // Shared by the Polyline and fitToCoordinates below, so a route of up to
   // MAX_ROUTE_POINTS points is converted once per route change instead of
   // once per render — this used to run on every keystroke anywhere in the
@@ -315,11 +335,13 @@ function InteractiveMap({
         {route.length > 1 && (
           <Polyline coordinates={latLngs} strokeWidth={4} strokeColor={accent} />
         )}
-        {/* Hidden while picking that end, so the crosshair is the only pin.
+        {/* Only the pin for the field currently being picked is hidden — so it
+            doesn't sit as a stale duplicate next to the live crosshair. Every
+            other pin (and the route) stays up as context for where it sits.
             Custom children rather than pinColor: the platform default is a
             balloon that looks nothing like the rest of the app, and anchoring at
             the tip is what makes a marker sit on its point instead of near it. */}
-        {pickup && !picking && (
+        {pickup && !hidePickup && (
           <Marker
             coordinate={toLatLng(pickup)}
             title="Collection"
@@ -329,7 +351,7 @@ function InteractiveMap({
             <MapPin color={statusHues.success} size={34} />
           </Marker>
         )}
-        {delivery && !picking && (
+        {delivery && !hideDelivery && (
           <Marker
             coordinate={toLatLng(delivery)}
             title="Drop-off"
@@ -339,8 +361,9 @@ function InteractiveMap({
             <MapPin color={statusHues.danger} size={34} />
           </Marker>
         )}
-        {!picking &&
-          (stops ?? []).map((s, i) => <StopMarker key={i} Marker={Marker} point={s} index={i} />)}
+        {(stops ?? [])
+          .filter((s) => s.id !== hiddenStopId)
+          .map((s) => <StopMarker key={s.id} Marker={Marker} point={s} index={s.index} />)}
       </MapView>
     </View>
   );
@@ -375,10 +398,10 @@ function InteractiveMapLibre({
   focus: ReturnType<typeof regionFor>;
   pickup?: GeoPoint | null;
   delivery?: GeoPoint | null;
-  stops?: GeoPoint[];
+  stops?: MapStop[];
   bottomInset: number;
   onCentreSettled?: (point: GeoPoint) => void;
-  picking: boolean;
+  picking: PickTarget | null;
   width: number;
   height: number;
   accent: string;
@@ -387,6 +410,11 @@ function InteractiveMapLibre({
   const { Map: MapLibreView, Camera, ViewAnnotation, GeoJSONSource, Layer } = maplibre;
   const cameraRef = useRef<CameraRef | null>(null);
   const mapViewRef = useRef<MapLibreViewRef | null>(null);
+  // The point being placed right now, if any — only its own pin is hidden
+  // below; everything else stays up as context for where it sits.
+  const hidePickup = picking === 'pickup';
+  const hideDelivery = picking === 'dropoff';
+  const hiddenStopId = picking && typeof picking === 'object' ? picking.stop : null;
 
   // Same reasoning as InteractiveMap's handleRegionChangeComplete: ask the
   // map what coordinate sits under the crosshair's exact pixel (dead centre
@@ -465,13 +493,15 @@ function InteractiveMapLibre({
             />
           </GeoJSONSource>
         )}
-        {/* Hidden while picking that end, so the crosshair is the only pin.
+        {/* Only the pin for the field currently being picked is hidden — so it
+            doesn't sit as a stale duplicate next to the live crosshair. Every
+            other pin (and the route) stays up as context for where it sits.
             MapLibre's anchor is a named edge (no fractional point like
             react-native-maps), so "bottom" pins the box's bottom edge — which
             is shadow padding below the pin's actual tip (see pinBottomGap
             above) — to the coordinate. offset nudges it down by that gap so
             the visual tip, not the box, lands on the exact point. */}
-        {pickup && !picking && (
+        {pickup && !hidePickup && (
           <ViewAnnotation
             id="pickup"
             lngLat={[pickup.lon, pickup.lat]}
@@ -481,7 +511,7 @@ function InteractiveMapLibre({
             <MapPin color={statusHues.success} size={34} />
           </ViewAnnotation>
         )}
-        {delivery && !picking && (
+        {delivery && !hideDelivery && (
           <ViewAnnotation
             id="delivery"
             lngLat={[delivery.lon, delivery.lat]}
@@ -491,16 +521,17 @@ function InteractiveMapLibre({
             <MapPin color={statusHues.danger} size={34} />
           </ViewAnnotation>
         )}
-        {!picking &&
-          (stops ?? []).map((s, i) => (
+        {(stops ?? [])
+          .filter((s) => s.id !== hiddenStopId)
+          .map((s) => (
             <ViewAnnotation
-              key={i}
-              id={`stop-${i}`}
+              key={s.id}
+              id={`stop-${s.id}`}
               lngLat={[s.lon, s.lat]}
               anchor="bottom"
               offset={[0, pinBottomGap(30)]}
             >
-              <NumberedMapPin index={i + 1} color={statusHues.info} size={30} />
+              <NumberedMapPin index={s.index} color={statusHues.info} size={30} />
             </ViewAnnotation>
           ))}
       </MapLibreView>

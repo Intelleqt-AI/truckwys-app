@@ -121,8 +121,8 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  // Only reachable when `token` is set — the header hides Share otherwise.
   const share = async () => {
-    if (!token) return toast.info('No public link available');
     await Share.share({
       message: `Invoice ${str(pick(inv, ['invoice_number']), '')}: ${invoiceShareUrl(id, token)}`,
     });
@@ -192,12 +192,18 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       // DRAFT, so Edit takes it over there instead (same actionLabel/
       // actionIcon/onAction pattern as VehicleDetailScreen/DriverDetailScreen/
       // CustomerDetailScreen's Edit button).
-      actionLabel={CAN_EDIT.includes(status) ? 'Edit' : 'Share'}
-      actionIcon={CAN_EDIT.includes(status) ? 'edit' : 'share'}
+      // Beyond DRAFT, Share also needs a `token` — an invoice that was marked
+      // paid without ever being emailed/reminded still has no view_token, and
+      // there's no link to share. Hiding the button there (rather than
+      // showing it and failing silently) matches the DRAFT case above.
+      actionLabel={CAN_EDIT.includes(status) ? 'Edit' : token ? 'Share' : undefined}
+      actionIcon={CAN_EDIT.includes(status) ? 'edit' : token ? 'share' : undefined}
       onAction={
         CAN_EDIT.includes(status)
           ? () => navigation.navigate('CreateInvoice', { id, preview: inv })
-          : share
+          : token
+            ? share
+            : undefined
       }
       footer={
         <View className="gap-2.5">

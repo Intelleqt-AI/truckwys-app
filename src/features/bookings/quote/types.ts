@@ -21,6 +21,9 @@ export interface StopEntry {
   loc: Loc | null;
 }
 
+/** A stop target carries which stop it is, so confirming writes back to the right row. */
+export type PickTarget = 'pickup' | 'dropoff' | { stop: string };
+
 export type LocSuggest = Loc & { foreign: boolean; country: string };
 
 // The five visible groupings of the quote form (Phase 2 — jump bar + section

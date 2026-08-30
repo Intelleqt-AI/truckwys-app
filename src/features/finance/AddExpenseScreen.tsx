@@ -27,6 +27,7 @@ import { num, str, pick } from '@/lib/api/list';
 import { parseNum, formatPlain } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { dismissKeyboard } from '@/lib/keyboard';
 import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
@@ -261,6 +262,9 @@ export function AddExpenseScreen({ route, navigation }: Props) {
   });
 
   const onValid = async (v: ExpenseFormValues) => {
+    // Starts closing the keyboard the instant Save is tapped, rather than
+    // leaving it up behind SaveSuccessOverlay.
+    void dismissKeyboard();
     setBusy(true);
     let outNotes = (v.notes ?? '').trim();
     if (isFuel && litresN > 0 && priceN > 0) {
@@ -289,6 +293,9 @@ export function AddExpenseScreen({ route, navigation }: Props) {
       else await createExpense(payload);
       invalidateFor(qc, 'expense');
       toast.success(editing ? 'Expense updated' : 'Expense added');
+      // Guarantee it's gone before the overlay shows — covers a fast/cached
+      // response where the tap-time dismiss above hasn't finished yet.
+      await dismissKeyboard();
       setSaved(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save expense');

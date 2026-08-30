@@ -11,6 +11,7 @@ import {
   View,
   Pressable,
   Platform,
+  Keyboard,
   useWindowDimensions,
   InteractionManager,
   type NativeSyntheticEvent,
@@ -70,6 +71,7 @@ import { formatDuration, formatPlain, parseNum } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { dismissKeyboard } from '@/lib/keyboard';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import type { AppStackParamList } from '@/navigation/types';
@@ -269,6 +271,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const sheetRef = useRef<BottomSheet>(null);
   const [snapIndex, setSnapIndex] = useState(0);
   const sheetHeight = screenH * (SNAP_FRACTIONS[Math.max(0, snapIndex)] ?? SNAP_FRACTIONS[0]!);
+  // Where to put the sheet back when a pick ends — onChange also reports -1
+  // while the sheet is closed for a pick, which is not a place to return to.
+  const lastOpenIndex = useRef(0);
+  const onSheetChange = useCallback((i: number) => {
+    setSnapIndex(i);
+    if (i >= 0) lastOpenIndex.current = i;
+  }, []);
 
   const [picking, setPicking] = useState<PickTarget | null>(null);
   const [pinLabel, setPinLabel] = useState<string | null>(null);
@@ -293,8 +302,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setPinPlace(null);
     setPinError(null);
     setPinReady(false);
-    // Get out of the way so the user can see what they're aiming at.
-    sheetRef.current?.snapToIndex(0);
+    // Off-screen for the duration of the pick, so the map is unobstructed and
+    // the sheet can't be dragged up under the centre-locked pin. close()
+    // rather than a style/opacity hide: @gorhom/bottom-sheet composes its own
+    // animated opacity after the `style` prop (BottomSheetBody), so
+    // `style={{opacity: 0}}` is a no-op — and even if it weren't, a
+    // transparent sheet still takes touches. Children stay mounted at index
+    // -1, so the form keeps its state.
+    Keyboard.dismiss();
+    sheetRef.current?.close();
   }, []);
 
   const endPick = useCallback(() => {
@@ -304,6 +320,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setPinBusy(false);
     setPinError(null);
     setPinReady(false);
+    sheetRef.current?.snapToIndex(lastOpenIndex.current);
   }, []);
 
   const removeStop = useCallback((id: string) => {
@@ -378,18 +395,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       cc: pinPlace?.cc || undefined,
     };
     const wasPicking = picking;
+    // A confirmed point always reopens the sheet expanded, not wherever it
+    // was before the pick.
+    lastOpenIndex.current = 1;
     // A stop pin never auto-advances to another field — just settles and
     // reopens the sheet, unlike the pickup/dropoff chain below.
     if (typeof wasPicking === 'object') {
       updateStop(wasPicking.stop, loc);
       endPick();
-      sheetRef.current?.snapToIndex(1);
       return;
     }
     if (wasPicking === 'pickup') setPickup(loc);
     else setDelivery(loc);
     endPick();
-    sheetRef.current?.snapToIndex(1);
   }, [picking, pinPlace, endPick, updateStop]);
 
   useEffect(
@@ -1121,6 +1139,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     );
 
   const save = async (send: boolean) => {
+    // Fire-and-forget: starts the keyboard closing the instant Save/Send is
+    // tapped (footer buttons sit in the sheet's pinned footer, outside the
+    // scroll view, so a tap on them never blurs whatever field was focused).
+    // Also gets validation toasts below out from behind the keyboard, where
+    // they were otherwise invisible.
+    void dismissKeyboard();
     if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
     // Draft can be saved any time (just needs a client to attach to) — except
     // pickup/dropoff, which the backend requires unconditionally (no
@@ -1155,6 +1179,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
       toast.success();
       completedRef.current = true;
+      // Guarantee the keyboard is gone before the overlay shows — the tap-time
+      // dismiss above usually wins the race already, but this covers a fast
+      // cached response (e.g. an immediate PATCH) and the "Save draft" button
+      // inside the unsaved-changes Alert, which never goes through the footer.
+      await dismissKeyboard();
       // Visible confirmation (Phase 4) — toast.success above is haptic-only
       // by app-wide policy (src/lib/toast.tsx), so this is what actually
       // tells the user what happened. Replaces the old instant goBack(); the
@@ -1239,6 +1268,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setSubmitAttempted('draft');
     const blocking = issuesRef.current.filter((i) => i.blocks === 'both');
     if (blocking.length) {
+      // The section jumpTo scrolls to is itself behind the keyboard while
+      // typing — close it so the jump actually lands somewhere visible.
+      void dismissKeyboard();
       if (Platform.OS !== 'web')
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       jumpTo(blocking[0]!.section);
@@ -1251,6 +1283,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setSubmitAttempted('send');
     const blocking = issuesRef.current.filter((i) => i.blocks === 'both' || i.blocks === 'send');
     if (blocking.length) {
+      // Same reasoning as onSaveDraft above.
+      void dismissKeyboard();
       if (Platform.OS !== 'web')
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       jumpTo(blocking[0]!.section);
@@ -1390,8 +1424,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [delivery?.lat, delivery?.lon],
   );
+  // Carries each stop's id (so MapCanvas can hide just the one being picked)
+  // and its true 1-based position in the full `stops` array — not its index
+  // in this filtered-to-resolved-only list, which disagreed with the form's
+  // own "Stop N" labelling (StopLocationRow) whenever an earlier stop had no
+  // coordinate yet.
   const mapStops = useMemo(
-    () => stops.filter((s) => s.loc).map((s) => ({ lat: s.loc!.lat, lon: s.loc!.lon })),
+    () =>
+      stops.flatMap((s, i) =>
+        s.loc ? [{ id: s.id, index: i + 1, lat: s.loc.lat, lon: s.loc.lon }] : [],
+      ),
     [stops],
   );
 
@@ -1412,7 +1454,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         // mapPadding.
         bottomInset={picking ? 0 : sheetHeight}
         onCentreSettled={onCentreSettled}
-        picking={!!picking}
+        picking={picking}
         width={screenW}
         height={screenH}
         topInset={insets.top}
@@ -1443,16 +1485,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         snapPoints={SNAP as unknown as string[]}
         enableDynamicSizing={false}
         enablePanDownToClose={false}
-        onChange={setSnapIndex}
+        onChange={onSheetChange}
         footerComponent={renderFooter}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustPan"
         backgroundStyle={{ backgroundColor: colors.surface, borderRadius: 2 }}
         handleIndicatorStyle={{ backgroundColor: colors.faint, width: 42 }}
-        // Hidden rather than unmounted while picking, so the form keeps its state
-        // and the transition back is instant.
-        style={{ opacity: picking ? 0 : 1 }}
       >
         <QuoteJumpBar ref={jumpBarRef} sections={jumpSections} onPress={jumpTo} />
         <BottomSheetScrollView

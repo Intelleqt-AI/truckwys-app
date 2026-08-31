@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Pressable, Alert, Modal, ActivityIndicator } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,8 +21,12 @@ import {
   Mono,
   Label,
   EmptyState,
+  StatCard,
+  Badge,
+  SwipeRow,
   type IconName,
 } from '@/components/ui';
+import { ListSkeleton } from '@/components/feedback';
 import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { status as statusHues } from '@/theme/tokens';
@@ -384,33 +388,68 @@ function AppearanceSection() {
 
 function VehicleTypesSection() {
   const qc = useQueryClient();
+  const { colors } = useTheme();
   const { nav } = useAppNavigation();
-  const { data } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['vehicle-types'],
     queryFn: async () => asArray(await fetchData('vehicle-types/')),
     retry: false,
   });
-  const list = data ?? [];
+  // Memoised so `sorted`/`activeCount` below don't re-derive on every render
+  // — `data ?? []` would otherwise hand them a fresh empty-array identity
+  // whenever `data` is undefined.
+  const list = useMemo(() => data ?? [], [data]);
   const [busy, setBusy] = useState(false);
 
   // Batch-delete selection mode.
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Ids currently mid swipe-delete — lets that one row show a spinner
+  // instead of leaving the tap-Delete-confirm-then-silence gap unexplained.
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
-  const removeOne = (t: Record<string, unknown>) => {
-    const tid = pick(t, ['id']) as string | number;
+  // Active types first, then alphabetical — the API gives no guaranteed
+  // order, and the ones you actually quote against should sort to the top.
+  const sorted = useMemo(
+    () =>
+      [...list].sort((a, b) => {
+        const ra = a as Record<string, unknown>;
+        const rb = b as Record<string, unknown>;
+        const activeA = pick(ra, ['active']) !== false;
+        const activeB = pick(rb, ['active']) !== false;
+        if (activeA !== activeB) return activeA ? -1 : 1;
+        return str(pick(ra, ['name'])).localeCompare(str(pick(rb, ['name'])));
+      }),
+    [list],
+  );
+  const activeCount = useMemo(
+    () => list.filter((t) => pick(t as Record<string, unknown>, ['active']) !== false).length,
+    [list],
+  );
+
+  const removeOne = (t: Record<string, unknown>, tid: string) => {
+    const rawId = pick(t, ['id']) as string | number;
     Alert.alert('Delete vehicle type', `Delete "${str(pick(t, ['name']), 'this type')}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          setDeletingIds((prev) => new Set(prev).add(tid));
           try {
-            await deleteVehicleType(tid);
+            await deleteVehicleType(rawId);
             invalidateFor(qc, 'vehicle-type');
             toast.success();
+            // Left in `deletingIds` on success — the invalidate above drops
+            // this row from the list entirely once the refetch lands, so
+            // there's nothing to revert and no flash back to a normal row.
           } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Could not delete');
+            setDeletingIds((prev) => {
+              const next = new Set(prev);
+              next.delete(tid);
+              return next;
+            });
           }
         },
       },
@@ -453,7 +492,7 @@ function VehicleTypesSection() {
       <View className="flex-row items-center justify-between">
         <Label className="text-muted">Vehicle types</Label>
         <View className="flex-row items-center gap-1">
-          {list.length > 0 && (
+          {sorted.length > 0 && (
             <Pressable
               hitSlop={8}
               className="px-2"
@@ -477,69 +516,122 @@ function VehicleTypesSection() {
         </View>
       </View>
 
-      {list.length > 0 ? (
-        <Group>
-          {list.map((t, i) => {
-            const r = t as Record<string, unknown>;
-            const tid = String(pick(r, ['id']) ?? i);
-            const cap = num(pick(r, ['capacity']));
-            const isActive = pick(r, ['active']) !== false;
-            const isSel = selected.has(tid);
-            const openEdit = () =>
-              nav.navigate('AddVehicleType', {
-                id: pick(r, ['id']) as string | number,
-                preview: r,
-              });
-            return (
-              <Pressable
-                key={tid}
-                onPress={() => (selectMode ? toggleSel(tid) : openEdit())}
-                className={`min-h-[52px] flex-row items-center gap-3 px-3.5 py-3 active:bg-surface-hover ${
-                  i === list.length - 1 ? '' : 'border-b border-line-row'
-                }`}
-              >
-                {selectMode &&
-                  (isSel ? (
-                    <Icon name="checkCircle" size={20} color="#4D9EFF" />
-                  ) : (
-                    <View
-                      style={{
-                        width: 20,
-                        height: 20,
-                        borderRadius: 10,
-                        borderWidth: 1.5,
-                        borderColor: '#888888',
-                      }}
-                    />
-                  ))}
-                <View className="flex-1">
-                  <Txt className="text-body text-fg" numberOfLines={1}>
-                    {str(pick(r, ['name']), 'Type')}
-                  </Txt>
-                  <Mono className="mt-0.5 text-caption text-faint">
-                    {cap ? `${cap} t` : '—'} · {isActive ? 'Active' : 'Inactive'}
-                  </Mono>
+      {isLoading ? (
+        <ListSkeleton rows={4} />
+      ) : isError ? (
+        <EmptyState
+          icon="alert"
+          title="Couldn't load vehicle types"
+          body="Check your connection and try again."
+          action={
+            <Button label="Retry" variant="secondary" icon="route" onPress={() => refetch()} />
+          }
+        />
+      ) : sorted.length > 0 ? (
+        <>
+          <View className="flex-row gap-2.5">
+            <StatCard label="Types" value={String(sorted.length)} />
+            <StatCard label="Active" value={String(activeCount)} />
+          </View>
+
+          <View>
+            {sorted.map((t, i) => {
+              const r = t as Record<string, unknown>;
+              const tid = String(pick(r, ['id']) ?? i);
+              const cap = num(pick(r, ['capacity']));
+              const rate = num(pick(r, ['base_rate']));
+              const fuelType = str(pick(r, ['fuel_type']));
+              const consumption = num(pick(r, ['fuel_consumption_l_per_100km']));
+              const description = str(pick(r, ['description']));
+              const isActive = pick(r, ['active']) !== false;
+              const isSel = selected.has(tid);
+              const isDeleting = deletingIds.has(tid);
+              const openEdit = () =>
+                nav.navigate('AddVehicleType', {
+                  id: pick(r, ['id']) as string | number,
+                  preview: r,
+                });
+              const meta = [
+                cap ? `${cap} t` : null,
+                rate ? `R ${rate}/km` : null,
+                fuelType || null,
+                consumption ? `${consumption} L/100km` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ');
+
+              return (
+                <View key={tid} className="mb-2.5 overflow-hidden rounded-xs border border-line">
+                  <SwipeRow
+                    enabled={!selectMode && !isDeleting}
+                    onDelete={() => removeOne(r, tid)}
+                  >
+                    <Pressable
+                      onPress={() => (selectMode ? toggleSel(tid) : openEdit())}
+                      disabled={isDeleting}
+                      className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3 active:bg-surface-hover"
+                    >
+                      {selectMode &&
+                        (isSel ? (
+                          <Icon name="checkCircle" size={20} color={colors.accent} />
+                        ) : (
+                          <View
+                            style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: 10,
+                              borderWidth: 1.5,
+                              borderColor: colors.faint,
+                            }}
+                          />
+                        ))}
+                      <View
+                        className={`h-[38px] w-[38px] items-center justify-center rounded-xs border ${
+                          isActive ? 'border-line-active' : 'border-line'
+                        }`}
+                      >
+                        <Icon
+                          name="truck"
+                          size={19}
+                          color={isActive ? colors.accent : colors.faint}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <View className="flex-row items-center gap-2">
+                          <Txt className="flex-1 text-body font-medium text-fg" numberOfLines={1}>
+                            {str(pick(r, ['name']), 'Type')}
+                          </Txt>
+                          {!isActive && <Badge label="Inactive" tone="neutral" />}
+                        </View>
+                        {!!description && (
+                          <Txt className="mt-0.5 text-caption text-muted" numberOfLines={1}>
+                            {description}
+                          </Txt>
+                        )}
+                        {!!meta && (
+                          <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                            {meta}
+                          </Mono>
+                        )}
+                      </View>
+                      {isDeleting ? (
+                        <ActivityIndicator size="small" color={colors.faint} />
+                      ) : (
+                        !selectMode && <Icon name="chevronRight" size={16} color={colors.faint} />
+                      )}
+                    </Pressable>
+                  </SwipeRow>
                 </View>
-                {!selectMode && (
-                  <View className="flex-row items-center">
-                    <IconButton
-                      name="edit"
-                      size={16}
-                      accessibilityLabel="Edit type"
-                      onPress={openEdit}
-                    />
-                    <IconButton
-                      name="x"
-                      size={16}
-                      accessibilityLabel="Delete type"
-                      onPress={() => removeOne(r)}
-                    />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </Group>
+              );
+            })}
+          </View>
+
+          {!selectMode && (
+            <Mono className="-mt-1 text-center text-nano text-faint">
+              Swipe a row left to delete
+            </Mono>
+          )}
+        </>
       ) : (
         <EmptyState icon="truck" title="No vehicle types" body="Add the classes you operate." />
       )}

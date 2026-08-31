@@ -6,9 +6,15 @@ import {
   Platform,
   Keyboard,
   InputAccessoryView,
+  InteractionManager,
   type TextInputProps,
 } from 'react-native';
-import Animated, { FadeInDown, FadeOut, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import Animated, {
+  FadeInDown,
+  FadeOut,
+  useAnimatedStyle,
+  withTiming,
+} from 'react-native-reanimated';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { Txt, Mono, Label, FieldLabel, INPUT_TEXT } from './Text';
 import { Icon, type IconName } from './icons';
@@ -116,18 +122,31 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
 
   // Reformat between raw and grouped, but only ever through parseNum — never
   // Number(), which is NaN for the comma decimal a South African keyboard types.
+  //
+  // Two things keep this off the focus/blur hot path:
+  //  - It's a no-op write when the reformatted string already matches what's
+  //    there (the common first-focus case — a value seeded from the API has
+  //    never been through the blur-side grouping, so there's nothing to undo).
+  //  - When it DOES need to write, that write is deferred a tick via
+  //    InteractionManager (same idiom as CreateQuoteScreen.tsx's post-save
+  //    invalidate) rather than run inline. `onChangeText` here is a
+  //    react-hook-form Controller write, which re-renders every subscriber —
+  //    running it synchronously inside onFocus/onBlur landed that render on
+  //    the exact JS tick the OS is trying to animate the keyboard in, which
+  //    is what made a numeric field (unlike a plain text one, whose onFocus
+  //    only sets local `focused` state) feel laggy to tap into.
   const reformat = (grouped: boolean) => {
     if (!numeric || typeof props.value !== 'string' || !props.onChangeText) return;
     const n = parseNum(props.value);
     if (n == null) return; // leave bad input alone; the caller validates it
-    props.onChangeText(
-      grouped
-        ? formatNumber(n, {
-            minimumFractionDigits: decimals ?? 0,
-            maximumFractionDigits: decimals ?? 4,
-          })
-        : formatPlain(n, decimals),
-    );
+    const next = grouped
+      ? formatNumber(n, {
+          minimumFractionDigits: decimals ?? 0,
+          maximumFractionDigits: decimals ?? 4,
+        })
+      : formatPlain(n, decimals);
+    if (next === props.value) return;
+    InteractionManager.runAfterInteractions(() => props.onChangeText?.(next));
   };
 
   // These compose with the caller's handlers instead of replacing them: props
@@ -150,7 +169,13 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   // fails validation on blur reads as a soft rejection rather than a jump-cut.
   const borderStyle = useAnimatedStyle(() => ({
     borderColor: withTiming(
-      error ? statusHues.danger : warning ? statusHues.warning : focused ? colors.accent : colors.line,
+      error
+        ? statusHues.danger
+        : warning
+          ? statusHues.warning
+          : focused
+            ? colors.accent
+            : colors.line,
       { duration: motion.fast },
     ),
   }));
@@ -247,7 +272,7 @@ export function SegmentedControl<T extends string>({
             }`}
           >
             <Mono
-              className={`text-micro tracking-wide uppercase ${
+              className={`text-micro uppercase tracking-wide ${
                 active ? 'text-on-accent' : 'text-muted'
               }`}
             >
@@ -334,7 +359,10 @@ export function RadioRows({
                 }`}
               >
                 <View className="flex-1">
-                  <Txt className={`text-callout ${active ? 'text-fg' : 'text-muted'}`} numberOfLines={1}>
+                  <Txt
+                    className={`text-callout ${active ? 'text-fg' : 'text-muted'}`}
+                    numberOfLines={1}
+                  >
                     {o.label}
                   </Txt>
                   {o.sub ? <Txt className="mt-0.5 text-caption text-faint">{o.sub}</Txt> : null}

@@ -53,6 +53,7 @@ import {
   ExternalLink,
   IdCard,
   IdCardLanyard,
+  Trash2,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -114,6 +115,7 @@ export const icons = {
   externalLink: ExternalLink,
   idCard: IdCard,
   idCardLanyard: IdCardLanyard,
+  trash: Trash2,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

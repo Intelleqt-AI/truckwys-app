@@ -1,6 +1,7 @@
-import { useCallback } from 'react';
-import { View, Pressable } from 'react-native';
+import { useCallback, useState } from 'react';
+import { View, Pressable, Platform } from 'react-native';
 import { format } from 'date-fns';
+import * as Haptics from 'expo-haptics';
 import {
   Screen,
   AppHeader,
@@ -16,6 +17,7 @@ import {
   Mono,
   Label,
   StatusPill,
+  Banner,
   Fab,
 } from '@/components/ui';
 import { HomeSkeleton, ErrorState } from '@/components/feedback';
@@ -27,10 +29,40 @@ import { useTheme } from '@/theme/ThemeProvider';
 import {
   formatCurrency,
   formatCurrencyCompact,
+  formatDate,
   formatNumber,
   formatPercent,
 } from '@/lib/formatters';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
+import { useGracePeriod, useSubscription } from '@/hooks/useSubscription';
+import { SubscriptionDetailModal } from '@/features/more/SubscriptionDetailModal';
+
+// Mirrors the phrasing already used on the Billing settings screen
+// (SettingsScreen.tsx's BillingSection), so grace-period copy reads
+// identically whether it's seen here or drilled into from Settings.
+function subscriptionBannerMessage(
+  subscription: Pick<
+    ReturnType<typeof useSubscription>,
+    'status' | 'cancelling' | 'blocked' | 'notice' | 'detail'
+  >,
+  daysRemaining: number | undefined,
+  expiresAt: string | undefined,
+): string {
+  if (subscription.blocked) return subscription.notice ?? subscription.detail;
+  if (subscription.cancelling) {
+    return 'Cancelling — access continues until the end of the current billing period.';
+  }
+  if (subscription.status === 'grace_period') {
+    if (daysRemaining !== undefined) {
+      return `Payment is overdue — ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} of grace remaining${
+        expiresAt ? ` (until ${formatDate(expiresAt)})` : ''
+      }.`;
+    }
+    return 'Payment is overdue. Your administrator can settle it on the Truckwys dashboard.';
+  }
+  // trialing, or any other role-visible-but-not-blocking state.
+  return subscription.detail;
+}
 
 export function HomeScreen() {
   const { data, isLoading, isError, refetch } = useOverview();
@@ -42,6 +74,9 @@ export function HomeScreen() {
   const tabs = visibleTabs(useRole());
   const hasFleet = tabs.includes('Fleet');
   const hasFinance = tabs.includes('Finance');
+  const subscription = useSubscription();
+  const { daysRemaining, expiresAt } = useGracePeriod(subscription.status, subscription.visible);
+  const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
   const heatColor = useCallback(
     (v: number) =>
@@ -96,6 +131,16 @@ export function HomeScreen() {
             </View>
           }
         />
+
+        {subscription.visible && (
+          <View className="mb-5">
+            <Banner
+              tone={subscription.tone === 'danger' ? 'danger' : 'warning'}
+              message={subscriptionBannerMessage(subscription, daysRemaining, expiresAt)}
+              onPress={() => setSubscriptionModalOpen(true)}
+            />
+          </View>
+        )}
 
         {/* Command strip */}
         <View className="mb-5 flex-row rounded-xs border border-line bg-surface py-3">
@@ -307,7 +352,19 @@ export function HomeScreen() {
           )}
         </View>
       </Screen>
-      <Fab onPress={() => createQuote()} />
+      {/* Long-press for the voice/AI entry point — undiscoverable alone, so
+          it's a second path onto the same screen, not the only one. */}
+      <Fab
+        onPress={() => createQuote()}
+        onLongPress={() => {
+          if (Platform.OS !== 'web') void Haptics.selectionAsync();
+          createQuote(true);
+        }}
+      />
+      <SubscriptionDetailModal
+        visible={subscriptionModalOpen}
+        onClose={() => setSubscriptionModalOpen(false)}
+      />
     </View>
   );
 }

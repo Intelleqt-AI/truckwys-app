@@ -8,6 +8,7 @@ type Id = number | string;
 export type BookingsTab = 'quotes' | 'orders' | 'history';
 export type FleetTab = 'vehicles' | 'drivers';
 export type FinanceTab = 'invoices' | 'expenses' | 'reports';
+export type InsightsTab = 'briefing' | 'cashflow' | 'lanes';
 
 export type TabParamList = {
   Home: undefined;
@@ -30,7 +31,7 @@ export type AppStackParamList = {
   AddCustomer: { id?: Id; preview?: Record<string, unknown> } | undefined;
   Settings: { section?: string } | undefined;
   BillingHistory: undefined;
-  CreateInvoice: undefined;
+  CreateInvoice: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AddExpense: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AddVehicle: { id?: Id; preview?: Record<string, unknown> } | undefined;
   AddVehicleType: { id?: Id; preview?: Record<string, unknown> } | undefined;
@@ -40,7 +41,7 @@ export type AppStackParamList = {
   More: undefined;
   Activity: undefined;
   Copilot: undefined;
-  Insights: undefined;
+  Insights: { tab?: InsightsTab } | undefined;
   Capital: undefined;
   Notifications: undefined;
   Support: undefined;

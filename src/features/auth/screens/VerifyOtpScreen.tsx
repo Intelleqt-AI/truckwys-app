@@ -1,18 +1,19 @@
 import { useState } from 'react';
 import { View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Screen, Txt, Mono, IconButton } from '@/components/ui';
+import { Mono } from '@/components/ui';
 import {
-  AuthLayout,
-  AuthGroup,
-  AuthField,
-  AuthButton,
-  AuthError,
-  AuthLink,
-  AuthHeading,
-} from '../components';
+  AuthScreen,
+  AuthTitle,
+  AuthTextLink,
+  SignInField,
+  SignInButton,
+  InlineError,
+  useErrorShake,
+} from '../authComponents';
 import { otpSchema, type OtpValues } from '../schemas';
 import { authApi } from '../api';
 import { useAuthStore } from '@/stores/authStore';
@@ -26,18 +27,26 @@ export function VerifyOtpScreen({ route, navigation }: Props) {
   const setSession = useAuthStore((s) => s.setSession);
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const { shakeStyle, trigger: triggerShake } = useErrorShake();
+
   const { control, handleSubmit, formState } = useForm<OtpValues>({
     resolver: zodResolver(otpSchema),
     defaultValues: { code: '' },
+    mode: 'onBlur',
   });
 
   const onSubmit = async (values: OtpValues) => {
+    setServerError(null);
     setSubmitting(true);
     try {
       const res = await authApi.verifyOtp(pendingToken, values.code.trim());
       await setSession(res.token, res.user);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Invalid code');
+      const message = e instanceof Error ? e.message : 'Invalid code';
+      setServerError(message);
+      toast.error(message);
+      triggerShake();
     } finally {
       setSubmitting(false);
     }
@@ -56,28 +65,32 @@ export function VerifyOtpScreen({ route, navigation }: Props) {
   };
 
   return (
-    <Screen scroll={false} padded={false}>
-      <View className="px-2 pt-1">
-        <IconButton name="chevronLeft" accessibilityLabel="Back" onPress={() => navigation.goBack()} />
-      </View>
-      <AuthLayout>
-        <AuthHeading title="Enter your code" />
-        <Txt className="-mt-7 mb-9 text-center text-body text-muted">
-          We sent a 6-digit code to{'\n'}
-          <Mono className="text-body text-fg">{email}</Mono>
-        </Txt>
+    <AuthScreen onBack={() => navigation.goBack()}>
+      <Animated.View entering={FadeInDown.delay(80).duration(400)}>
+        <AuthTitle
+          title="Enter your code"
+          sub={
+            <>
+              We sent a 6-digit code to{'\n'}
+              <Mono className="text-body text-fg">{email}</Mono>
+            </>
+          }
+        />
+      </Animated.View>
 
-        <AuthGroup>
+      <Animated.View entering={FadeInDown.delay(160).duration(400)} style={{ marginTop: 24 }}>
+        <Animated.View style={shakeStyle}>
           <Controller
             control={control}
             name="code"
             render={({ field: { onChange, onBlur, value } }) => (
-              <AuthField
-                placeholder="6-digit code"
-                accessibilityLabel="Verification code"
+              <SignInField
+                label="6-digit code"
+                icon="shield"
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
+                error={formState.errors.code?.message}
                 keyboardType="number-pad"
                 // Lets iOS offer the code straight from the Messages/mail
                 // notification instead of making the user go and read it.
@@ -85,20 +98,28 @@ export function VerifyOtpScreen({ route, navigation }: Props) {
                 autoComplete="one-time-code"
                 maxLength={8}
                 returnKeyType="go"
-                onSubmitEditing={handleSubmit(onSubmit)}
-                style={{ paddingVertical: 15, letterSpacing: 4 }}
-                last
+                onSubmitEditing={handleSubmit(onSubmit, triggerShake)}
+                style={{ letterSpacing: 4 }}
               />
             )}
           />
-        </AuthGroup>
+        </Animated.View>
+      </Animated.View>
 
-        <AuthError message={formState.errors.code?.message} />
+      {!!serverError && (
+        <View className="mt-3">
+          <InlineError message={serverError} />
+        </View>
+      )}
 
-        <AuthButton label="Verify" onPress={handleSubmit(onSubmit)} loading={submitting} />
-
-        <AuthLink label={resending ? 'Sending…' : 'Resend code'} onPress={resend} disabled={resending} />
-      </AuthLayout>
-    </Screen>
+      <Animated.View entering={FadeInDown.delay(220).duration(400)} style={{ marginTop: 20 }}>
+        <SignInButton label="Verify" onPress={handleSubmit(onSubmit, triggerShake)} loading={submitting} />
+        <AuthTextLink
+          label={resending ? 'Sending…' : 'Resend code'}
+          onPress={resend}
+          disabled={resending}
+        />
+      </Animated.View>
+    </AuthScreen>
   );
 }

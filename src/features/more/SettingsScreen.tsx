@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { View, Pressable, Alert, Modal } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { View, Pressable, Alert, Modal, ActivityIndicator } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,8 +21,12 @@ import {
   Mono,
   Label,
   EmptyState,
+  StatCard,
+  Badge,
+  SwipeRow,
   type IconName,
 } from '@/components/ui';
+import { ListSkeleton } from '@/components/feedback';
 import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { status as statusHues } from '@/theme/tokens';
@@ -115,7 +120,8 @@ export function SettingsScreen({ route, navigation }: Props) {
       {section === 'integrations' && <IntegrationsSection />}
       {section === 'risk' && (
         <Txt className="text-callout text-muted">
-          {current?.label} is managed on the web dashboard. Configuration here is read-only on mobile.
+          {current?.label} is managed on the web dashboard. Configuration here is read-only on
+          mobile.
         </Txt>
       )}
     </SheetScreen>
@@ -166,6 +172,32 @@ const DATE_FORMATS = [
   { label: 'MM/DD/YYYY', value: 'MM/DD/YYYY' },
   { label: 'YYYY-MM-DD', value: 'YYYY-MM-DD' },
 ];
+
+// Swaps the icon+label for a spinner+"Uploading" while an image upload is in
+// flight, then reverts — Button's own `loading` state just blanks to a bare
+// spinner, which reads as "did this button die?" for a multi-second upload.
+function UploadButton({
+  label,
+  icon,
+  uploading,
+  onPress,
+}: {
+  label: string;
+  icon: IconName;
+  uploading: boolean;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  if (uploading) {
+    return (
+      <View className="min-h-[48px] flex-row items-center justify-center gap-2 rounded-xs border border-line-active bg-surface px-4">
+        <ActivityIndicator size="small" color={colors.fg} />
+        <Mono className="text-micro uppercase tracking-wide text-fg">Uploading</Mono>
+      </View>
+    );
+  }
+  return <Button label={label} variant="secondary" icon={icon} onPress={onPress} />;
+}
 
 function ProfileSection() {
   const { data: me } = useMe();
@@ -225,12 +257,21 @@ function ProfileSection() {
   };
 
   const pickAvatar = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
     if (res.canceled || !res.assets?.[0]) return;
     const a = res.assets[0];
     setBusy(true);
     try {
-      const out = await uploadAvatar({ uri: a.uri, name: a.fileName ?? 'avatar.jpg', type: a.mimeType ?? 'image/jpeg' });
+      const out = await uploadAvatar({
+        uri: a.uri,
+        name: a.fileName ?? 'avatar.jpg',
+        type: a.mimeType ?? 'image/jpeg',
+      });
       const url = str(pick(out ?? {}, ['avatar']));
       if (url) setAvatar(url);
       await Promise.all([Promise.resolve(invalidateFor(qc, 'user')), refreshUser()]);
@@ -245,26 +286,80 @@ function ProfileSection() {
   return (
     <View className="gap-4">
       <View className="flex-row items-center gap-3">
-        <Avatar name={`${firstName} ${lastName}`.trim() || email} uri={mediaUrl(avatar)} size={56} />
-        <Button label="Change photo" variant="secondary" icon="user" onPress={pickAvatar} />
+        <Avatar
+          name={`${firstName} ${lastName}`.trim() || email}
+          uri={mediaUrl(avatar)}
+          size={56}
+        />
+        <UploadButton label="Change photo" icon="user" uploading={busy} onPress={pickAvatar} />
       </View>
       <View className="flex-row gap-3">
         <View className="flex-1">
-          <TextField label="First name" placeholder="Jane" autoCapitalize="words" value={firstName} onChangeText={setFirstName} />
+          <TextField
+            label="First name"
+            placeholder="Jane"
+            autoCapitalize="words"
+            value={firstName}
+            onChangeText={setFirstName}
+          />
         </View>
         <View className="flex-1">
-          <TextField label="Last name" placeholder="Dlamini" autoCapitalize="words" value={lastName} onChangeText={setLastName} />
+          <TextField
+            label="Last name"
+            placeholder="Dlamini"
+            autoCapitalize="words"
+            value={lastName}
+            onChangeText={setLastName}
+          />
         </View>
       </View>
-      <TextField label="Email" placeholder="you@company.co.za" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-      <TextField label="Job title" placeholder="e.g. Operations Manager" value={jobTitle} onChangeText={setJobTitle} />
-      <TextField label="Phone" placeholder="+27 82 123 4567" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+      <TextField
+        label="Email"
+        placeholder="you@company.co.za"
+        icon="send"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={email}
+        onChangeText={setEmail}
+      />
+      <TextField
+        label="Job title"
+        placeholder="e.g. Operations Manager"
+        value={jobTitle}
+        onChangeText={setJobTitle}
+      />
+      <TextField
+        label="Phone"
+        placeholder="+27 82 123 4567"
+        icon="phone"
+        keyboardType="phone-pad"
+        value={phone}
+        onChangeText={setPhone}
+      />
       {user?.role ? <DetailRow label="Role" value={user.role} /> : null}
 
       <Label className="mt-1 text-muted">Preferences</Label>
-      <SelectField label="Time zone" icon="clock" options={TIMEZONES} value={timezone} onSelect={setTimezone} />
-      <SelectField label="Language" icon="user" options={LANGUAGES} value={language} onSelect={setLanguage} />
-      <SelectField label="Date format" icon="calendar" options={DATE_FORMATS} value={dateFormat} onSelect={setDateFormat} />
+      <SelectField
+        label="Time zone"
+        icon="clock"
+        options={TIMEZONES}
+        value={timezone}
+        onSelect={setTimezone}
+      />
+      <SelectField
+        label="Language"
+        icon="user"
+        options={LANGUAGES}
+        value={language}
+        onSelect={setLanguage}
+      />
+      <SelectField
+        label="Date format"
+        icon="calendar"
+        options={DATE_FORMATS}
+        value={dateFormat}
+        onSelect={setDateFormat}
+      />
 
       <Button label="Save profile" loading={busy} onPress={save} fullWidth />
     </View>
@@ -293,33 +388,68 @@ function AppearanceSection() {
 
 function VehicleTypesSection() {
   const qc = useQueryClient();
+  const { colors } = useTheme();
   const { nav } = useAppNavigation();
-  const { data } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['vehicle-types'],
     queryFn: async () => asArray(await fetchData('vehicle-types/')),
     retry: false,
   });
-  const list = data ?? [];
+  // Memoised so `sorted`/`activeCount` below don't re-derive on every render
+  // — `data ?? []` would otherwise hand them a fresh empty-array identity
+  // whenever `data` is undefined.
+  const list = useMemo(() => data ?? [], [data]);
   const [busy, setBusy] = useState(false);
 
   // Batch-delete selection mode.
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Ids currently mid swipe-delete — lets that one row show a spinner
+  // instead of leaving the tap-Delete-confirm-then-silence gap unexplained.
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
-  const removeOne = (t: Record<string, unknown>) => {
-    const tid = pick(t, ['id']) as string | number;
+  // Active types first, then alphabetical — the API gives no guaranteed
+  // order, and the ones you actually quote against should sort to the top.
+  const sorted = useMemo(
+    () =>
+      [...list].sort((a, b) => {
+        const ra = a as Record<string, unknown>;
+        const rb = b as Record<string, unknown>;
+        const activeA = pick(ra, ['active']) !== false;
+        const activeB = pick(rb, ['active']) !== false;
+        if (activeA !== activeB) return activeA ? -1 : 1;
+        return str(pick(ra, ['name'])).localeCompare(str(pick(rb, ['name'])));
+      }),
+    [list],
+  );
+  const activeCount = useMemo(
+    () => list.filter((t) => pick(t as Record<string, unknown>, ['active']) !== false).length,
+    [list],
+  );
+
+  const removeOne = (t: Record<string, unknown>, tid: string) => {
+    const rawId = pick(t, ['id']) as string | number;
     Alert.alert('Delete vehicle type', `Delete "${str(pick(t, ['name']), 'this type')}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          setDeletingIds((prev) => new Set(prev).add(tid));
           try {
-            await deleteVehicleType(tid);
+            await deleteVehicleType(rawId);
             invalidateFor(qc, 'vehicle-type');
             toast.success();
+            // Left in `deletingIds` on success — the invalidate above drops
+            // this row from the list entirely once the refetch lands, so
+            // there's nothing to revert and no flash back to a normal row.
           } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Could not delete');
+            setDeletingIds((prev) => {
+              const next = new Set(prev);
+              next.delete(tid);
+              return next;
+            });
           }
         },
       },
@@ -362,7 +492,7 @@ function VehicleTypesSection() {
       <View className="flex-row items-center justify-between">
         <Label className="text-muted">Vehicle types</Label>
         <View className="flex-row items-center gap-1">
-          {list.length > 0 && (
+          {sorted.length > 0 && (
             <Pressable
               hitSlop={8}
               className="px-2"
@@ -377,52 +507,131 @@ function VehicleTypesSection() {
             </Pressable>
           )}
           {!selectMode && (
-            <IconButton name="plus" accessibilityLabel="Add vehicle type" onPress={() => nav.navigate('AddVehicleType')} />
+            <IconButton
+              name="plus"
+              accessibilityLabel="Add vehicle type"
+              onPress={() => nav.navigate('AddVehicleType')}
+            />
           )}
         </View>
       </View>
 
-      {list.length > 0 ? (
-        <Group>
-          {list.map((t, i) => {
-            const r = t as Record<string, unknown>;
-            const tid = String(pick(r, ['id']) ?? i);
-            const cap = num(pick(r, ['capacity']));
-            const isActive = pick(r, ['active']) !== false;
-            const isSel = selected.has(tid);
-            const openEdit = () => nav.navigate('AddVehicleType', { id: pick(r, ['id']) as string | number, preview: r });
-            return (
-              <Pressable
-                key={tid}
-                onPress={() => (selectMode ? toggleSel(tid) : openEdit())}
-                className={`min-h-[52px] flex-row items-center gap-3 px-3.5 py-3 active:bg-surface-hover ${
-                  i === list.length - 1 ? '' : 'border-b border-line-row'
-                }`}
-              >
-                {selectMode &&
-                  (isSel ? (
-                    <Icon name="checkCircle" size={20} color="#4D9EFF" />
-                  ) : (
-                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: '#888888' }} />
-                  ))}
-                <View className="flex-1">
-                  <Txt className="text-body text-fg" numberOfLines={1}>
-                    {str(pick(r, ['name']), 'Type')}
-                  </Txt>
-                  <Mono className="mt-0.5 text-caption text-faint">
-                    {cap ? `${cap} t` : '—'} · {isActive ? 'Active' : 'Inactive'}
-                  </Mono>
+      {isLoading ? (
+        <ListSkeleton rows={4} />
+      ) : isError ? (
+        <EmptyState
+          icon="alert"
+          title="Couldn't load vehicle types"
+          body="Check your connection and try again."
+          action={
+            <Button label="Retry" variant="secondary" icon="route" onPress={() => refetch()} />
+          }
+        />
+      ) : sorted.length > 0 ? (
+        <>
+          <View className="flex-row gap-2.5">
+            <StatCard label="Types" value={String(sorted.length)} />
+            <StatCard label="Active" value={String(activeCount)} />
+          </View>
+
+          <View>
+            {sorted.map((t, i) => {
+              const r = t as Record<string, unknown>;
+              const tid = String(pick(r, ['id']) ?? i);
+              const cap = num(pick(r, ['capacity']));
+              const rate = num(pick(r, ['base_rate']));
+              const fuelType = str(pick(r, ['fuel_type']));
+              const consumption = num(pick(r, ['fuel_consumption_l_per_100km']));
+              const description = str(pick(r, ['description']));
+              const isActive = pick(r, ['active']) !== false;
+              const isSel = selected.has(tid);
+              const isDeleting = deletingIds.has(tid);
+              const openEdit = () =>
+                nav.navigate('AddVehicleType', {
+                  id: pick(r, ['id']) as string | number,
+                  preview: r,
+                });
+              const meta = [
+                cap ? `${cap} t` : null,
+                rate ? `R ${rate}/km` : null,
+                fuelType || null,
+                consumption ? `${consumption} L/100km` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ');
+
+              return (
+                <View key={tid} className="mb-2.5 overflow-hidden rounded-xs border border-line">
+                  <SwipeRow
+                    enabled={!selectMode && !isDeleting}
+                    onDelete={() => removeOne(r, tid)}
+                  >
+                    <Pressable
+                      onPress={() => (selectMode ? toggleSel(tid) : openEdit())}
+                      disabled={isDeleting}
+                      className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3 active:bg-surface-hover"
+                    >
+                      {selectMode &&
+                        (isSel ? (
+                          <Icon name="checkCircle" size={20} color={colors.accent} />
+                        ) : (
+                          <View
+                            style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: 10,
+                              borderWidth: 1.5,
+                              borderColor: colors.faint,
+                            }}
+                          />
+                        ))}
+                      <View
+                        className={`h-[38px] w-[38px] items-center justify-center rounded-xs border ${
+                          isActive ? 'border-line-active' : 'border-line'
+                        }`}
+                      >
+                        <Icon
+                          name="truck"
+                          size={19}
+                          color={isActive ? colors.accent : colors.faint}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <View className="flex-row items-center gap-2">
+                          <Txt className="flex-1 text-body font-medium text-fg" numberOfLines={1}>
+                            {str(pick(r, ['name']), 'Type')}
+                          </Txt>
+                          {!isActive && <Badge label="Inactive" tone="neutral" />}
+                        </View>
+                        {!!description && (
+                          <Txt className="mt-0.5 text-caption text-muted" numberOfLines={1}>
+                            {description}
+                          </Txt>
+                        )}
+                        {!!meta && (
+                          <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                            {meta}
+                          </Mono>
+                        )}
+                      </View>
+                      {isDeleting ? (
+                        <ActivityIndicator size="small" color={colors.faint} />
+                      ) : (
+                        !selectMode && <Icon name="chevronRight" size={16} color={colors.faint} />
+                      )}
+                    </Pressable>
+                  </SwipeRow>
                 </View>
-                {!selectMode && (
-                  <View className="flex-row items-center">
-                    <IconButton name="edit" size={16} accessibilityLabel="Edit type" onPress={openEdit} />
-                    <IconButton name="x" size={16} accessibilityLabel="Delete type" onPress={() => removeOne(r)} />
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
-        </Group>
+              );
+            })}
+          </View>
+
+          {!selectMode && (
+            <Mono className="-mt-1 text-center text-nano text-faint">
+              Swipe a row left to delete
+            </Mono>
+          )}
+        </>
       ) : (
         <EmptyState icon="truck" title="No vehicle types" body="Add the classes you operate." />
       )}
@@ -641,9 +850,30 @@ function SecuritySection() {
   return (
     <View className="gap-5">
       <View className="gap-4">
-        <TextField label="Current password" placeholder="Current password" secureTextEntry icon="lock" value={current} onChangeText={setCurrent} />
-        <TextField label="New password" placeholder="At least 8 characters" secureTextEntry icon="lock" value={next} onChangeText={setNext} />
-        <TextField label="Confirm new password" placeholder="Re-enter the new password" secureTextEntry icon="lock" value={confirmPw} onChangeText={setConfirmPw} />
+        <TextField
+          label="Current password"
+          placeholder="Current password"
+          secureTextEntry
+          icon="lock"
+          value={current}
+          onChangeText={setCurrent}
+        />
+        <TextField
+          label="New password"
+          placeholder="At least 8 characters"
+          secureTextEntry
+          icon="lock"
+          value={next}
+          onChangeText={setNext}
+        />
+        <TextField
+          label="Confirm new password"
+          placeholder="Re-enter the new password"
+          secureTextEntry
+          icon="lock"
+          value={confirmPw}
+          onChangeText={setConfirmPw}
+        />
         <Button label="Update password" loading={busy} onPress={submit} fullWidth />
       </View>
 
@@ -687,42 +917,44 @@ function SecuritySection() {
             onPress={closeDelete}
             className="flex-1 items-center justify-center bg-black/65 px-6"
           >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
-            >
-              <Txt className="text-heading font-semibold text-fg">Delete account</Txt>
-              <Txt className="mt-1.5 text-sub text-muted">
-                This deactivates your account, signs you out of every device, and cannot be undone.
-                Enter your password to confirm.
-              </Txt>
-              <View className="mt-4">
-                <TextField
-                  label="Password"
-                  placeholder="Your current password"
-                  secureTextEntry
-                  icon="lock"
-                  autoCapitalize="none"
-                  value={deletePassword}
-                  onChangeText={setDeletePassword}
-                />
-              </View>
-              <View className="mt-5 flex-row gap-2.5">
-                <View className="flex-1">
-                  <Button label="Cancel" variant="secondary" onPress={closeDelete} fullWidth />
-                </View>
-                <View className="flex-1">
-                  <Button
-                    label="Delete account"
-                    variant="danger"
-                    loading={deleteBusy}
-                    disabled={!deletePassword}
-                    onPress={confirmDelete}
-                    fullWidth
+            <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
+              <Pressable
+                onPress={(e) => e.stopPropagation()}
+                className="rounded-sm border border-line bg-surface p-5"
+              >
+                <Txt className="text-heading font-semibold text-fg">Delete account</Txt>
+                <Txt className="mt-1.5 text-sub text-muted">
+                  This deactivates your account, signs you out of every device, and cannot be
+                  undone. Enter your password to confirm.
+                </Txt>
+                <View className="mt-4">
+                  <TextField
+                    label="Password"
+                    placeholder="Your current password"
+                    secureTextEntry
+                    icon="lock"
+                    autoCapitalize="none"
+                    value={deletePassword}
+                    onChangeText={setDeletePassword}
                   />
                 </View>
-              </View>
-            </Pressable>
+                <View className="mt-5 flex-row gap-2.5">
+                  <View className="flex-1">
+                    <Button label="Cancel" variant="secondary" onPress={closeDelete} fullWidth />
+                  </View>
+                  <View className="flex-1">
+                    <Button
+                      label="Delete account"
+                      variant="danger"
+                      loading={deleteBusy}
+                      disabled={!deletePassword}
+                      onPress={confirmDelete}
+                      fullWidth
+                    />
+                  </View>
+                </View>
+              </Pressable>
+            </KeyboardAvoidingView>
           </Pressable>
         </Modal>
       )}
@@ -738,7 +970,9 @@ function SecuritySection() {
                 <Txt className="text-callout text-fg" numberOfLines={1}>
                   {s.device}
                 </Txt>
-                <Mono className="mt-0.5 text-caption text-faint">{s.current ? 'This device' : s.lastSeen}</Mono>
+                <Mono className="mt-0.5 text-caption text-faint">
+                  {s.current ? 'This device' : s.lastSeen}
+                </Mono>
               </View>
               {!s.current && (
                 <Pressable hitSlop={8} onPress={() => revoke(s.id)}>
@@ -755,7 +989,11 @@ function SecuritySection() {
                     `Sign out ${otherCount} other device${otherCount === 1 ? '' : 's'}? They'll need to log in again.`,
                     [
                       { text: 'Cancel', style: 'cancel' },
-                      { text: 'Sign out', style: 'destructive', onPress: () => revokeMany('others') },
+                      {
+                        text: 'Sign out',
+                        style: 'destructive',
+                        onPress: () => revokeMany('others'),
+                      },
                     ],
                   )
                 : Alert.alert(
@@ -788,7 +1026,9 @@ function SecuritySection() {
                 style={{ backgroundColor: ACTIVITY_TONE[a.event] ?? statusHues.info }}
               />
               <View className="flex-1">
-                <Txt className="text-caption text-fg">{ACTIVITY_LABEL[a.event] ?? (a.action === 'LOGIN' ? 'Signed in' : 'Signed out')}</Txt>
+                <Txt className="text-caption text-fg">
+                  {ACTIVITY_LABEL[a.event] ?? (a.action === 'LOGIN' ? 'Signed in' : 'Signed out')}
+                </Txt>
                 <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
                   {[a.device, a.ip, formatRelativeTime(a.time)].filter(Boolean).join(' · ')}
                 </Mono>
@@ -862,7 +1102,10 @@ const INDUSTRY_OPTIONS = [
   { label: 'Agriculture', value: 'agriculture' },
   { label: 'Other', value: 'other' },
 ];
-const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC'].map((p) => ({ label: p, value: p }));
+const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC'].map((p) => ({
+  label: p,
+  value: p,
+}));
 // The backend's factory default for Company.fuel_price_per_litre. Used both as
 // the blank-box fallback on save and to recognise an untouched diesel price when
 // the live feed offers a fresher one — those two uses must stay in step, or the
@@ -999,7 +1242,13 @@ function CompanySection() {
         vat_number: vatNumber.trim(),
         website: website.trim(),
         description: description.trim(),
-        address: { street: street.trim(), city: city.trim(), province, postal_code: postalCode.trim(), country: 'South Africa' },
+        address: {
+          street: street.trim(),
+          city: city.trim(),
+          province,
+          postal_code: postalCode.trim(),
+          country: 'South Africa',
+        },
         contact: { phone: phone.trim(), email: email.trim(), support_email: supportEmail.trim() },
         allow_cross_border: allowCrossBorder === 'yes',
         default_quote_validity_days: optionalNum(validityDays),
@@ -1051,7 +1300,8 @@ function CompanySection() {
         // request, so it always wins. Never quietly overwrite a real price.
         setFuelPrice((prev) => {
           const n = parseNum(prev);
-          const untouched = !prev.trim() || (n != null && Math.abs(n - DIESEL_DEFAULT_PRICE) < 0.001);
+          const untouched =
+            !prev.trim() || (n != null && Math.abs(n - DIESEL_DEFAULT_PRICE) < 0.001);
           return manual || untouched ? String(num(diesel)) : prev;
         });
       }
@@ -1090,17 +1340,29 @@ function CompanySection() {
   })();
 
   const uploadLogo = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
     if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
+    setBusy(true);
     try {
-      const out = (await updateCompanyLogo({ uri: asset.uri, name: 'logo.jpg', type: 'image/jpeg' })) as Record<string, unknown>;
+      const out = (await updateCompanyLogo({
+        uri: asset.uri,
+        name: 'logo.jpg',
+        type: 'image/jpeg',
+      })) as Record<string, unknown>;
       const url = str(pick(out ?? {}, ['logo_url']));
       if (url) setLogoUrl(url);
       invalidateFor(qc, 'company');
       toast.success();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload logo');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1109,16 +1371,50 @@ function CompanySection() {
       <Label className="text-muted">Company logo</Label>
       <View className="flex-row items-center gap-3">
         <Avatar name={companyName} uri={mediaUrl(logoUrl)} size={56} />
-        <Button label="Upload logo" variant="secondary" icon="download" onPress={uploadLogo} />
+        <UploadButton label="Upload logo" icon="download" uploading={busy} onPress={uploadLogo} />
       </View>
 
       <Label className="mt-1 text-muted">Business information</Label>
-      <TextField label="Company name" placeholder="Your company" icon="building" value={companyName} onChangeText={setCompanyName} />
-      <SelectField label="Industry" options={INDUSTRY_OPTIONS} value={industry} onSelect={setIndustry} />
-      <TextField label="Registration number" placeholder="YYYY/XXXXXX/XX" value={regNumber} onChangeText={setRegNumber} />
-      <TextField label="VAT number" placeholder="4XXXXXXXXX" value={vatNumber} onChangeText={setVatNumber} />
-      <TextField label="Website" placeholder="https://" autoCapitalize="none" keyboardType="url" value={website} onChangeText={setWebsite} />
-      <TextField label="Description" placeholder="What your company does" value={description} onChangeText={setDescription} multiline />
+      <TextField
+        label="Company name"
+        placeholder="Your company"
+        icon="building"
+        value={companyName}
+        onChangeText={setCompanyName}
+      />
+      <SelectField
+        label="Industry"
+        options={INDUSTRY_OPTIONS}
+        value={industry}
+        onSelect={setIndustry}
+      />
+      <TextField
+        label="Registration number"
+        placeholder="YYYY/XXXXXX/XX"
+        value={regNumber}
+        onChangeText={setRegNumber}
+      />
+      <TextField
+        label="VAT number"
+        placeholder="4XXXXXXXXX"
+        value={vatNumber}
+        onChangeText={setVatNumber}
+      />
+      <TextField
+        label="Website"
+        placeholder="https://"
+        autoCapitalize="none"
+        keyboardType="url"
+        value={website}
+        onChangeText={setWebsite}
+      />
+      <TextField
+        label="Description"
+        placeholder="What your company does"
+        value={description}
+        onChangeText={setDescription}
+        multiline
+      />
 
       <Label className="mt-1 text-muted">Business address</Label>
       <TextField label="Street address" value={street} onChangeText={setStreet} />
@@ -1127,15 +1423,44 @@ function CompanySection() {
           <TextField label="City" value={city} onChangeText={setCity} />
         </View>
         <View className="flex-1">
-          <SelectField label="Province" options={PROVINCE_OPTIONS} value={province} onSelect={setProvince} />
+          <SelectField
+            label="Province"
+            options={PROVINCE_OPTIONS}
+            value={province}
+            onSelect={setProvince}
+          />
         </View>
       </View>
-      <TextField label="Postal code" keyboardType="number-pad" value={postalCode} onChangeText={setPostalCode} />
+      <TextField
+        label="Postal code"
+        keyboardType="number-pad"
+        value={postalCode}
+        onChangeText={setPostalCode}
+      />
 
       <Label className="mt-1 text-muted">Contact</Label>
-      <TextField label="Phone" icon="phone" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-      <TextField label="Business email" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-      <TextField label="Support email" autoCapitalize="none" keyboardType="email-address" value={supportEmail} onChangeText={setSupportEmail} />
+      <TextField
+        label="Phone"
+        icon="phone"
+        keyboardType="phone-pad"
+        value={phone}
+        onChangeText={setPhone}
+      />
+      <TextField
+        label="Business email"
+        icon="send"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={email}
+        onChangeText={setEmail}
+      />
+      <TextField
+        label="Support email"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={supportEmail}
+        onChangeText={setSupportEmail}
+      />
 
       <Label className="mt-1 text-muted">Quote defaults</Label>
       <SelectField
@@ -1149,21 +1474,62 @@ function CompanySection() {
       />
       <Txt className="-mt-1 text-caption text-faint">
         Whether your fleet is set up to run loads that cross into neighbouring countries. Set to
-        &quot;No&quot; and any quote whose route actually crosses a border is refused rather than priced.
+        &quot;No&quot; and any quote whose route actually crosses a border is refused rather than
+        priced.
       </Txt>
-      <TextField label="Quote validity (days)" placeholder="e.g. 7" keyboardType="number-pad" value={validityDays} onChangeText={setValidityDays} />
-      <TextField label="Base rate / km" prefix="R" placeholder="e.g. 25" keyboardType="decimal-pad" value={baseRate} onChangeText={setBaseRate} />
-      <TextField label="Toll rate / km" prefix="R" placeholder="e.g. 0,95" keyboardType="decimal-pad" value={tollRate} onChangeText={setTollRate} />
+      <TextField
+        label="Quote validity (days)"
+        placeholder="e.g. 7"
+        keyboardType="number-pad"
+        value={validityDays}
+        onChangeText={setValidityDays}
+      />
+      <TextField
+        label="Base rate / km"
+        prefix="R"
+        placeholder="e.g. 25"
+        keyboardType="decimal-pad"
+        value={baseRate}
+        onChangeText={setBaseRate}
+      />
+      <TextField
+        label="Toll rate / km"
+        prefix="R"
+        placeholder="e.g. 0,95"
+        keyboardType="decimal-pad"
+        value={tollRate}
+        onChangeText={setTollRate}
+      />
       <Txt className="-mt-1 text-caption text-faint">
         Fallback only — used when the routing service can&apos;t itemise toll plazas.
       </Txt>
-      <TextField label="Default SLA (hours)" placeholder="e.g. 48" icon="clock" keyboardType="number-pad" value={slaHours} onChangeText={setSlaHours} />
+      <TextField
+        label="Default SLA (hours)"
+        placeholder="e.g. 48"
+        icon="clock"
+        keyboardType="number-pad"
+        value={slaHours}
+        onChangeText={setSlaHours}
+      />
       <View className="flex-row gap-3">
         <View className="flex-1">
-          <TextField label="Surcharge over (kg)" placeholder="e.g. 5 000" keyboardType="number-pad" numeric value={surchargeThreshold} onChangeText={setSurchargeThreshold} />
+          <TextField
+            label="Surcharge over (kg)"
+            placeholder="e.g. 5 000"
+            keyboardType="number-pad"
+            numeric
+            value={surchargeThreshold}
+            onChangeText={setSurchargeThreshold}
+          />
         </View>
         <View className="flex-1">
-          <TextField label="Surcharge (%)" placeholder="e.g. 15" keyboardType="decimal-pad" value={surchargePct} onChangeText={setSurchargePct} />
+          <TextField
+            label="Surcharge (%)"
+            placeholder="e.g. 15"
+            keyboardType="decimal-pad"
+            value={surchargePct}
+            onChangeText={setSurchargePct}
+          />
         </View>
       </View>
 
@@ -1182,28 +1548,57 @@ function CompanySection() {
         />
       </View>
       <Txt className="-mt-2 text-caption text-faint">
-        Used when a vehicle type of that fuel runs a quote. Diesel and petrol can
-        be pulled from the live national price; electric and hybrid have no feed,
-        so set those yourself.
+        Used when a vehicle type of that fuel runs a quote. Diesel and petrol can be pulled from the
+        live national price; electric and hybrid have no feed, so set those yourself.
       </Txt>
       <View className="flex-row gap-3">
         <View className="flex-1">
-          <TextField label="Diesel (R/L)" prefix="R" placeholder="e.g. 23,50" keyboardType="decimal-pad" value={fuelPrice} onChangeText={setFuelPrice} />
+          <TextField
+            label="Diesel (R/L)"
+            prefix="R"
+            placeholder="e.g. 23,50"
+            keyboardType="decimal-pad"
+            value={fuelPrice}
+            onChangeText={setFuelPrice}
+          />
         </View>
         <View className="flex-1">
-          <TextField label="Petrol (R/L)" prefix="R" placeholder="Not set" keyboardType="decimal-pad" value={fuelPetrol} onChangeText={setFuelPetrol} />
+          <TextField
+            label="Petrol (R/L)"
+            prefix="R"
+            placeholder="Not set"
+            keyboardType="decimal-pad"
+            value={fuelPetrol}
+            onChangeText={setFuelPetrol}
+          />
         </View>
       </View>
       <View className="flex-row gap-3">
         <View className="flex-1">
-          <TextField label="Electric (R/kWh)" prefix="R" placeholder="Not set" keyboardType="decimal-pad" value={fuelElectric} onChangeText={setFuelElectric} />
+          <TextField
+            label="Electric (R/kWh)"
+            prefix="R"
+            placeholder="Not set"
+            keyboardType="decimal-pad"
+            value={fuelElectric}
+            onChangeText={setFuelElectric}
+          />
         </View>
         <View className="flex-1">
-          <TextField label="Hybrid (R/L)" prefix="R" placeholder="Not set" keyboardType="decimal-pad" value={fuelHybrid} onChangeText={setFuelHybrid} />
+          <TextField
+            label="Hybrid (R/L)"
+            prefix="R"
+            placeholder="Not set"
+            keyboardType="decimal-pad"
+            value={fuelHybrid}
+            onChangeText={setFuelHybrid}
+          />
         </View>
       </View>
       {liveNote && (
-        <Txt className={`-mt-1 text-caption ${liveStale ? 'text-warning' : 'text-faint'}`}>{liveNote}</Txt>
+        <Txt className={`-mt-1 text-caption ${liveStale ? 'text-warning' : 'text-faint'}`}>
+          {liveNote}
+        </Txt>
       )}
 
       <Button label="Save changes" loading={busy} onPress={save} fullWidth />
@@ -1274,7 +1669,15 @@ function UsersSection() {
     <View className="gap-5">
       <View className="gap-3">
         <Label className="text-muted">Invite a teammate</Label>
-        <TextField label="Email" placeholder="colleague@company.co.za" icon="send" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+        <TextField
+          label="Email"
+          placeholder="colleague@company.co.za"
+          icon="send"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          value={email}
+          onChangeText={setEmail}
+        />
         <SelectField label="Role" icon="shield" options={ROLES} value={role} onSelect={setRole} />
         <Button label="Send invite" loading={busy} onPress={invite} fullWidth />
       </View>
@@ -1299,9 +1702,18 @@ function UsersSection() {
               ) : (
                 <>
                   <View style={{ width: 120 }}>
-                    <SelectField options={ROLES} value={u.role} onSelect={(r) => changeRole(u.id, r)} />
+                    <SelectField
+                      options={ROLES}
+                      value={u.role}
+                      onSelect={(r) => changeRole(u.id, r)}
+                    />
                   </View>
-                  <IconButton name="x" size={16} accessibilityLabel="Remove user" onPress={() => remove(u.id, u.name)} />
+                  <IconButton
+                    name="x"
+                    size={16}
+                    accessibilityLabel="Remove user"
+                    onPress={() => remove(u.id, u.name)}
+                  />
                 </>
               )}
             </View>
@@ -1347,7 +1759,11 @@ function useNextPaymentLabel(nextBillingAt: string): string {
 }
 
 const CHARGE_TONE = (status: string) =>
-  status === 'complete' ? statusHues.success : status === 'pending' ? statusHues.warning : statusHues.danger;
+  status === 'complete'
+    ? statusHues.success
+    : status === 'pending'
+      ? statusHues.warning
+      : statusHues.danger;
 
 /** One charge row, shared by the preview and the full-history screen. */
 function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
@@ -1432,18 +1848,24 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
         </View>
       )}
 
-      <Txt className="text-caption text-faint">{subscriptionStatusDetail(status)}</Txt>
+      <Txt className="text-caption text-faint">
+        {subscriptionStatusDetail(status, cancelling)}
+      </Txt>
 
       <Group>
         <DetailRow label="Plan" value={planLabel} mono={false} />
-        <DetailRow label="Status" value={subscriptionStatusLabel(status)} />
+        <DetailRow label="Status" value={subscriptionStatusLabel(status, cancelling)} />
         {amount > 0 ? <DetailRow label="Amount" value={formatCurrency(amount)} /> : null}
         {last4 ? (
           <DetailRow label="Card" value={`${cardType || 'Card'} •••• ${last4}`} mono={false} />
         ) : null}
         {/* Was reading `renews_at`, which this endpoint never returns — the
             row was permanently blank. */}
-        <DetailRow label="Renews" value={nextBillingDate ? formatDate(nextBillingDate) : '—'} last />
+        <DetailRow
+          label="Renews"
+          value={nextBillingDate ? formatDate(nextBillingDate) : '—'}
+          last
+        />
       </Group>
 
       {!!countdown && (

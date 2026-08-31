@@ -3,7 +3,7 @@ import { View, ScrollView, Pressable, RefreshControl, type ScrollViewProps } fro
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
-import { LiveDot } from './primitives';
+import { SubscriptionDot } from './SubscriptionDot';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // ── Ambient glow: one fixed, faint accent bloom behind the workspace ───────
@@ -106,7 +106,7 @@ export function AppHeader({
           <Txt className="text-title font-semibold tracking-[-0.02em]" style={{ fontSize: 26 }}>
             {title}
           </Txt>
-          {live && <LiveDot label="Live" />}
+          {live && <SubscriptionDot />}
         </View>
       </View>
       {right}
@@ -129,7 +129,7 @@ export function SectionLabel({
       <Label className="tracking-label">{children as string}</Label>
       {action && (
         <Pressable hitSlop={8} onPress={onAction} accessibilityRole="button">
-          <Mono className="text-micro tracking-label uppercase text-accent">{action}</Mono>
+          <Mono className="text-micro uppercase tracking-label text-accent">{action}</Mono>
         </Pressable>
       )}
     </View>
@@ -159,7 +159,7 @@ export function UnderlineTabs<T extends string>({
             className={`border-b-2 py-3 ${active ? 'border-accent' : 'border-transparent'}`}
           >
             <Mono
-              className={`text-caption tracking-wide uppercase ${
+              className={`text-caption uppercase tracking-wide ${
                 active ? 'font-semibold text-fg' : 'text-muted'
               }`}
             >
@@ -195,13 +195,15 @@ export function FilterChips<T extends string>({
             key={o.value}
             onPress={() => onChange(o.value)}
             accessibilityRole="button"
+
             accessibilityState={{ selected: active }}
             className={`min-h-[34px] justify-center rounded-xs border border-line px-3 ${
               active ? 'bg-accent' : 'bg-surface'
             }`}
           >
             <Mono
-              className={`text-micro tracking-wide uppercase ${
+              numberOfLines={1}
+              className={`text-micro uppercase tracking-wide ${
                 active ? 'text-on-accent' : 'text-muted'
               }`}
             >
@@ -215,12 +217,23 @@ export function FilterChips<T extends string>({
 }
 
 // ── Fab: floating action button (create) ───────────────────────────────────
-export function Fab({ onPress, icon = 'plus' }: { onPress: () => void; icon?: IconName }) {
+export function Fab({
+  onPress,
+  onLongPress,
+  icon = 'plus',
+}: {
+  onPress: () => void;
+  /** Optional secondary entry point (e.g. "New quote by voice") — undiscoverable
+      on its own, so callers pair it with a more visible entry point too. */
+  onLongPress?: () => void;
+  icon?: IconName;
+}) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityLabel="Create"
       className="absolute right-4 h-14 w-14 items-center justify-center rounded-sm bg-accent active:opacity-90"

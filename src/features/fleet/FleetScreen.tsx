@@ -14,6 +14,7 @@ import {
   ListRow,
   IconButton,
   Icon,
+  Avatar,
   Mono,
   EmptyState,
 } from '@/components/ui';
@@ -38,7 +39,7 @@ const VEHICLE_FILTERS = [
 const DRIVER_FILTERS = [
   { label: 'All', value: 'ALL' },
   { label: 'Active', value: 'ACTIVE' },
-  { label: 'On duty', value: 'ON_DUTY' },
+  { label: 'On leave', value: 'ON_LEAVE' },
   { label: 'Inactive', value: 'INACTIVE' },
 ];
 
@@ -94,7 +95,12 @@ function VehiclesTab() {
     [data, filter, q],
   );
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load vehicles." />;
 
   const ready = data.filter((v) => ['AVAILABLE', 'IN_USE'].includes(v.status)).length;
@@ -129,6 +135,7 @@ function VehiclesTab() {
             leading={<Icon name="truck" size={22} color={colors.muted} />}
             title={item.name}
             subtitle={item.plate}
+            subtitleIcon="idCard"
             trailing={
               <View className="items-end gap-1">
                 {item.aiHealthScore != null && (
@@ -158,12 +165,20 @@ function DriversTab() {
       (data ?? []).filter(
         (d) =>
           (filter === 'ALL' || d.status === filter) &&
-          (!q || d.name.toLowerCase().includes(q.toLowerCase())),
+          (!q ||
+            `${d.name} ${d.phone ?? ''} ${d.licenseNumber ?? ''}`
+              .toLowerCase()
+              .includes(q.toLowerCase())),
       ),
     [data, filter, q],
   );
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load drivers." />;
 
   return (
@@ -178,8 +193,8 @@ function DriversTab() {
           <View className="mb-3 flex-row gap-3">
             <StatCard label="Drivers" value={String(data.length)} />
             <StatCard
-              label="On duty"
-              value={String(data.filter((d) => ['ACTIVE', 'ON_DUTY', 'IN_USE'].includes(d.status)).length)}
+              label="Active"
+              value={String(data.filter((d) => d.status === 'ACTIVE').length)}
             />
           </View>
           <View className="mb-3">
@@ -188,12 +203,16 @@ function DriversTab() {
           <FilterChips options={DRIVER_FILTERS} value={filter} onChange={setFilter} />
         </View>
       }
-      ListEmptyComponent={<EmptyState icon="users" title="No drivers" body="No drivers match this filter." />}
+      ListEmptyComponent={
+        <EmptyState icon="users" title="No drivers" body="No drivers match this filter." />
+      }
       renderItem={({ item }) => (
         <View className="mb-2.5 overflow-hidden rounded-xs border border-line bg-surface">
           <ListRow
-            leading={<Icon name="user" size={22} color="#888888" />}
+            leading={<Avatar name={item.name} uri={item.avatar} size={36} />}
             title={item.name}
+            subtitle={item.phone || item.licenseNumber}
+            subtitleIcon={item.phone ? 'phone' : 'idCardLanyard'}
             trailing={
               <View className="items-end gap-1">
                 {item.safetyScore != null && (

@@ -1,9 +1,25 @@
+import { memo } from 'react';
 import { View, ActivityIndicator } from 'react-native';
-import { Button, Icon, Label, Mono, Txt } from '@/components/ui';
+import { Button, Label, Txt } from '@/components/ui';
 import { MapPin, MapReticle } from './MapPin';
 import { status as statusHues } from '@/theme/tokens';
+import type { PickTarget } from './types';
 
-export type PickTarget = 'pickup' | 'dropoff';
+// Lives in types.ts (this file's stated home for shared quote-builder types),
+// re-exported here so existing importers of this file keep working.
+export type { PickTarget };
+
+// MapPin's teardrop tip sits at (12, 29.6) of its 0..34 viewBox (see the
+// comment on its Path — walked out from the SVG's own bezier commands), not
+// at the bottom of the box (y=34, which is padding for its cast shadow).
+// Centering the pin's box on the reticle and lifting it by half its own
+// height would leave the tip sitting above the reticle's exact point by the
+// gap between the tip and the box bottom — this lift is the box's half-height
+// *plus* that gap, so the tip itself, not the box, lands exactly on the point.
+const PIN_TIP_Y = 29.6;
+const PIN_VIEWBOX_H = 34;
+const PIN_SIZE = 40;
+const PIN_LIFT = PIN_SIZE * (PIN_VIEWBOX_H / 24) * (PIN_TIP_Y / PIN_VIEWBOX_H - 0.5);
 
 /**
  * The Uber/Pathao pick affordance: a pin locked to the centre of the map while
@@ -15,12 +31,15 @@ export type PickTarget = 'pickup' | 'dropoff';
  * the user is looking.
  *
  * Purely presentational; the caller owns the map centre and the lookup.
+ * Memoized — cheap on its own, but it's free and it's mounted for the
+ * duration of a pick, which spans several map-drag re-renders.
  */
-export function CrosshairOverlay({
+function CrosshairOverlayImpl({
   target,
   address,
   resolving,
   error,
+  ready,
   onConfirm,
   onCancel,
   bottomInset,
@@ -30,35 +49,27 @@ export function CrosshairOverlay({
   address?: string | null;
   resolving?: boolean;
   error?: string | null;
+  /** The map has settled on a point at least once. Confirming only ever needs
+      this — an address name is a display nicety, never a requirement, so a
+      spot with no resolvable address (or one still resolving) isn't blocked. */
+  ready?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   bottomInset: number;
 }) {
   const isPickup = target === 'pickup';
-  const tint = isPickup ? statusHues.success : statusHues.danger;
+  const isStop = typeof target === 'object';
+  const tint = isPickup ? statusHues.success : isStop ? statusHues.info : statusHues.danger;
+  const noun = isPickup ? 'collection' : isStop ? 'stop' : 'drop-off';
 
   return (
     <>
-      {/* Chip naming the end being set. pointerEvents none — the whole map
-          surface has to stay draggable, including under the chrome. */}
-      <View className="absolute left-0 right-0 top-0 items-center pt-3" pointerEvents="none">
-        <View
-          className="flex-row items-center gap-2 rounded-pill border border-line bg-bg-deep/90 px-3.5 py-2"
-          style={{ borderColor: tint }}
-        >
-          <Icon name="pin" size={14} color={tint} />
-          <Mono className="text-micro tracking-wide uppercase" style={{ color: tint }}>
-            {isPickup ? 'Set collection' : 'Set drop-off'}
-          </Mono>
-        </View>
-      </View>
-
       {/* Pin and reticle both centred on the map's centre. The pin's tip is
           the point, so it is lifted by its own height; the reticle sits exactly
           on the spot and stays readable while the map is moving. */}
       <View className="absolute inset-0 items-center justify-center" pointerEvents="none">
-        <View style={{ transform: [{ translateY: -28 }] }}>
-          <MapPin color={tint} size={40} />
+        <View style={{ transform: [{ translateY: -PIN_LIFT }] }}>
+          <MapPin color={tint} size={PIN_SIZE} />
         </View>
         <View className="absolute">
           <MapReticle color={tint} size={20} />
@@ -68,14 +79,20 @@ export function CrosshairOverlay({
       {/* Readout + confirm, above whatever the sheet is occupying. */}
       <View className="absolute left-0 right-0 px-4" style={{ bottom: bottomInset + 12 }}>
         <View className="gap-2.5 rounded-xs border border-line bg-elevated p-3.5">
-          <Label className="text-muted">{isPickup ? 'Collection point' : 'Drop-off point'}</Label>
+          <Label className="text-muted">
+            {isPickup ? 'Collection point' : isStop ? 'Stop point' : 'Drop-off point'}
+          </Label>
           {resolving ? (
             <View className="flex-row items-center gap-2">
               <ActivityIndicator size="small" color={tint} />
               <Txt className="text-sub text-faint">Finding the address…</Txt>
             </View>
           ) : error ? (
-            <Txt className="text-sub text-danger">{error}</Txt>
+            // Still confirmable — this is just "no address name found here",
+            // not "no pin". Confirming falls back to the coordinates.
+            <Txt className="text-sub text-warning">
+              No address here — will use the exact coordinates
+            </Txt>
           ) : (
             <Txt className="text-callout text-fg" numberOfLines={2}>
               {address || 'Move the map to place the pin'}
@@ -87,10 +104,10 @@ export function CrosshairOverlay({
             </View>
             <View className="flex-[1.4]">
               <Button
-                label={isPickup ? 'Confirm collection' : 'Confirm drop-off'}
+                label={`Confirm ${noun}`}
                 icon="check"
                 onPress={onConfirm}
-                disabled={!address || !!resolving}
+                disabled={!ready}
                 fullWidth
               />
             </View>
@@ -100,3 +117,5 @@ export function CrosshairOverlay({
     </>
   );
 }
+
+export const CrosshairOverlay = memo(CrosshairOverlayImpl);

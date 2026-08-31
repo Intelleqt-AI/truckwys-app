@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { View, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native';
 import Svg, { Path, Line, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Mono } from './Text';
@@ -11,7 +11,9 @@ export interface CurvePoint {
 
 // Profit-vs-margin "sweet-spot" sparkline (area + dashed reference at optimal
 // margin). Tap/drag to inspect a point — shows its margin% + expected profit.
-export function ProfitCurve({
+// Memoized — `points` is already a stable memo at the call site, and this
+// does a full sort + path rebuild on every render otherwise.
+function ProfitCurveImpl({
   points,
   optimalMargin,
   height = 64,
@@ -47,7 +49,9 @@ export function ProfitCurve({
   const sx = (m: number) => pad + ((m - minX) / spanX) * (w - pad * 2);
   const sy = (p: number) => pad + (1 - (p - minY) / spanY) * (height - pad * 2);
 
-  const line = sorted.map((p, i) => `${i ? 'L' : 'M'}${sx(p.margin).toFixed(1)},${sy(p.profit).toFixed(1)}`).join(' ');
+  const line = sorted
+    .map((p, i) => `${i ? 'L' : 'M'}${sx(p.margin).toFixed(1)},${sy(p.profit).toFixed(1)}`)
+    .join(' ');
   const area = `${line} L${sx(maxX).toFixed(1)},${height - pad} L${sx(minX).toFixed(1)},${height - pad} Z`;
   // Only drawn when the optimum actually lies on the plotted curve. It used to
   // be projected unconditionally, so an out-of-domain margin (the backend
@@ -104,12 +108,35 @@ export function ProfitCurve({
             <Path d={area} fill="url(#pc)" />
             <Path d={line} stroke={color} strokeWidth={1.5} fill="none" />
             {refX != null && (
-              <Line x1={refX} y1={pad} x2={refX} y2={height - pad} stroke={color} strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
+              <Line
+                x1={refX}
+                y1={pad}
+                x2={refX}
+                y2={height - pad}
+                stroke={color}
+                strokeWidth={1}
+                strokeDasharray="3 3"
+                opacity={0.7}
+              />
             )}
             {sel && (
               <>
-                <Line x1={sx(sel.margin)} y1={pad} x2={sx(sel.margin)} y2={height - pad} stroke="#888888" strokeWidth={1} />
-                <Circle cx={sx(sel.margin)} cy={sy(sel.profit)} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
+                <Line
+                  x1={sx(sel.margin)}
+                  y1={pad}
+                  x2={sx(sel.margin)}
+                  y2={height - pad}
+                  stroke="#888888"
+                  strokeWidth={1}
+                />
+                <Circle
+                  cx={sx(sel.margin)}
+                  cy={sy(sel.profit)}
+                  r={4}
+                  fill={color}
+                  stroke="#fff"
+                  strokeWidth={1.5}
+                />
               </>
             )}
           </Svg>
@@ -118,3 +145,5 @@ export function ProfitCurve({
     </View>
   );
 }
+
+export const ProfitCurve = memo(ProfitCurveImpl);

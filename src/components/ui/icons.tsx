@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ChevronLeft,
   ChevronDown,
+  ChevronUp,
   MapPin,
   Clock,
   ArrowRight,
@@ -47,6 +48,12 @@ import {
   TrendingUp,
   Share,
   Mic,
+  Mail,
+  EyeOff,
+  ExternalLink,
+  IdCard,
+  IdCardLanyard,
+  Trash2,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -64,6 +71,7 @@ export const icons = {
   chevronRight: ChevronRight,
   chevronLeft: ChevronLeft,
   chevronDown: ChevronDown,
+  chevronUp: ChevronUp,
   pin: MapPin,
   clock: Clock,
   arrowRight: ArrowRight,
@@ -102,6 +110,12 @@ export const icons = {
   download: Download,
   sparkle: Sparkles,
   trend: TrendingUp,
+  mail: Mail,
+  eyeOff: EyeOff,
+  externalLink: ExternalLink,
+  idCard: IdCard,
+  idCardLanyard: IdCardLanyard,
+  trash: Trash2,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

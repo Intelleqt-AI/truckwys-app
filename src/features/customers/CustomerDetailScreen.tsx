@@ -124,16 +124,16 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
       />
 
       <View className="mb-5 mt-4 flex-row flex-wrap gap-3">
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Total quotes" value={String(totalQuotes)} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Accepted" value={String(accepted.length)} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Total revenue" value={formatCurrency(totalRevenue, { maximumFractionDigits: 0 })} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard
             label="Credit limit"
             value={

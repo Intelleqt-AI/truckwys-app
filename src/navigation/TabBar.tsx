@@ -98,10 +98,12 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   // Accent-tinted highlight reads on both themes over the glass bar.
   const highlightBg = scheme === 'dark' ? 'rgba(77,158,255,0.20)' : 'rgba(37,99,235,0.12)';
 
-  // Standard iOS floating-bar position: docked low, just above the home
-  // indicator. A theme-aware shade (dark in dark mode / white in light) fades
-  // scrolling content out at the very bottom, behind the bar.
-  const barBottom = Math.max(insets.bottom - 12, 8);
+  // Standard iOS floating-bar position: docked just above the home
+  // indicator / Android nav bar, with a consistent gap on top of the safe
+  // area so the bar never sits under the system nav area. A theme-aware
+  // shade (dark in dark mode / white in light) fades scrolling content out
+  // at the very bottom, behind the bar.
+  const barBottom = Math.max(insets.bottom, 8) + 4;
   // Tall, multi-stop ramp so the fade is smooth with no visible top edge; the
   // solid part sits at the very bottom, easing to transparent well above the bar.
   const shadeH = barBottom + BAR_HEIGHT + 90;
@@ -157,53 +159,53 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             elevation: 14,
           }}
         >
-        <View
-          style={{ flex: 1, paddingHorizontal: HPAD }}
-          onLayout={(e) => setInnerW(e.nativeEvent.layout.width - HPAD * 2)}
-        >
-          {hlW > 0 && (
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                {
-                  position: 'absolute',
-                  left: HPAD,
-                  top: V_INSET,
-                  width: hlW,
-                  height: HL_H,
-                  borderRadius: HL_RADIUS,
-                  backgroundColor: highlightBg,
-                },
-                highlight,
-              ]}
-            />
-          )}
-          <View style={{ flex: 1, flexDirection: 'row' }}>
-            {state.routes.map((route, index) => {
-              const focused = state.index === index;
-              const onPress = () => {
-                const event = navigation.emit({
-                  type: 'tabPress',
-                  target: route.key,
-                  canPreventDefault: true,
-                });
-                if (!focused && !event.defaultPrevented) {
-                  if (Platform.OS !== 'web') void Haptics.selectionAsync();
-                  navigation.navigate(route.name);
-                }
-              };
-              return (
-                <Destination
-                  key={route.key}
-                  focused={focused}
-                  label={route.name}
-                  icon={TAB_ICON[route.name] ?? 'grid'}
-                  onPress={onPress}
-                />
-              );
-            })}
+          <View
+            style={{ flex: 1, paddingHorizontal: HPAD }}
+            onLayout={(e) => setInnerW(e.nativeEvent.layout.width - HPAD * 2)}
+          >
+            {hlW > 0 && (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  {
+                    position: 'absolute',
+                    left: HPAD,
+                    top: V_INSET,
+                    width: hlW,
+                    height: HL_H,
+                    borderRadius: HL_RADIUS,
+                    backgroundColor: highlightBg,
+                  },
+                  highlight,
+                ]}
+              />
+            )}
+            <View style={{ flex: 1, flexDirection: 'row' }}>
+              {state.routes.map((route, index) => {
+                const focused = state.index === index;
+                const onPress = () => {
+                  const event = navigation.emit({
+                    type: 'tabPress',
+                    target: route.key,
+                    canPreventDefault: true,
+                  });
+                  if (!focused && !event.defaultPrevented) {
+                    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                    navigation.navigate(route.name);
+                  }
+                };
+                return (
+                  <Destination
+                    key={route.key}
+                    focused={focused}
+                    label={route.name}
+                    icon={TAB_ICON[route.name] ?? 'grid'}
+                    onPress={onPress}
+                  />
+                );
+              })}
+            </View>
           </View>
-        </View>
         </Glass>
       </View>
     </View>

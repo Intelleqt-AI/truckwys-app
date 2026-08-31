@@ -42,6 +42,10 @@ yarn-error.*
 /ios
 /android
 
+# personal
+.private
+.vscode
+
 # Firebase client config — pulled in at build time via env vars, and
 # injected into EAS builds as file secrets. Not committed.
 google-services.json

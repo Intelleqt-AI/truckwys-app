@@ -22,11 +22,14 @@ export function useDrivers() {
   });
 }
 
-export function useVehicle(id: string | number, preview?: Record<string, unknown>) {
+export function useVehicle(id: string | number, preview?: Record<string, unknown>, enabled = true) {
   return useQuery<Record<string, unknown>>({
     queryKey: ['vehicle', id],
     queryFn: () => fetchData(`vehicles/${id}/`),
     initialData: preview,
+    // Matches useDriver's gate — AddVehicleScreen calls this unconditionally
+    // (create or edit) and must not fire `GET vehicles//` when there's no id.
+    enabled: enabled && !!id,
   });
 }
 
@@ -46,6 +49,15 @@ export function useDriver(id: string | number, preview?: Record<string, unknown>
     queryFn: () => fetchData(`drivers/${id}/`),
     initialData: preview,
     enabled: enabled && !!id,
+  });
+}
+
+// Loads for one driver — powers the driver-detail Recent loads block.
+export function useDriverLoads(id: string | number) {
+  return useQuery<Record<string, unknown>[]>({
+    queryKey: ['driver-loads', id],
+    queryFn: async () => asArray(await fetchData(`loads/?driver=${id}&page_size=50`)),
+    enabled: !!id,
   });
 }
 
@@ -70,6 +82,8 @@ export const VEHICLE_STATUSES = [
   'OUT_OF_SERVICE',
   'INACTIVE',
 ] as const;
+
+export const DRIVER_STATUSES = ['ACTIVE', 'INACTIVE', 'ON_LEAVE'] as const;
 
 export const createVehicle = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'vehicles/', data });

@@ -38,6 +38,7 @@ export function VoiceQuoteBar({
         value={value}
         onChangeText={onChangeText}
         multiline
+        bottomSheet
       />
       {note ? <Txt className="mt-1.5 text-caption text-muted">{note}</Txt> : null}
       <View className="mt-2 flex-row items-stretch gap-2.5">

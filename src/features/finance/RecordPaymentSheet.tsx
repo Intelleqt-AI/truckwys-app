@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { View, Modal, Pressable, ScrollView } from 'react-native';
+import { View, Modal, Pressable } from 'react-native';
+import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Txt, Mono, Button, TextField, DateField, SelectField, type Option } from '@/components/ui';
 import { formatCurrency, formatPlain, parseNum } from '@/lib/formatters';
 
@@ -71,93 +72,98 @@ export function RecordPaymentSheet({
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
       <Pressable onPress={onCancel} className="flex-1 items-center justify-center bg-black/65 px-6">
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
-        >
-          <Txt className="text-heading font-semibold text-fg">Record payment</Txt>
-          <Txt className="mb-4 mt-1.5 text-sub text-muted">
-            Outstanding balance {formatCurrency(balance)}
-          </Txt>
+        <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            className="rounded-sm border border-line bg-surface p-5"
+          >
+            <Txt className="text-heading font-semibold text-fg">Record payment</Txt>
+            <Txt className="mb-4 mt-1.5 text-sub text-muted">
+              Outstanding balance {formatCurrency(balance)}
+            </Txt>
 
-          <ScrollView className="mb-4 max-h-[380px]" keyboardShouldPersistTaps="handled">
-            <View className="gap-4">
-              <View>
-                <TextField
-                  label="Amount"
-                  placeholder="0,00"
-                  prefix="R"
-                  keyboardType="decimal-pad"
-                  numeric
-                  decimals={2}
-                  error={invalid ? 'Enter a number, e.g. 12 500,00' : undefined}
-                  value={amount}
-                  onChangeText={setAmount}
+            <KeyboardAwareScrollView
+              className="mb-4 max-h-[380px]"
+              keyboardShouldPersistTaps="handled"
+            >
+              <View className="gap-4">
+                <View>
+                  <TextField
+                    label="Amount"
+                    placeholder="0,00"
+                    prefix="R"
+                    keyboardType="decimal-pad"
+                    numeric
+                    decimals={2}
+                    error={invalid ? 'Enter a number, e.g. 12 500,00' : undefined}
+                    value={amount}
+                    onChangeText={setAmount}
+                  />
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => setAmount(formatPlain(balance, 2))}
+                    className="mt-1.5 self-start"
+                  >
+                    <Mono className="text-caption text-accent">
+                      Full — {formatCurrency(balance)}
+                    </Mono>
+                  </Pressable>
+                </View>
+
+                <DateField
+                  label="Payment date"
+                  value={date}
+                  onChange={setDate}
+                  maximumDate={new Date()}
                 />
-                <Pressable
-                  hitSlop={8}
-                  onPress={() => setAmount(formatPlain(balance, 2))}
-                  className="mt-1.5 self-start"
-                >
-                  <Mono className="text-caption text-accent">
-                    Full — {formatCurrency(balance)}
+
+                <SelectField
+                  label="Method"
+                  icon="dollar"
+                  options={PAYMENT_METHODS}
+                  value={method}
+                  onSelect={setMethod}
+                />
+
+                <TextField
+                  label="Reference (optional)"
+                  placeholder="e.g. bank reference"
+                  value={reference}
+                  onChangeText={setReference}
+                />
+
+                {overpaying && (
+                  <Mono className="text-micro text-warning">
+                    Amount is more than the {formatCurrency(balance)} outstanding.
                   </Mono>
-                </Pressable>
+                )}
               </View>
+            </KeyboardAwareScrollView>
 
-              <DateField
-                label="Payment date"
-                value={date}
-                onChange={setDate}
-                maximumDate={new Date()}
-              />
-
-              <SelectField
-                label="Method"
-                icon="dollar"
-                options={PAYMENT_METHODS}
-                value={method}
-                onSelect={setMethod}
-              />
-
-              <TextField
-                label="Reference (optional)"
-                placeholder="e.g. bank reference"
-                value={reference}
-                onChangeText={setReference}
-              />
-
-              {overpaying && (
-                <Mono className="text-micro text-warning">
-                  Amount is more than the {formatCurrency(balance)} outstanding.
-                </Mono>
-              )}
+            <View className="flex-row gap-2.5">
+              <View className="flex-1">
+                <Button label="Cancel" variant="secondary" onPress={onCancel} fullWidth />
+              </View>
+              <View className="flex-1">
+                <Button
+                  label={busy ? 'RECORDING…' : 'RECORD'}
+                  loading={busy}
+                  disabled={!canSubmit}
+                  onPress={() =>
+                    canSubmit &&
+                    onConfirm({
+                      amount: amountNum,
+                      payment_date: date,
+                      payment_method: method,
+                      reference: reference.trim(),
+                    })
+                  }
+                  fullWidth
+                />
+              </View>
             </View>
-          </ScrollView>
-
-          <View className="flex-row gap-2.5">
-            <View className="flex-1">
-              <Button label="Cancel" variant="secondary" onPress={onCancel} fullWidth />
-            </View>
-            <View className="flex-1">
-              <Button
-                label={busy ? 'RECORDING…' : 'RECORD'}
-                loading={busy}
-                disabled={!canSubmit}
-                onPress={() =>
-                  canSubmit &&
-                  onConfirm({
-                    amount: amountNum,
-                    payment_date: date,
-                    payment_method: method,
-                    reference: reference.trim(),
-                  })
-                }
-                fullWidth
-              />
-            </View>
-          </View>
-        </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Pressable>
     </Modal>
   );

@@ -284,11 +284,12 @@ export function useBillingHistory() {
   });
 }
 
-export function useBillingStatus() {
+export function useBillingStatus(options?: { enabled?: boolean }) {
   return useQuery<Record<string, unknown>>({
     queryKey: ['billing-status'],
     queryFn: () => fetchData('billing/status/'),
     retry: false,
+    enabled: options?.enabled ?? true,
   });
 }
 

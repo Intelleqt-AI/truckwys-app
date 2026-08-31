@@ -11,6 +11,8 @@ import {
   StatusPill,
   Group,
   DetailRow,
+  Timeline,
+  type TimelineStep,
   Button,
   Icon,
   Txt,
@@ -21,11 +23,12 @@ import { ErrorState } from '@/components/feedback';
 import { useLoad, updateLoadStatus, convertLoadToInvoice, uploadLoadPod, assignLoadDriver } from './api';
 import { AssignSheet, assignedIds } from './AssignSheet';
 import { useSubscription } from '@/hooks/useSubscription';
-import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL } from './constants';
+import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL, stepIndexFor } from './constants';
 import { num, str, pick } from '@/lib/api/list';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
+import { status as statusHues } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -46,7 +49,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const l = (data ?? {}) as Record<string, unknown>;
 
   const status = str(pick(l, ['status']), 'PENDING').toUpperCase();
-  const idx = LOAD_STEPS.indexOf((status === 'CANCELLED' ? 'PENDING' : status) as never);
+  const idx = stepIndexFor(status);
   const transitions = VALID_TRANSITIONS[status] ?? [];
   const rate = num(pick(l, ['rate']));
   const distance = num(pick(l, ['distance']));
@@ -56,6 +59,61 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
   const current = assignedIds(l);
   const hasAssignment = !!(current.driverId || current.vehicleId);
+
+  // Each stage shows the one real fact the API actually records for it — the
+  // Load model only has `created_at` and `actual_delivered_at` as genuine
+  // per-stage timestamps, so nothing here is a guessed date.
+  const timelineSteps: TimelineStep[] = LOAD_STEPS.map((step, i) => {
+    const base = { label: STATUS_LABEL(step), done: i < idx, current: i === idx, color: colors.accent };
+    switch (step) {
+      case 'PENDING': {
+        const createdAt = str(pick(l, ['created_at']));
+        return { ...base, time: createdAt ? `Created ${formatDate(createdAt)}` : undefined };
+      }
+      case 'ASSIGNED': {
+        const driverName = str(pick(l, ['driver_name']));
+        const vehicleInfo = str(pick(l, ['vehicle_info']));
+        const meta = [driverName, vehicleInfo].filter(Boolean).join(' · ');
+        // The check attests to an assignment, not to lifecycle position: the
+        // backend only enforces driver+vehicle for the ASSIGNED status itself,
+        // so a load can legitimately reach IN_TRANSIT with neither. Deriving
+        // `done` from the same `meta` that gets rendered makes a checkmark over
+        // "Not yet assigned" unrepresentable.
+        return { ...base, done: base.done && !!meta, meta: meta || 'Not yet assigned' };
+      }
+      case 'IN_TRANSIT': {
+        const pickupDate = str(pick(l, ['pickup_date']));
+        return { ...base, time: pickupDate ? `Pickup ${formatDate(pickupDate)}` : undefined };
+      }
+      case 'DELIVERED': {
+        const deliveredAt = str(pick(l, ['actual_delivered_at']));
+        const deliveryDate = str(pick(l, ['delivery_date']));
+        return {
+          ...base,
+          time: deliveredAt
+            ? `Delivered ${formatDate(deliveredAt)}`
+            : base.done
+              // Already delivered — a "Due" date here would read as still pending.
+              ? undefined
+              : deliveryDate
+                ? `Due ${formatDate(deliveryDate)}`
+                : undefined,
+        };
+      }
+      case 'INVOICED': {
+        const invoiceNumber = str(pick(l, ['invoice_number', 'invoice']));
+        return { ...base, meta: invoiceNumber ? `Invoice ${invoiceNumber}` : undefined };
+      }
+      default:
+        return base;
+    }
+  });
+  // The API doesn't record how far a cancelled load got, so the honest thing
+  // is to leave every stage muted (idx is -1) and cap the list with its own
+  // terminal row, rather than guessing which stage it was cancelled from.
+  if (status === 'CANCELLED') {
+    timelineSteps.push({ label: 'Cancelled', done: true, current: false, color: statusHues.danger });
+  }
 
   const refresh = () => invalidateFor(qc, 'load');
 
@@ -163,63 +221,12 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         <Txt className="text-callout text-muted">{str(pick(l, ['customer_name', 'customer']), '')}</Txt>
       </View>
 
-      {/* Progress stepper — cumulative fill + glowing active dot */}
-      <View className="mb-5 rounded-xs border border-line bg-surface px-3 py-4">
-        <View className="flex-row items-center">
-          {LOAD_STEPS.map((step, i) => {
-            const past = i <= idx;
-            const current = i === idx;
-            return (
-              <View key={step} className="flex-1 flex-row items-center">
-                {i > 0 && (
-                  <View
-                    style={{
-                      flex: 1,
-                      height: 3,
-                      borderRadius: 3,
-                      marginBottom: 16,
-                      backgroundColor: past ? colors.accent : colors.line,
-                    }}
-                  />
-                )}
-                <View className="items-center" style={{ width: 56, gap: 6 }}>
-                  <View
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 11,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: current ? 'rgba(77,158,255,0.22)' : 'transparent',
-                    }}
-                  >
-                    <View
-                      style={{
-                        width: current ? 12 : 10,
-                        height: current ? 12 : 10,
-                        borderRadius: 6,
-                        backgroundColor: past ? colors.accent : colors.line,
-                      }}
-                    />
-                  </View>
-                  <Mono
-                    className="text-center uppercase"
-                    style={{
-                      fontSize: 8.5,
-                      letterSpacing: 0.4,
-                      lineHeight: 11,
-                      fontWeight: current ? '700' : '500',
-                      color: past ? colors.accent : colors.faint,
-                    }}
-                  >
-                    {step.replace(/_/g, ' ')}
-                  </Mono>
-                </View>
-              </View>
-            );
-          })}
+      {/* Status timeline — done / current / upcoming, one real fact per stage */}
+      <Group label="Status">
+        <View className="p-4">
+          <Timeline steps={timelineSteps} />
         </View>
-      </View>
+      </Group>
 
       {/* Update status — single dropdown (current + valid next states) */}
       {transitions.length > 0 && (
@@ -238,19 +245,19 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Metrics */}
       <View className="mb-5 flex-row flex-wrap gap-3">
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Total amount" value={formatCurrency(total, { maximumFractionDigits: 0 })} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Distance" value={`${formatNumber(distance)} km`} />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard
             label="Weight"
             value={`${formatNumber(num(pick(l, ['weight'])) / 1000, { maximumFractionDigits: 0 })} t`}
           />
         </View>
-        <View style={{ width: '47.5%' }}>
+        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Rate / km" value={formatCurrency(ratePerKm)} />
         </View>
       </View>

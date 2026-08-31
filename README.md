@@ -2,7 +2,7 @@
 
 Production-ready **React Native (Expo)** app for the Truckwys road-freight platform — iOS + Android. Matches the Claude Design "operations terminal" design system and reaches feature parity with the web frontend (`../truckwyas-frontend`), talking to the Django REST API (`../truckwys-backend`).
 
-- **Expo SDK 57** · React Native 0.86 · React 19 · TypeScript (strict)
+- **Expo SDK 54** · React Native 0.81 · React 19 · TypeScript (strict)
 - **NativeWind v4** (Tailwind) — dark-first theme with OS light/dark
 - **TanStack Query v5** (server state) + **Zustand** (auth/session)
 - **React Navigation 7** (native-stack + bottom-tabs)
@@ -40,13 +40,13 @@ EXPO_PUBLIC_API_URL=http://192.168.x.x:8001/
 
 ## Scripts
 
-| Command | Purpose |
-| --- | --- |
-| `npm start` | Expo dev server |
+| Command                   | Purpose                      |
+| ------------------------- | ---------------------------- |
+| `npm start`               | Expo dev server              |
 | `npm run ios` / `android` | Launch on simulator/emulator |
-| `npm run typecheck` | `tsc --noEmit` (strict) |
-| `npm run lint` | ESLint |
-| `npm run format` | Prettier write |
+| `npm run typecheck`       | `tsc --noEmit` (strict)      |
+| `npm run lint`            | ESLint                       |
+| `npm run format`          | Prettier write               |
 
 ## Architecture
 
@@ -128,6 +128,7 @@ eas submit --profile production --platform android
 ```
 
 Before the first store submission, set in `app.config.ts` / EAS:
+
 - iOS `bundleIdentifier` + Apple Developer team & App Store Connect app
 - Android `package` + Play Console app + upload keystore (EAS-managed)
 - Replace the placeholder `assets/icon.png` / `assets/splash-icon.png` with the

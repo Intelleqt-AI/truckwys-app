@@ -1,14 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import {
-  View,
-  TextInput,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-} from 'react-native';
+import { View, TextInput, Pressable, Platform, TouchableOpacity } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useHeaderHeight } from '@react-navigation/elements';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
@@ -50,7 +44,7 @@ const localKey = (role: string) => `local:${role}:${++localSeq}`;
 
 export function CopilotScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const headerHeight = useHeaderHeight();
+  const { progress } = useReanimatedKeyboardAnimation();
   const { colors } = useTheme();
   const qc = useQueryClient();
   const rootNav = useNavigation();
@@ -109,18 +103,62 @@ export function CopilotScreen({ navigation }: Props) {
     [colors.accent],
   );
 
+  // iOS 26: the legacy headerRight above wraps its custom view in a native
+  // "shared background" Liquid Glass group, whose capsule is sized natively
+  // rather than hugged to our RN content — that's what stretched it into an
+  // oversized pill with both icons pinned left (same root cause documented in
+  // src/components/ui/Sheet.tsx). unstable_headerRightItems renders through
+  // react-native-screens' native item path instead, sizing correctly. iOS
+  // only — Android keeps renderRight above, which already renders fine there.
+  const iosRightItems = useCallback(
+    () => [
+      {
+        type: 'custom' as const,
+        element: (
+          <TouchableOpacity
+            onPress={() => startNewChat()}
+            hitSlop={8}
+            activeOpacity={0.5}
+            accessibilityRole="button"
+            accessibilityLabel="New chat"
+            className="h-9 w-9 items-center justify-center"
+          >
+            <Icon name="plus" size={21} color={colors.accent} strokeWidth={2} />
+          </TouchableOpacity>
+        ),
+      },
+      {
+        type: 'custom' as const,
+        element: (
+          <TouchableOpacity
+            onPress={() => setHistoryOpen(true)}
+            hitSlop={8}
+            activeOpacity={0.5}
+            accessibilityRole="button"
+            accessibilityLabel="Conversation history"
+            className="h-9 w-9 items-center justify-center"
+          >
+            <Icon name="clock" size={20} color={colors.accent} strokeWidth={2} />
+          </TouchableOpacity>
+        ),
+      },
+    ],
+    // startNewChat is stable enough for a header button; it only reads refs/setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [colors.accent],
+  );
+
   useLayoutEffect(() => {
+    const isIOS = Platform.OS === 'ios';
     navigation.setOptions({
       title: 'AI Copilot',
-      // The keyboardVerticalOffset below is only correct because the header is
-      // opaque and non-transparent here. Restoring the iOS large title would
-      // double-count it and leave a gap above the keyboard.
       headerLargeTitle: false,
       headerTransparent: false,
       headerStyle: { backgroundColor: colors.bgDeep },
-      headerRight: renderRight,
+      headerRight: isIOS ? undefined : renderRight,
+      unstable_headerRightItems: isIOS ? iosRightItems : undefined,
     });
-  }, [navigation, colors.bgDeep, renderRight]);
+  }, [navigation, colors.bgDeep, renderRight, iosRightItems]);
 
   // ── Turn lifecycle ────────────────────────────────────────────────────────
   /** Move the finished live turn into the cached transcript. */
@@ -346,23 +384,41 @@ export function CopilotScreen({ navigation }: Props) {
 
   const canSend = !!input.trim() && !sending;
 
+  // NativeWind's className doesn't apply to Animated.View (it's not in its
+  // default interop registry), so the dock's static styling is inlined here
+  // rather than left inert on a className prop. The insets.bottom portion of
+  // paddingBottom only clears the home indicator while the keyboard is
+  // closed — once it's open, the keyboard already covers that area, so it
+  // interpolates out to avoid a gap above the keyboard.
+  const dockStyle = useAnimatedStyle(() => ({
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    columnGap: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    backgroundColor: colors.bgDeep,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 6 + insets.bottom * (1 - progress.value),
+  }));
+
   return (
     <View className="flex-1 bg-bg-deep">
       <AmbientGlow />
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={headerHeight}
-      >
+      <KeyboardAvoidingView className="flex-1" behavior="padding" automaticOffset>
         <MessageList
           messages={transcript}
+          pendingStatus={pending?.status}
           header={
             isEmpty ? (
               <Starters onPick={(prompt) => void send(prompt)} />
             ) : aiAvailable === false ? (
               <View className="mb-2 flex-row items-center gap-1.5">
                 <Icon name="alert" size={12} color={statusHues.warning} />
-                <Mono className="text-micro tracking-wide uppercase" style={{ color: statusHues.warning }}>
+                <Mono
+                  className="text-micro uppercase tracking-wide"
+                  style={{ color: statusHues.warning }}
+                >
                   Rules engine
                 </Mono>
               </View>
@@ -384,10 +440,7 @@ export function CopilotScreen({ navigation }: Props) {
           onDismissProposal={(p) => void rejectProposal(p)}
         />
 
-        <View
-          className="flex-row items-end gap-2 border-t border-line bg-bg-deep px-3 pt-2"
-          style={{ paddingBottom: insets.bottom + 6 }}
-        >
+        <Animated.View style={dockStyle}>
           <View className="min-h-[44px] flex-1 justify-center rounded-xs border border-line bg-surface px-3">
             <TextInput
               className="text-fg"
@@ -415,13 +468,9 @@ export function CopilotScreen({ navigation }: Props) {
             className="h-11 w-11 items-center justify-center rounded-xs active:opacity-60"
             style={{ opacity: canSend ? 1 : 0.35 }}
           >
-            {sending ? (
-              <ActivityIndicator size="small" color={colors.accent} />
-            ) : (
-              <Icon name="send" size={20} color={colors.accent} />
-            )}
+            <Icon name="send" size={20} color={colors.accent} />
           </Pressable>
-        </View>
+        </Animated.View>
       </KeyboardAvoidingView>
 
       {historyOpen && (

@@ -61,16 +61,16 @@ export function CustomerRiskScreen({ route, navigation }: Props) {
           <RiskBadge band={band} riskPct={riskPct} />
 
           <View className="mb-5 flex-row flex-wrap gap-3">
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="AI risk" value={formatPercent(riskPct, 0)} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Avg days to pay" value={`${num(pick(stats, ['avg_days_to_pay']))}d`} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="On-time rate" value={formatPercent(num(pick(stats, ['on_time_pct'])))} />
             </View>
-            <View style={{ width: '47.5%' }}>
+            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Overdue >30d" value={formatCurrency(num(pick(stats, ['overdue_30_total'])), { maximumFractionDigits: 0 })} />
             </View>
           </View>

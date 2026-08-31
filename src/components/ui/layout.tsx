@@ -3,7 +3,7 @@ import { View, ScrollView, Pressable, RefreshControl, type ScrollViewProps } fro
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
-import { LiveDot } from './primitives';
+import { SubscriptionDot } from './SubscriptionDot';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // ── Ambient glow: one fixed, faint accent bloom behind the workspace ───────
@@ -106,7 +106,7 @@ export function AppHeader({
           <Txt className="text-title font-semibold tracking-[-0.02em]" style={{ fontSize: 26 }}>
             {title}
           </Txt>
-          {live && <LiveDot label="Live" />}
+          {live && <SubscriptionDot />}
         </View>
       </View>
       {right}

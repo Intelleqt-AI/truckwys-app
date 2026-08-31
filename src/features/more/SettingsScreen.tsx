@@ -1848,11 +1848,13 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
         </View>
       )}
 
-      <Txt className="text-caption text-faint">{subscriptionStatusDetail(status)}</Txt>
+      <Txt className="text-caption text-faint">
+        {subscriptionStatusDetail(status, cancelling)}
+      </Txt>
 
       <Group>
         <DetailRow label="Plan" value={planLabel} mono={false} />
-        <DetailRow label="Status" value={subscriptionStatusLabel(status)} />
+        <DetailRow label="Status" value={subscriptionStatusLabel(status, cancelling)} />
         {amount > 0 ? <DetailRow label="Amount" value={formatCurrency(amount)} /> : null}
         {last4 ? (
           <DetailRow label="Card" value={`${cardType || 'Card'} •••• ${last4}`} mono={false} />

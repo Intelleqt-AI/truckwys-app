@@ -170,7 +170,7 @@ export function Badge({
   const square = shape === 'square';
   return (
     <View
-      className="flex-row items-center"
+      className="flex-row items-center self-start"
       style={{
         gap: 6,
         paddingHorizontal: square ? 8 : 9,

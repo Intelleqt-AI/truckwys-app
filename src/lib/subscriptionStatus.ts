@@ -18,7 +18,11 @@ export function isSubscriptionBlocked(status?: string | null): boolean {
   return status === 'suspended' || status === 'cancelled';
 }
 
-export function subscriptionStatusLabel(status?: string | null): string {
+export function subscriptionStatusLabel(
+  status?: string | null,
+  cancelAtPeriodEnd?: boolean,
+): string {
+  if (cancelAtPeriodEnd) return 'CANCELLING';
   switch (status) {
     case 'trialing':
       return 'TRIAL';
@@ -34,7 +38,11 @@ export function subscriptionStatusLabel(status?: string | null): string {
   }
 }
 
-export function subscriptionStatusTone(status?: string | null): SubscriptionTone {
+export function subscriptionStatusTone(
+  status?: string | null,
+  cancelAtPeriodEnd?: boolean,
+): SubscriptionTone {
+  if (cancelAtPeriodEnd) return 'warning';
   switch (status) {
     case 'grace_period':
     case 'trialing':
@@ -48,7 +56,13 @@ export function subscriptionStatusTone(status?: string | null): SubscriptionTone
 }
 
 /** Longer explanation, for the billing screen and the blocked-action notice. */
-export function subscriptionStatusDetail(status?: string | null): string {
+export function subscriptionStatusDetail(
+  status?: string | null,
+  cancelAtPeriodEnd?: boolean,
+): string {
+  if (cancelAtPeriodEnd) {
+    return 'This subscription is cancelled and will not renew. Full access continues until the end of the current billing period — your administrator can undo this any time before then on the Truckwys dashboard.';
+  }
   switch (status) {
     case 'trialing':
       return 'This account is on a trial. Quoting and invoicing keep working until it ends.';
@@ -68,4 +82,25 @@ export function subscriptionBlockedNotice(status?: string | null): string {
   return status === 'cancelled'
     ? 'Cancelled subscription — new quotes and invoices are blocked. Existing work is unaffected.'
     : 'Suspended subscription — new quotes and invoices are blocked. Existing work is unaffected.';
+}
+
+/** Roles that should see billing-attention states (trial, grace, cancelling). */
+export const BILLING_AWARE_ROLES = ['ADMIN', 'MANAGER'] as const;
+
+export type SubscriptionAudience = 'all' | 'billing' | 'none';
+
+/**
+ * Who should be shown this subscription state outside the Billing screen.
+ *
+ * 'all'     — work is actually blocked; every role deserves the reason.
+ * 'billing' — informational, not yet blocking; only roles who can act on it.
+ * 'none'    — healthy, nothing to show.
+ */
+export function subscriptionAudience(
+  status?: string | null,
+  cancelAtPeriodEnd?: boolean,
+): SubscriptionAudience {
+  if (isSubscriptionBlocked(status)) return 'all';
+  if (status === 'grace_period' || status === 'trialing' || cancelAtPeriodEnd) return 'billing';
+  return 'none';
 }

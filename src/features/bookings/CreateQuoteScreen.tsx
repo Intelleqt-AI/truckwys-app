@@ -471,6 +471,28 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (def > 0) setBaseRatePerKm(String(def));
   };
 
+  // The AI returns a free-form spoken vehicle type ("flat bed") rather than
+  // one of our configured names ("Flatbed"). costs.ts matches fuel figures by
+  // exact name, so an unresolved string silently loses both the type's rate
+  // and its fuel consumption. Reconcile it against the real list before
+  // applying it — exact, then case-insensitive, then case/punctuation-
+  // insensitive — and return the configured name so every exact-match lookup
+  // downstream still hits. Matches against the full list, not vtypeOptions,
+  // since that filters out types with no vehicles free right now and a
+  // spoken type with zero availability should still resolve to its own rate.
+  const resolveVehicleTypeName = (spoken: string): string | null => {
+    const list = vtypes ?? [];
+    const exact = list.find((v) => v.name === spoken);
+    if (exact) return exact.name;
+    const lower = spoken.toLowerCase();
+    const ci = list.find((v) => v.name.toLowerCase() === lower);
+    if (ci) return ci.name;
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const target = normalize(spoken);
+    const loose = list.find((v) => normalize(v.name) === target);
+    return loose?.name ?? null;
+  };
+
   // Unsaved-changes baseline, fresh-quote case (Phase 4) — captured once,
   // after the base-rate prefill above has had its own deferred setTimeout(0)
   // a chance to settle. Without waiting for it, the default R/km landing a
@@ -888,7 +910,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         const kg = num(pick(ex, ['weight']));
         if (kg > 0) setWeight(formatPlain(Math.round((kg / 1000) * 100) / 100));
       }
-      if (pick(ex, ['vehicle_type'])) setVehicleType(str(pick(ex, ['vehicle_type'])));
+      if (pick(ex, ['vehicle_type'])) {
+        const spoken = str(pick(ex, ['vehicle_type']));
+        const resolved = resolveVehicleTypeName(spoken);
+        // Route through the dropdown's own handler so a resolved type gets
+        // its rate exactly like a manual selection would — same precedence
+        // (vehicle type's own rate, else the company default). An
+        // unresolved type is left as-is: shown so the user can correct it,
+        // rate untouched.
+        if (resolved) handleVehicleTypeSelect(resolved);
+        else setVehicleType(spoken);
+      }
       if (pick(ex, ['pickup_date'])) setPickupDate(str(pick(ex, ['pickup_date'])));
       if (pick(ex, ['delivery_date'])) setDeliveryDate(str(pick(ex, ['delivery_date'])));
       if (pick(ex, ['valid_until'])) setValidUntil(str(pick(ex, ['valid_until'])));

@@ -32,7 +32,6 @@ const SECTIONS: MenuItem[][] = [
     { icon: 'dollar', label: 'Fast Pay Capital', route: 'Capital', allow: canSeeFinanceFeatures },
   ],
   [
-    { icon: 'bell', label: 'Notifications', route: 'Notifications' },
     { icon: 'clock', label: 'Activity', route: 'Activity' },
     { icon: 'sparkle', label: 'AI Copilot', route: 'Copilot', allow: canSeeInsights },
   ],

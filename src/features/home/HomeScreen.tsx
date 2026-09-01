@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Pressable, Platform } from 'react-native';
+import { View, Pressable, TouchableOpacity, Platform } from 'react-native';
 import { format } from 'date-fns';
 import * as Haptics from 'expo-haptics';
 import {
@@ -36,6 +36,8 @@ import {
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 import { useGracePeriod, useSubscription } from '@/hooks/useSubscription';
 import { SubscriptionDetailModal } from '@/features/more/SubscriptionDetailModal';
+import { useAuthStore } from '@/stores/authStore';
+import { mediaUrl } from '@/lib/api/client';
 
 // Mirrors the phrasing already used on the Billing settings screen
 // (SettingsScreen.tsx's BillingSection), so grace-period copy reads
@@ -70,6 +72,7 @@ export function HomeScreen() {
   const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } =
     useAppNavigation();
   const { data: unread } = useUnreadCount();
+  const user = useAuthStore((s) => s.user);
   const { colors } = useTheme();
   const tabs = visibleTabs(useRole());
   const hasFleet = tabs.includes('Fleet');
@@ -121,13 +124,21 @@ export function HomeScreen() {
                   </View>
                 )}
               </View>
-              <IconButton
-                name="settings"
-                size={23}
-                color={colors.fg}
-                accessibilityLabel="Settings & more"
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Profile, settings & more"
+                hitSlop={8}
+                activeOpacity={0.7}
                 onPress={openMore}
-              />
+                className="h-11 w-11 items-center justify-center"
+              >
+                <Avatar
+                  name={user?.name ?? user?.email}
+                  uri={mediaUrl(user?.avatar as string | undefined)}
+                  size={32}
+                  bordered
+                />
+              </TouchableOpacity>
             </View>
           }
         />

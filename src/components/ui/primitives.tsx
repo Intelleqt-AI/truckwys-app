@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Pressable,
@@ -197,8 +197,24 @@ export function Badge({
   );
 }
 
-// ── Avatar: circle initials or accent-dim fill ─────────────────────────────
-export function Avatar({ name, size = 36, uri }: { name?: string; size?: number; uri?: string }) {
+// ── Avatar: circle initials, optionally overlaid with a remote image ───────
+// Initials render as the base layer so a slow-loading or broken `uri` never
+// leaves an empty circle — the image just fades in on top once it resolves.
+export function Avatar({
+  name,
+  size = 36,
+  uri,
+  bordered = false,
+}: {
+  name?: string;
+  size?: number;
+  uri?: string;
+  bordered?: boolean;
+}) {
+  // Tracks the URI that failed (not a plain boolean) so the flag invalidates
+  // itself when `uri` changes — recycled list rows retry instead of inheriting
+  // a previous row's failure.
+  const [failedUri, setFailedUri] = useState<string>();
   const initials = (name ?? '')
     .split(' ')
     .map((p) => p[0])
@@ -206,28 +222,27 @@ export function Avatar({ name, size = 36, uri }: { name?: string; size?: number;
     .slice(0, 2)
     .join('')
     .toUpperCase();
-  if (uri) {
-    return (
-      <View
-        className="overflow-hidden rounded-pill bg-line-active"
-        style={{ width: size, height: size }}
-      >
-        <Image
-          source={{ uri }}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
-          contentFit="cover"
-        />
-      </View>
-    );
-  }
+  const showImage = !!uri && failedUri !== uri;
   return (
     <View
-      className="items-center justify-center rounded-pill bg-accent-dim"
+      className={`items-center justify-center overflow-hidden rounded-pill bg-accent-dim ${
+        bordered ? 'border-2 border-accent' : ''
+      }`}
       style={{ width: size, height: size }}
     >
       <Mono className="text-accent" style={{ fontSize: size * 0.36 }}>
         {initials || '—'}
       </Mono>
+      {showImage && (
+        <Image
+          source={{ uri }}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          contentFit="cover"
+          transition={120}
+          recyclingKey={uri}
+          onError={() => setFailedUri(uri)}
+        />
+      )}
     </View>
   );
 }

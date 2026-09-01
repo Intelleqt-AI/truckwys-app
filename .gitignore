@@ -21,6 +21,9 @@ expo-env.d.ts
 # Metro
 .metro-health-check*
 
+# eas env:pull output — never commit pulled env values
+.eas/
+
 # debug
 npm-debug.*
 yarn-debug.*
@@ -46,7 +49,7 @@ yarn-error.*
 .private
 .vscode
 
-# Firebase client config — pulled in at build time via env vars, and
-# injected into EAS builds as file secrets. Not committed.
-google-services.json
-GoogleService-Info.plist
+# Firebase client config (google-services.json, GoogleService-Info.plist) is
+# committed on purpose — see app.config.ts. These are client-side Firebase
+# identifiers, not secrets, and committing them keeps the fingerprint runtime
+# version reproducible on every machine and in EAS builds.

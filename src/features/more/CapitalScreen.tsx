@@ -1,24 +1,11 @@
-import { useState } from 'react';
-import { View, Pressable } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { View, Pressable, Linking } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  SheetScreen,
-  SectionLabel,
-  Group,
-  ListRow,
-  StatCard,
-  StatusPill,
-  Button,
-  Badge,
-  Mono,
-  EmptyState,
-} from '@/components/ui';
+import { SheetScreen, SectionLabel, StatCard, Button, Badge, Mono, EmptyState } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useCapital, requestAdvance } from './api';
+import { useCapital } from './api';
+import { loadAppliedIds, saveAppliedId, MERCHANT_CAPITAL_URL } from '@/features/finance/fastpay';
 import { formatCurrency } from '@/lib/formatters';
-import { toast } from '@/lib/toast';
-import { invalidateFor } from '@/lib/queryInvalidation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
 import type { AppStackParamList } from '@/navigation/types';
@@ -31,22 +18,19 @@ const meterColor = (utilization: number, accent: string) =>
 
 export function CapitalScreen({ navigation }: Props) {
   const { data, isLoading, isError, refetch } = useCapital();
-  const qc = useQueryClient();
   const { colors } = useTheme();
-  const [busy, setBusy] = useState<string | null>(null);
   const [showIneligible, setShowIneligible] = useState(false);
+  const [applied, setApplied] = useState<Set<string>>(new Set());
 
-  const request = async (invoiceId: string) => {
-    setBusy(invoiceId);
-    try {
-      await requestAdvance(invoiceId);
-      invalidateFor(qc, 'advance');
-      toast.success('Advance requested');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not request advance');
-    } finally {
-      setBusy(null);
-    }
+  useEffect(() => {
+    void loadAppliedIds().then(setApplied);
+  }, []);
+
+  // Applications happen on Merchant Capital's own site — there's nothing on
+  // our backend to record, so this just flags the row and hands off.
+  const applyForCapital = async (invoiceId: string) => {
+    setApplied(await saveAppliedId(invoiceId));
+    await Linking.openURL(MERCHANT_CAPITAL_URL);
   };
 
   return (
@@ -107,6 +91,19 @@ export function CapitalScreen({ navigation }: Props) {
             </View>
           )}
 
+          {/* Same partnership banner as web — Fast Pay hands off to Merchant
+              Capital's own site rather than creating an in-app advance. */}
+          <View
+            className="mb-5 rounded-xs border border-line bg-surface p-4"
+            style={{ borderLeftWidth: 3, borderLeftColor: colors.accent }}
+          >
+            <Mono className="text-caption font-medium text-fg">Fast Pay powered by Merchant Capital</Mono>
+            <Mono className="mt-1 text-micro text-faint">
+              Get paid faster on your eligible invoices. Apply via our trusted lending partner — approval in
+              minutes.
+            </Mono>
+          </View>
+
           <SectionLabel>Eligible invoices</SectionLabel>
           {data.eligible.length === 0 ? (
             <EmptyState icon="dollar" title="Nothing eligible" body="Complete deliveries with a POD to unlock Fast Pay." />
@@ -135,9 +132,8 @@ export function CapitalScreen({ navigation }: Props) {
                         <Badge label="High risk" tone="danger" />
                       ) : (
                         <Button
-                          label="Request advance"
-                          loading={busy === e.id}
-                          onPress={() => request(e.id)}
+                          label={applied.has(String(e.id)) ? 'Applied ✓' : 'Apply'}
+                          onPress={() => applyForCapital(String(e.id))}
                           fullWidth
                         />
                       )}
@@ -172,20 +168,6 @@ export function CapitalScreen({ navigation }: Props) {
                 </View>
               )}
             </>
-          )}
-
-          {data.advances.length > 0 && (
-            <Group label="Your advances">
-              {data.advances.map((a, i) => (
-                <ListRow
-                  key={a.id}
-                  title={formatCurrency(a.amount, { maximumFractionDigits: 0 })}
-                  trailing={<StatusPill status={a.status} />}
-                  onPress={() => navigation.navigate('AdvanceDetail', { id: a.id })}
-                  last={i === data.advances.length - 1}
-                />
-              ))}
-            </Group>
           )}
         </View>
       )}

@@ -78,6 +78,7 @@
     "web": "expo start --web",
     "build:dev:android": "eas build --platform android --profile development",
     "build:prod:ios": "eas build --platform ios --profile production --auto-submit",
+    "build:prod:android": "eas build --platform android --profile production --auto-submit",
     "update:prod": "eas update --branch production --message",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,json}\"",

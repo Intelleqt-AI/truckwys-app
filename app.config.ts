@@ -26,6 +26,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   backgroundColor: DEEP,
   assetBundlePatterns: ['**/*'],
   ios: {
+    icon: {
+      dark: './assets/ios-icon-dark.png',
+      light: './assets/ios-icon-light.png',
+      tinted: './assets/ios-icon-tinted.png',
+    },
     // Phone-only for v1. App Review tests iPad when this is true, and the UI is
     // built for a phone (floating tab bar, pageSheet modals, 2-up stat grids).
     supportsTablet: false,
@@ -80,8 +85,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     package: 'za.co.truckwys.mobile',
     // versionCode intentionally omitted — see the buildNumber comment under
     // ios above; same reasoning, same remote-version-source mechanism.
+    icon: './assets/icon.png',
     adaptiveIcon: {
-      backgroundColor: DEEP,
+      backgroundColor: "#FFFFFF",
+      // foregroundImage: './assets/android-icon-foreground.png',
       foregroundImage: './assets/android-icon-foreground.png',
       monochromeImage: './assets/android-icon-monochrome.png',
     },
@@ -126,8 +133,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         image: './assets/splash-icon.png',
         imageWidth: 160,
         resizeMode: 'contain',
-        backgroundColor: DEEP,
-        dark: { backgroundColor: DEEP },
+        backgroundColor: '#FFFFFF',
+        dark: {
+          image: "./assets/splash-icon-dark.png",
+          backgroundColor: DEEP
+        },
       },
     ],
   ],

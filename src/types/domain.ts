@@ -25,8 +25,10 @@ export const normalizeQuote = (q: Raw): QuoteLite => ({
   id: (pick(q, ['id', 'pk']) as string | number) ?? '',
   code: str(pick(q, ['quote_number', 'reference', 'code', 'id']), 'Q-—'),
   customer: str(pick(q, ['customer_name', 'customer', 'client_name']), 'Customer'),
-  origin: str(pick(q, ['origin_city', 'origin', 'pickup_city', 'pickup_state']), '—'),
-  destination: str(pick(q, ['destination_city', 'destination', 'delivery_city', 'delivery_state']), '—'),
+  // Full-text locations first (matches QuoteDetailScreen.tsx / web's fixed
+  // routing display), short city/state codes only as a fallback.
+  origin: str(pick(q, ['pickup_location', 'origin_city', 'origin', 'pickup_city']), '—'),
+  destination: str(pick(q, ['delivery_location', 'destination_city', 'destination', 'delivery_city']), '—'),
   stopLabels: asArray<Raw>(pick(q, ['stops']))
     .map((s) => str(pick(s, ['location'])))
     .filter(Boolean),

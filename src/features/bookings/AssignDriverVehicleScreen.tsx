@@ -62,11 +62,11 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
   const [vehicleId, setVehicleId] = useState(initialVehicleId);
   const [busy, setBusy] = useState(false);
 
-  const { data: driversRaw } = useQuery({
+  const { data: driversRaw, isLoading: driversLoading } = useQuery({
     queryKey: ['drivers-available-for-assign'],
     queryFn: () => fetchData('drivers/?status=ACTIVE'),
   });
-  const { data: vehiclesRaw } = useQuery({
+  const { data: vehiclesRaw, isLoading: vehiclesLoading } = useQuery({
     queryKey: ['vehicles-available-for-assign', vehicleType ?? ''],
     queryFn: () =>
       fetchData(
@@ -76,47 +76,48 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
       ),
   });
 
-  const clearLabel = reassigning ? '— Unassign —' : '— Assign later —';
+  // Reassigning: driver stays optional (relabeled away from "unassign"),
+  // vehicle becomes mandatory — no clear entry for it at all.
+  const driverClearLabel = reassigning ? '— No driver —' : '— Assign later —';
+  const vehicleClearLabel = reassigning ? undefined : '— Assign later —';
 
   const driverOptions: Option[] = useMemo(() => {
     const rows = asArray<DriverOption>(driversRaw);
     return [
-      { label: clearLabel, value: '' },
+      { label: driverClearLabel, value: '' },
       ...rows.map((d) => ({
         label: d.user_details?.name || d.user_details?.username || `Driver #${d.id}`,
         value: String(d.id),
       })),
     ];
-  }, [driversRaw, clearLabel]);
+  }, [driversRaw, driverClearLabel]);
 
   const vehicleOptions: Option[] = useMemo(() => {
     const rows = asArray<VehicleOption>(vehiclesRaw);
-    return [
-      { label: clearLabel, value: '' },
-      ...rows.map((v) => {
-        const name = [v.make, v.model].filter(Boolean).join(' ');
-        return {
-          label: `${name || 'Vehicle'}${v.plate ? ` · ${v.plate}` : ` #${v.id}`}`,
-          value: String(v.id),
-        };
-      }),
-    ];
-  }, [vehiclesRaw, clearLabel]);
+    const mapped = rows.map((v) => {
+      const name = [v.make, v.model].filter(Boolean).join(' ');
+      return {
+        label: `${name || 'Vehicle'}${v.plate ? ` · ${v.plate}` : ` #${v.id}`}`,
+        value: String(v.id),
+      };
+    });
+    return vehicleClearLabel ? [{ label: vehicleClearLabel, value: '' }, ...mapped] : mapped;
+  }, [vehiclesRaw, vehicleClearLabel]);
 
-  // All-or-nothing, matching web: both picked assigns, neither leaves it
-  // unassigned. No capacity or licence check — the backend owns that.
-  const both = !!driverId && !!vehicleId;
-  const neither = !driverId && !vehicleId;
-  const canProceed = (both || neither) && !busy;
+  // Vehicle is the only mandatory-if-anything field in both modes — a driver
+  // can never be picked without a vehicle. Reassign mode always requires a
+  // vehicle (no clear entry for it); convert mode also allows leaving both
+  // empty to assign later.
+  const canProceed = reassigning ? !!vehicleId && !busy : (!driverId || !!vehicleId) && !busy;
 
   const confirmLabel = busy
     ? reassigning
       ? 'SAVING…'
       : 'CONVERTING…'
-    : both
+    : reassigning
       ? 'CONFIRM'
-      : reassigning
-        ? 'UNASSIGN'
+      : vehicleId
+        ? 'CONFIRM'
         : 'ASSIGN LATER';
 
   const confirm = async () => {
@@ -128,13 +129,13 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
         await assignLoadDriver(loadId, driverId ? Number(driverId) : null, vehicleId ? Number(vehicleId) : null);
         // assign_driver only auto-promotes PENDING -> ASSIGNED; from any other
         // status (e.g. LOADING) it leaves status untouched, so finish the move
-        // explicitly when this was opened from the status dropdown — but only
-        // if it actually resulted in a real assignment (not a clear).
-        if (activateOnAssign && driverId && vehicleId) {
+        // explicitly when this was opened from the status dropdown. Vehicle is
+        // required to get here at all, so this always reflects a real assignment.
+        if (activateOnAssign && vehicleId) {
           await updateLoadStatus(loadId, 'ASSIGNED');
         }
         invalidateFor(qc, 'load');
-        toast.success(driverId && vehicleId ? 'Assigned' : 'Unassigned');
+        toast.success('Assigned');
         navigation.goBack();
       } else {
         if (quoteId == null) throw new Error('Missing quote');
@@ -142,7 +143,7 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
         // A load's status drives revenue/fleet utilisation; a converted quote
         // also stops showing as convertible.
         invalidateFor(qc, 'quote', 'load');
-        toast.success(driverId && vehicleId ? 'Converted and assigned' : 'Converted to booking');
+        toast.success(vehicleId ? 'Converted and assigned' : 'Converted to booking');
         const newLoadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
         navigation.pop(popCallerOnSuccess ? 2 : 1);
         if (newLoadId != null) {
@@ -155,8 +156,12 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
     }
   };
 
-  const noDrivers = driverOptions.length === 1;
-  const noVehicles = vehicleOptions.length === 1;
+  // Gated on isLoading so the "no options" warning doesn't flash before the
+  // query has actually resolved (asArray(undefined) === [] looks empty too).
+  const noDrivers = !driversLoading && driverOptions.length === 1;
+  // Reassign mode has no clear entry in vehicleOptions, so the "empty" baseline is 0 not 1.
+  const noVehicles =
+    !vehiclesLoading && (reassigning ? vehicleOptions.length === 0 : vehicleOptions.length === 1);
 
   return (
     <SheetScreen
@@ -175,23 +180,14 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
     >
       <Txt className="mb-5 text-sub text-muted">
         {reassigning
-          ? 'Pick a driver and vehicle for this load, or clear both to unassign.'
+          ? 'Pick a vehicle for this load. Driver is optional.'
           : `Convert ${reference ? reference : 'this quote'} to an active booking?`}
       </Txt>
 
       <View className="gap-4">
         <SelectField
-          label="Driver"
-          placeholder={clearLabel}
-          options={noDrivers ? [] : driverOptions}
-          value={driverId}
-          onSelect={setDriverId}
-          warning={noDrivers ? 'No available drivers — check the Fleet tab.' : undefined}
-        />
-
-        <SelectField
           label={vehicleType ? `Vehicle (${vehicleType})` : 'Vehicle'}
-          placeholder={clearLabel}
+          placeholder={vehicleClearLabel ?? 'Select vehicle'}
           options={noVehicles ? [] : vehicleOptions}
           value={vehicleId}
           onSelect={setVehicleId}
@@ -204,9 +200,18 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
           }
         />
 
-        {!both && !neither && (
+        <SelectField
+          label="Driver"
+          placeholder={driverClearLabel}
+          options={noDrivers ? [] : driverOptions}
+          value={driverId}
+          onSelect={setDriverId}
+          warning={noDrivers ? 'No available drivers — check the Fleet tab.' : undefined}
+        />
+
+        {!reassigning && !!driverId && !vehicleId && (
           <Mono className="text-micro text-warning">
-            Select both, or clear both to {reassigning ? 'unassign' : 'assign later'}.
+            Select a vehicle to assign a driver, or clear driver to assign later.
           </Mono>
         )}
       </View>

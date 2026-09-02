@@ -78,8 +78,7 @@ const QUOTE_FILTERS = [
   { label: 'Draft', value: 'DRAFT' },
   { label: 'Sent', value: 'SENT' },
   { label: 'Accepted', value: 'ACCEPTED' },
-  { label: 'In-Transit', value: 'IT' },
-  { label: 'Completed', value: 'COMPLETED' },
+  { label: 'Declined', value: 'DECLINED' },
 ];
 
 function QuotesTab() {
@@ -87,6 +86,7 @@ function QuotesTab() {
   const { data: loads } = useLoads();
   const { refreshing, onRefresh } = useManualRefresh(refetch);
   const [filter, setFilter] = useState('ALL');
+  const [q, setQ] = useState('');
   const { openQuote, openAssign, openLoad } = useAppNavigation();
 
   if (isLoading)
@@ -97,7 +97,11 @@ function QuotesTab() {
     );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load quotes." />;
 
-  const list = data.filter((q) => filter === 'ALL' || q.status === filter);
+  const list = data.filter(
+    (item) =>
+      (filter === 'ALL' || item.status === filter) &&
+      (!q || `${item.code} ${item.customer}`.toLowerCase().includes(q.toLowerCase())),
+  );
 
   return (
     <FlashList
@@ -110,6 +114,9 @@ function QuotesTab() {
       ItemSeparatorComponent={() => <View className="h-2.5" />}
       ListHeaderComponent={
         <View className="mb-3">
+          <View className="mb-3">
+            <SearchField value={q} onChangeText={setQ} placeholder="Search quotes…" />
+          </View>
           <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
         </View>
       }
@@ -173,7 +180,7 @@ function QuoteCard({
           <StatusPill status={quote.status} />
         </View>
         <Txt className="text-body font-medium text-fg">{quote.customer}</Txt>
-        <Txt className="mt-0.5 text-sub text-muted">
+        <Txt className="mt-0.5 text-sub text-muted" numberOfLines={1} ellipsizeMode="tail">
           {[quote.origin, ...quote.stopLabels, quote.destination].join(' → ')}
         </Txt>
         <View className="mt-3 flex-row items-center justify-between">

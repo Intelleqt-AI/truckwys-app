@@ -123,6 +123,12 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     .map((s) => ({ lat: num(pick(s, ['lat'])), lon: num(pick(s, ['lon'])) }))
     .filter((p) => p.lat && p.lon);
 
+  // Real road-path polyline, when the quote was saved with one — older quotes
+  // (saved before this field existed) fall back to RouteMap's dashed line.
+  const routeGeometry = asArray<Record<string, unknown>>(pick(q, ['route_geometry']))
+    .map((p) => ({ lat: num(pick(p, ['lat'])), lon: num(pick(p, ['lon'])) }))
+    .filter((p) => p.lat && p.lon);
+
   const pickupLat = num(pick(q, ['pickup_lat']));
   const pickupLon = num(pick(q, ['pickup_lng']));
   const deliveryLat = num(pick(q, ['delivery_lat']));
@@ -472,6 +478,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
               pickup={{ lat: pickupLat, lon: pickupLon }}
               delivery={{ lat: deliveryLat, lon: deliveryLon }}
               stops={stopPoints}
+              geometry={routeGeometry.length > 1 ? routeGeometry : undefined}
             />
           </View>
         )}

@@ -1180,6 +1180,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         tripType,
         winProb,
         stops,
+        routeGeometry: mapGeometry,
       },
       status,
     );

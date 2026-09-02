@@ -1,5 +1,6 @@
 import { num, pick } from '@/lib/api/list';
 import type { CostBreakdown } from './costs';
+import type { GeoPoint } from '@/lib/routeGeometry';
 import { extractCode, roundCoord, type Loc, type StopEntry } from './types';
 
 // Moved out of CreateQuoteScreen.tsx's buildPayload (Phase 0 extraction) —
@@ -25,6 +26,7 @@ export interface BuildQuotePayloadInput {
   tripType: 'ONE_WAY' | 'ROUND_TRIP';
   winProb: number;
   stops: StopEntry[];
+  routeGeometry: GeoPoint[];
 }
 
 export function buildQuotePayload(
@@ -46,6 +48,7 @@ export function buildQuotePayload(
     tripType,
     winProb,
     stops,
+    routeGeometry,
   }: BuildQuotePayloadInput,
   status: 'DRAFT' | 'SENT',
 ) {
@@ -68,6 +71,9 @@ export function buildQuotePayload(
     stops: stops
       .filter((s) => s.loc)
       .map((s) => ({ location: s.loc!.label, lat: roundCoord(s.loc!.lat), lon: roundCoord(s.loc!.lon) })),
+    // Previously computed for live pricing only, then discarded: never saved,
+    // so Quote Detail / a converted Load could never show the real road path.
+    route_geometry: routeGeometry.map((p) => ({ lat: roundCoord(p.lat), lon: roundCoord(p.lon) })),
     cargo_description: cargo || `${weight}t ${vehicleType}`,
     weight: weightKg,
     distance: costs.distance,

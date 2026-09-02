@@ -5,8 +5,29 @@ import { Icon, Badge, Button, TextField, Txt, Label, Mono, INPUT_TEXT } from '@/
 import { useTheme } from '@/theme/ThemeProvider';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
-import { suggestLocations } from '../api';
+import { suggestLocations, fetchRecentLocations, recordLocationPick } from '../api';
 import { roundCoord, isForeignCc, type Loc, type LocSuggest } from './types';
+
+function toLocSuggest(raw: unknown, forceRecent?: boolean): LocSuggest {
+  const o = raw as Record<string, unknown>;
+  const cc = str(pick(o, ['country_code', 'country'])) || undefined;
+  const foreign = Boolean(pick(o, ['cross_border'])) || isForeignCc(cc);
+  return {
+    label: str(pick(o, ['label', 'name', 'description', 'address'])),
+    lat: num(pick(o, ['lat', 'latitude'])),
+    lon: num(pick(o, ['lon', 'lng', 'longitude'])),
+    cc,
+    foreign,
+    country: str(pick(o, ['country', 'country_name'])),
+    isRecent: forceRecent ?? Boolean(pick(o, ['is_recent'])),
+  };
+}
+
+// Recent-first, deduped by label (mirrors web's mergeSuggestions).
+function mergeSuggestions(recent: LocSuggest[], live: LocSuggest[]): LocSuggest[] {
+  const seen = new Set(recent.map((s) => s.label.toLowerCase()));
+  return [...recent, ...live.filter((s) => !seen.has(s.label.toLowerCase()))];
+}
 
 // ── Location autocomplete with coordinates ──────────────────────────────────
 // Moved out of CreateQuoteScreen.tsx verbatim (Phase 0 extraction), now
@@ -111,34 +132,56 @@ function LocationFieldImpl({
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
-    if (!focused || text.length < 2 || chosen.current === text) {
+
+    if (!focused) {
       clearTimer.current = setTimeout(() => setResults([]), 0);
       return () => {
         if (clearTimer.current) clearTimeout(clearTimer.current);
       };
     }
+
+    // Empty, focused field: show frequent/recent picks immediately, no
+    // debounce (there's nothing to type-ahead against yet).
+    if (text.length === 0) {
+      const mine = ++reqId.current;
+      (async () => {
+        try {
+          const raw = await fetchRecentLocations();
+          if (mine !== reqId.current) return;
+          const list = asArray(raw)
+            .map((r) => toLocSuggest(r, true))
+            .filter((l) => l.label && l.lat && l.lon)
+            .slice(0, 6);
+          setResults(list);
+        } catch {
+          if (mine === reqId.current) setResults([]);
+        }
+      })();
+      return;
+    }
+
+    if (text.length < 2 || chosen.current === text) {
+      clearTimer.current = setTimeout(() => setResults([]), 0);
+      return () => {
+        if (clearTimer.current) clearTimeout(clearTimer.current);
+      };
+    }
+
     searchTimer.current = setTimeout(async () => {
       const mine = ++reqId.current;
       try {
-        const raw = await suggestLocations(text);
+        const [recentRaw, liveRaw] = await Promise.all([
+          fetchRecentLocations(text).catch(() => []),
+          suggestLocations(text).catch(() => []),
+        ]);
         if (mine !== reqId.current) return;
-        const list = asArray(raw)
-          .map((r) => {
-            const o = r as Record<string, unknown>;
-            const cc = str(pick(o, ['country_code', 'country'])) || undefined;
-            const foreign = Boolean(pick(o, ['cross_border'])) || isForeignCc(cc);
-            return {
-              label: str(pick(o, ['label', 'name', 'description', 'address'])),
-              lat: num(pick(o, ['lat', 'latitude'])),
-              lon: num(pick(o, ['lon', 'lng', 'longitude'])),
-              cc,
-              foreign,
-              country: str(pick(o, ['country', 'country_name'])),
-            } as LocSuggest;
-          })
-          .filter((l) => l.label && l.lat && l.lon)
-          .slice(0, 6);
-        setResults(list);
+        const recentList = asArray(recentRaw)
+          .map((r) => toLocSuggest(r))
+          .filter((l) => l.label && l.lat && l.lon);
+        const liveList = asArray(liveRaw)
+          .map((r) => toLocSuggest(r))
+          .filter((l) => l.label && l.lat && l.lon);
+        setResults(mergeSuggestions(recentList, liveList).slice(0, 6));
       } catch {
         if (mine === reqId.current) setResults([]);
       }
@@ -265,9 +308,11 @@ function LocationFieldImpl({
                 onChange(r);
                 setText(r.label);
                 setResults([]);
+                recordLocationPick(r.label, r.lat, r.lon);
               }}
               className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3 active:bg-surface-hover"
             >
+              {r.isRecent && <Icon name="clock" size={13} color={colors.faint} />}
               <Icon name="pin" size={15} color={r.foreign ? '#F59E0B' : colors.faint} />
               <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
                 {r.label}

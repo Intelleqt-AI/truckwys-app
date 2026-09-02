@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { View, Alert, Modal, Pressable } from 'react-native';
+import { View, Alert, Modal, Pressable, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -26,6 +27,7 @@ import { assignedIds } from './AssignDriverVehicleScreen';
 import { useSubscription } from '@/hooks/useSubscription';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL, stepIndexFor } from './constants';
 import { num, str, pick, asArray } from '@/lib/api/list';
+import { mediaUrl } from '@/lib/api/client';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -46,7 +48,9 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const [busy, setBusy] = useState(false);
   const [podBusy, setPodBusy] = useState(false);
   const [showDeliverModal, setShowDeliverModal] = useState(false);
+  const [showPodPreview, setShowPodPreview] = useState(false);
   const [deliverBusy, setDeliverBusy] = useState(false);
+  const [uploadDeliverBusy, setUploadDeliverBusy] = useState(false);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this booking." />;
   const l = (data ?? {}) as Record<string, unknown>;
@@ -60,6 +64,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const ratePerKm = distance ? rate / distance : 0;
   const invoiced = status === 'INVOICED' || !!pick(l, ['invoice_id', 'invoice']);
   const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
+  const podDocumentUrl = str(pick(l, ['pod_document']));
+  const podReceivedBy = str(pick(l, ['pod_received_by']));
   const current = assignedIds(l);
   const hasAssignment = !!(current.driverId || current.vehicleId);
   // Driver/vehicle are locked in once the load moves past Assigned — editing
@@ -73,6 +79,13 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     .map((s) => ({ lat: num(pick(s, ['lat'])), lon: num(pick(s, ['lon'])) }))
     .filter((p) => p.lat && p.lon);
 
+  // Real road-path polyline, carried over from the source quote on convert —
+  // older loads (converted before this field existed) fall back to RouteMap's
+  // dashed line.
+  const routeGeometry = asArray<Record<string, unknown>>(pick(l, ['route_geometry']))
+    .map((p) => ({ lat: num(pick(p, ['lat'])), lon: num(pick(p, ['lon'])) }))
+    .filter((p) => p.lat && p.lon);
+
   const pickupLat = num(pick(l, ['pickup_lat']));
   const pickupLon = num(pick(l, ['pickup_lng']));
   const deliveryLat = num(pick(l, ['delivery_lat']));
@@ -82,8 +95,17 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   // Each stage shows the one real fact the API actually records for it — the
   // Load model only has `created_at` and `actual_delivered_at` as genuine
   // per-stage timestamps, so nothing here is a guessed date.
+  // A status with no further transitions (e.g. INVOICED) is a dead end — render
+  // its own step as done (checkmark) instead of "current" (which would leave it
+  // permanently showing a hollow ring + pulsing halo with nothing left to do).
+  const isTerminal = transitions.length === 0;
   const timelineSteps: TimelineStep[] = LOAD_STEPS.map((step, i) => {
-    const base = { label: STATUS_LABEL(step), done: i < idx, current: i === idx, color: colors.accent };
+    const base = {
+      label: STATUS_LABEL(step),
+      done: i < idx || (isTerminal && i === idx),
+      current: !isTerminal && i === idx,
+      color: colors.accent,
+    };
     switch (step) {
       case 'PENDING': {
         const createdAt = str(pick(l, ['created_at']));
@@ -152,10 +174,11 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
   const changeStatus = (next: string) => {
     if (next === status || busy) return;
-    // Backend requires both driver and vehicle to reach Assigned — if either
-    // is missing, open the assign screen right here instead of letting the
-    // PATCH 400. Confirming it also moves the status (activateOnAssign).
-    if (next === 'ASSIGNED' && !(current.driverId && current.vehicleId)) {
+    // Backend requires a vehicle to reach Assigned — driver is optional. If
+    // the vehicle is missing, open the assign screen right here instead of
+    // letting the PATCH 400. Confirming it also moves the status
+    // (activateOnAssign). Mirrors web's Bookings.tsx (vehicle-only check).
+    if (next === 'ASSIGNED' && !current.vehicleId) {
       nav.openAssign({
         mode: 'reassign',
         loadId: id,
@@ -221,7 +244,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
     if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
-    setDeliverBusy(true);
+    setUploadDeliverBusy(true);
     try {
       const name = asset.fileName ?? `pod-${id}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
@@ -233,7 +256,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload POD');
     } finally {
-      setDeliverBusy(false);
+      setUploadDeliverBusy(false);
     }
   };
 
@@ -261,7 +284,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
               icon="download"
               variant="secondary"
               loading={podBusy}
-              onPress={uploadPod}
+              onPress={hasPod ? () => setShowPodPreview(true) : uploadPod}
               fullWidth
             />
           </View>
@@ -377,6 +400,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
             pickup={{ lat: pickupLat, lon: pickupLon }}
             delivery={{ lat: deliveryLat, lon: deliveryLon }}
             stops={stopPoints}
+            geometry={routeGeometry.length > 1 ? routeGeometry : undefined}
           />
         </View>
       )}
@@ -441,7 +465,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                 <Button
                   label="Upload POD & set delivered"
                   icon="download"
-                  loading={deliverBusy}
+                  loading={uploadDeliverBusy}
+                  disabled={deliverBusy}
                   onPress={uploadPodAndDeliver}
                   fullWidth
                 />
@@ -449,14 +474,73 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   label="Skip & set delivered"
                   variant="secondary"
                   loading={deliverBusy}
+                  disabled={uploadDeliverBusy}
                   onPress={skipAndDeliver}
                   fullWidth
                 />
                 <Button
                   label="Cancel"
                   variant="secondary"
-                  disabled={deliverBusy}
+                  disabled={deliverBusy || uploadDeliverBusy}
                   onPress={() => setShowDeliverModal(false)}
+                  fullWidth
+                />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {showPodPreview && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowPodPreview(false)}>
+          <Pressable
+            onPress={() => setShowPodPreview(false)}
+            className="flex-1 items-center justify-center bg-black/65 px-6"
+          >
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+            >
+              <Txt className="text-heading font-semibold text-fg">Proof of delivery</Txt>
+              <Txt className="mb-4 mt-1.5 text-sub text-muted">{podReceivedBy || 'Received'}</Txt>
+              {podDocumentUrl ? (
+                /\.pdf($|\?)/i.test(podDocumentUrl) ? (
+                  <View className="mb-4">
+                    <Txt className="mb-3 text-sub text-muted">PDF document attached.</Txt>
+                    <Button
+                      label="Open PDF"
+                      icon="download"
+                      variant="secondary"
+                      onPress={() => WebBrowser.openBrowserAsync(mediaUrl(podDocumentUrl)!)}
+                      fullWidth
+                    />
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: mediaUrl(podDocumentUrl) }}
+                    style={{ width: '100%', aspectRatio: 1.2, borderRadius: 4, marginBottom: 16 }}
+                    resizeMode="contain"
+                  />
+                )
+              ) : (
+                <Txt className="mb-4 text-sub text-muted">
+                  No document file was attached — only a receipt name is on record.
+                </Txt>
+              )}
+              <View className="gap-2.5">
+                <Button
+                  label="Replace"
+                  variant="secondary"
+                  onPress={() => {
+                    setShowPodPreview(false);
+                    uploadPod();
+                  }}
+                  fullWidth
+                />
+                <Button
+                  label="Close"
+                  variant="secondary"
+                  onPress={() => setShowPodPreview(false)}
                   fullWidth
                 />
               </View>

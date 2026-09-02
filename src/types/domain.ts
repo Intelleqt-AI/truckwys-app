@@ -1,4 +1,4 @@
-import { num, str, pick } from '@/lib/api/list';
+import { num, str, pick, asArray } from '@/lib/api/list';
 
 // Normalized, UI-facing shapes. The Django API types most numeric fields as
 // strings and field names drift a little between endpoints, so each normalizer
@@ -12,6 +12,7 @@ export interface QuoteLite {
   customer: string;
   origin: string;
   destination: string;
+  stopLabels: string[];
   amount: number;
   status: string;
   marginPct?: number;
@@ -26,6 +27,9 @@ export const normalizeQuote = (q: Raw): QuoteLite => ({
   customer: str(pick(q, ['customer_name', 'customer', 'client_name']), 'Customer'),
   origin: str(pick(q, ['origin_city', 'origin', 'pickup_city', 'pickup_state']), '—'),
   destination: str(pick(q, ['destination_city', 'destination', 'delivery_city', 'delivery_state']), '—'),
+  stopLabels: asArray<Raw>(pick(q, ['stops']))
+    .map((s) => str(pick(s, ['location'])))
+    .filter(Boolean),
   amount: num(pick(q, ['total_amount', 'price', 'amount', 'total'])),
   status: str(pick(q, ['status']), 'DRAFT').toUpperCase(),
   marginPct: pick(q, ['margin_percent', 'marginPct', 'margin']) != null

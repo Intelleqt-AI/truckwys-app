@@ -536,6 +536,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         lat: num(pick(q, ['delivery_lat'])),
         lon: num(pick(q, ['delivery_lng'])),
       });
+      const savedStops = asArray<Record<string, unknown>>(pick(q, ['stops']));
+      if (savedStops.length > 0) {
+        setStops(
+          savedStops.map((s, i) => ({
+            id: `saved-${i}`,
+            loc: {
+              label: str(pick(s, ['location'])),
+              lat: num(pick(s, ['lat'])),
+              lon: num(pick(s, ['lon'])),
+            },
+          })),
+        );
+      }
       setWeight(String((num(pick(q, ['weight'])) || 0) / 1000 || ''));
       setCargo(str(pick(q, ['cargo_description'])));
       setDriverAllowance(String(num(pick(q, ['driver_allowance']))));
@@ -1166,6 +1179,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         validUntil,
         tripType,
         winProb,
+        stops,
       },
       status,
     );

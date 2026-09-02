@@ -277,13 +277,15 @@ export function HomeScreen() {
                 key={q.id}
                 leading={<Avatar name={q.customer} size={38} />}
                 title={q.customer}
-                subtitle={`${q.origin} → ${q.destination}`}
+                subtitle={[q.origin, ...q.stopLabels, q.destination].join(' → ')}
                 trailing={
                   <View className="items-end gap-1">
                     <Mono className="text-callout font-semibold text-fg">
                       {formatCurrency(q.amount, { maximumFractionDigits: 0 })}
                     </Mono>
-                    <StatusPill status={q.status} />
+                    <View>
+                      <StatusPill status={q.status} />
+                    </View>
                   </View>
                 }
                 onPress={() => openQuote(q.id, q.raw)}

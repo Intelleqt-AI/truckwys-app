@@ -21,18 +21,17 @@ import {
   Mono,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
+import { RouteMap } from '@/components/RouteMap';
 import {
   useQuote,
   sendQuote,
-  convertQuoteToLoad,
   useLoads,
   recordQuoteOutcome,
   deleteQuote,
   downloadQuotePdf,
   patchQuote,
 } from './api';
-import { AssignSheet } from './AssignSheet';
-import { num, str, pick } from '@/lib/api/list';
+import { num, str, pick, asArray } from '@/lib/api/list';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { quoteShareUrl } from '@/lib/legal';
 import { openWhatsApp } from '@/lib/whatsapp';
@@ -45,19 +44,26 @@ import {
 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
 // Matches the web quote-detail status dropdown (plain PATCH { status }).
+// In-Transit/Completed now belong to the Order created via "Convert to
+// booking", not the quote — the backend rejects a direct write to either.
+// They're only shown below when a legacy quote already carries that status.
 const STATUS_OPTIONS = [
   { label: 'Draft', value: 'DRAFT' },
   { label: 'Sent', value: 'SENT' },
   { label: 'Accepted', value: 'ACCEPTED' },
   { label: 'Declined', value: 'DECLINED' },
-  { label: 'In-Transit', value: 'IT' },
-  { label: 'Completed', value: 'COMPLETED' },
 ];
+
+const LEGACY_STATUS_LABELS: Record<string, string> = {
+  IT: 'In-Transit',
+  COMPLETED: 'Completed',
+};
 
 // Same fixed reasons the web outcome modal offers.
 const REJECTION_REASONS = [
@@ -76,12 +82,12 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
   const { data, isError, refetch } = useQuote(id, preview);
   const qc = useQueryClient();
+  const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
-  const [convertBusy, setConvertBusy] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
-  const [showAssign, setShowAssign] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [outcomeType, setOutcomeType] = useState<'accepted' | 'rejected' | null>(null);
   const [outcomeBusy, setOutcomeBusy] = useState(false);
   const [finalPrice, setFinalPrice] = useState('');
@@ -107,6 +113,24 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     pick(q, ['delivery_location', 'destination_city', 'destination', 'delivery_city']),
     '—',
   );
+
+  // Stops: raw {location, lat, lon} records → a label array for RoutePreview's
+  // rail and a GeoPoint array for RouteMap's markers. A stop missing lat/lon
+  // is dropped from the map rather than plotted at (0,0).
+  const stopsRaw = asArray<Record<string, unknown>>(pick(q, ['stops']));
+  const stopLabels = stopsRaw.map((s) => str(pick(s, ['location']))).filter(Boolean);
+  const stopPoints = stopsRaw
+    .map((s) => ({ lat: num(pick(s, ['lat'])), lon: num(pick(s, ['lon'])) }))
+    .filter((p) => p.lat && p.lon);
+
+  const pickupLat = num(pick(q, ['pickup_lat']));
+  const pickupLon = num(pick(q, ['pickup_lng']));
+  const deliveryLat = num(pick(q, ['delivery_lat']));
+  const deliveryLon = num(pick(q, ['delivery_lng']));
+  // A detail view either knows the route or doesn't — skip the map entirely
+  // rather than let RouteMap fall back to its South-Africa placeholder, which
+  // is only right for an in-progress picker.
+  const hasRouteCoords = !!(pickupLat && deliveryLat);
 
   // Customer (flat fields on the quote).
   const customer = [
@@ -235,26 +259,6 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     }
   };
 
-  const convert = async (driverId: string, vehicleId: string) => {
-    setConvertBusy(true);
-    try {
-      const created = await convertQuoteToLoad(id, { driver_id: driverId, vehicle_id: vehicleId });
-      // The new load lands in Orders, and the chosen vehicle/driver are no
-      // longer "available".
-      invalidateFor(qc, 'quote', 'load');
-      setShowAssign(false);
-      toast.success(driverId && vehicleId ? 'Converted and assigned' : 'Converted to booking');
-      // The quote is now a booking — replace rather than stack, matching web.
-      const loadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
-      if (loadId != null) navigation.replace('LoadDetail', { id: loadId as string | number });
-      else navigation.goBack();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not convert quote');
-    } finally {
-      setConvertBusy(false);
-    }
-  };
-
   const closeOutcome = () => {
     setOutcomeType(null);
     setFinalPrice('');
@@ -332,7 +336,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       {
         text: 'Delete',
         style: 'destructive',
-        onPress: () => run(setConvertBusy, () => deleteQuote(id), 'Quote deleted', true),
+        onPress: () => run(setDeleteBusy, () => deleteQuote(id), 'Quote deleted', true),
       },
     ]);
 
@@ -396,9 +400,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         <Button
           label="Convert to booking"
           icon="arrowRight"
-          loading={convertBusy}
           disabled={subscription.blocked}
-          onPress={() => setShowAssign(true)}
+          onPress={() =>
+            nav.openAssign({
+              mode: 'convert',
+              quoteId: id,
+              reference: str(pick(q, ['quote_number'])),
+              vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
+              popCallerOnSuccess: true,
+            })
+          }
           fullWidth
         />
       )}
@@ -414,7 +425,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           />
         </View>
         <View className="flex-1">
-          <Button label="Delete" variant="danger" icon="x" onPress={confirmDelete} fullWidth />
+          <Button
+            label="Delete"
+            variant="danger"
+            icon="x"
+            loading={deleteBusy}
+            onPress={confirmDelete}
+            fullWidth
+          />
         </View>
       </View>
     </View>
@@ -444,9 +462,19 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         <RoutePreview
           origin={origin}
           dest={dest}
+          stops={stopLabels}
           distance={distanceKm > 0 ? `${Math.round(distanceKm)} km` : undefined}
           duration={pick(q, ['sla_hours']) ? `SLA ${num(pick(q, ['sla_hours']))}h` : undefined}
         />
+        {hasRouteCoords && (
+          <View className="mt-3">
+            <RouteMap
+              pickup={{ lat: pickupLat, lon: pickupLon }}
+              delivery={{ lat: deliveryLat, lon: deliveryLon }}
+              stops={stopPoints}
+            />
+          </View>
+        )}
       </View>
 
       {marginPct > 0 && marginPct < 12 && (
@@ -525,7 +553,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         <View className="border-b border-line-row px-3.5 py-3">
           <SelectField
             label="Status"
-            options={STATUS_OPTIONS}
+            options={
+              status === 'IT' || status === 'COMPLETED'
+                ? [
+                    ...STATUS_OPTIONS,
+                    { label: LEGACY_STATUS_LABELS[status] ?? status, value: status },
+                  ]
+                : STATUS_OPTIONS
+            }
             value={status}
             onSelect={changeStatus}
           />
@@ -545,17 +580,6 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           </View>
         </Group>
       ) : null}
-
-      {showAssign && (
-        <AssignSheet
-          mode="convert"
-          reference={str(pick(q, ['quote_number']))}
-          vehicleType={str(pick(q, ['vehicle_type'])) || undefined}
-          busy={convertBusy}
-          onConfirm={convert}
-          onCancel={() => setShowAssign(false)}
-        />
-      )}
 
       {sendOpen && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setSendOpen(false)}>

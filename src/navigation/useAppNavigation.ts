@@ -21,6 +21,8 @@ export function useAppNavigation() {
       nav.navigate('DriverDetail', { id, preview }),
     openInvoice: (id: string | number, preview?: Record<string, unknown>) =>
       nav.navigate('InvoiceDetail', { id, preview }),
+    openAssign: (params: AppStackParamList['AssignDriverVehicle']) =>
+      nav.navigate('AssignDriverVehicle', params),
     openCustomer: (id: string | number, preview?: Record<string, unknown>) =>
       nav.navigate('CustomerDetail', { id, preview }),
     createQuote: (ai?: boolean) => nav.navigate('CreateQuote', { ai }),

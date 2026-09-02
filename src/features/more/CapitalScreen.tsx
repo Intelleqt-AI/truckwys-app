@@ -125,19 +125,15 @@ export function CapitalScreen({ navigation }: Props) {
                     <Mono className="text-caption text-faint">
                       Advance {formatCurrency(e.advance, { maximumFractionDigits: 0 })}
                     </Mono>
-                    <View style={{ width: 140 }}>
-                      {e.riskBlocked ? (
-                        // Customer risk above the 70% limit — the backend will
-                        // refuse this one, so don't offer the action.
-                        <Badge label="High risk" tone="danger" />
-                      ) : (
-                        <Button
-                          label={applied.has(String(e.id)) ? 'Applied ✓' : 'Apply'}
-                          onPress={() => applyForCapital(String(e.id))}
-                          fullWidth
-                        />
-                      )}
-                    </View>
+                    {e.riskBlocked ? (
+                      // Customer risk above the 70% limit — the backend will
+                      // refuse this one, so don't offer the action.
+                      <Badge label="High risk" tone="danger" />
+                    ) : applied.has(String(e.id)) ? (
+                      <Badge label="Applied" tone="success" dot />
+                    ) : (
+                      <Button label="Apply" size="sm" onPress={() => applyForCapital(String(e.id))} />
+                    )}
                   </View>
                 </View>
               ))}

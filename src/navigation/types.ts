@@ -25,6 +25,22 @@ export type AppStackParamList = {
   VehicleDetail: { id: Id; preview?: Record<string, unknown> };
   DriverDetail: { id: Id; preview?: Record<string, unknown> };
   InvoiceDetail: { id: Id; preview?: Record<string, unknown> };
+  AssignDriverVehicle: {
+    mode: 'convert' | 'reassign';
+    /** Reassign target. */
+    loadId?: Id;
+    /** Convert target. */
+    quoteId?: Id;
+    /** Quote number, shown in the convert prompt copy. */
+    reference?: string;
+    vehicleType?: string;
+    initialDriverId?: string;
+    initialVehicleId?: string;
+    /** Reassign only: also PATCH status -> ASSIGNED after a real assignment. */
+    activateOnAssign?: boolean;
+    /** Convert only: also pop the screen beneath this one (e.g. QuoteDetail) before pushing LoadDetail. */
+    popCallerOnSuccess?: boolean;
+  };
   Customers: undefined;
   CustomerDetail: { id: Id; preview?: Record<string, unknown> };
   CustomerRisk: { id: Id };

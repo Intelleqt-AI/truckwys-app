@@ -36,9 +36,8 @@ export function useCapital() {
   return useQuery({
     queryKey: ['capital'],
     queryFn: async () => {
-      const [eligibleRes, advances, facilities] = await Promise.all([
+      const [eligibleRes, facilities] = await Promise.all([
         fetchData('capital/eligible/').catch(() => null),
-        fetchData('advances/').catch(() => []),
         // The facility drives the Available / In Use tiles the web app shows;
         // mobile never fetched it, which is why it only had two numbers.
         fetchData('facilities/').catch(() => []),
@@ -85,23 +84,10 @@ export function useCapital() {
           available: num(pick(facility, ['available'])),
           utilization: num(pick(facility, ['utilization_percent'])),
         },
-        advances: asArray(advances).map((a) => {
-          const r = a as Record<string, unknown>;
-          return {
-            id: str(pick(r, ['id']), ''),
-            amount: num(pick(r, ['amount', 'advance_amount'])),
-            status: str(pick(r, ['status']), 'PENDING').toUpperCase(),
-          };
-        }),
       };
     },
   });
 }
-
-// The create serializer requires `invoice_id`; posting `invoice` returned
-// 400 "invoice_id: This field is required." for every request.
-export const requestAdvance = (invoiceId: string | number) =>
-  postData({ url: 'advances/', data: { invoice_id: Number(invoiceId) } });
 
 export function useAdvance(id: string | number) {
   return useQuery<Record<string, unknown>>({

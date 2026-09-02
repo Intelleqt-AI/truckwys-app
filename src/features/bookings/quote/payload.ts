@@ -1,6 +1,7 @@
 import { num, pick } from '@/lib/api/list';
 import type { CostBreakdown } from './costs';
-import { extractCode, roundCoord, type Loc } from './types';
+import type { GeoPoint } from '@/lib/routeGeometry';
+import { extractCode, roundCoord, type Loc, type StopEntry } from './types';
 
 // Moved out of CreateQuoteScreen.tsx's buildPayload (Phase 0 extraction) —
 // same object literal, same key order, no behaviour change. This is the DRF
@@ -24,6 +25,8 @@ export interface BuildQuotePayloadInput {
   validUntil: string;
   tripType: 'ONE_WAY' | 'ROUND_TRIP';
   winProb: number;
+  stops: StopEntry[];
+  routeGeometry: GeoPoint[];
 }
 
 export function buildQuotePayload(
@@ -44,6 +47,8 @@ export function buildQuotePayload(
     validUntil,
     tripType,
     winProb,
+    stops,
+    routeGeometry,
   }: BuildQuotePayloadInput,
   status: 'DRAFT' | 'SENT',
 ) {
@@ -59,6 +64,16 @@ export function buildQuotePayload(
     pickup_lng: pickup ? roundCoord(pickup.lon) : undefined,
     delivery_lat: delivery ? roundCoord(delivery.lat) : undefined,
     delivery_lng: delivery ? roundCoord(delivery.lon) : undefined,
+    // Only stops with a resolved location count — same rule the live route-calc
+    // call already applies. Previously these were used for pricing only, then
+    // discarded: never saved, so Quote Detail / the quotes list / a converted
+    // Load could never show them.
+    stops: stops
+      .filter((s) => s.loc)
+      .map((s) => ({ location: s.loc!.label, lat: roundCoord(s.loc!.lat), lon: roundCoord(s.loc!.lon) })),
+    // Previously computed for live pricing only, then discarded: never saved,
+    // so Quote Detail / a converted Load could never show the real road path.
+    route_geometry: routeGeometry.map((p) => ({ lat: roundCoord(p.lat), lon: roundCoord(p.lon) })),
     cargo_description: cargo || `${weight}t ${vehicleType}`,
     weight: weightKg,
     distance: costs.distance,

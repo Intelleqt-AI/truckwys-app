@@ -121,14 +121,21 @@ export function Group({
   children: ReactNode;
   className?: string;
 }) {
+  const { colors } = useTheme();
   return (
     <View className={`mb-5 ${className}`}>
       {label && (
         <View className="mb-2.5 flex-row items-center justify-between">
           <Label>{label}</Label>
           {action && (
-            <Pressable hitSlop={8} onPress={onAction} accessibilityRole="button">
+            <Pressable
+              hitSlop={8}
+              onPress={onAction}
+              accessibilityRole="button"
+              className="flex-row items-center gap-0.5"
+            >
               <Mono className="text-micro tracking-label uppercase text-accent">{action}</Mono>
+              <Icon name="chevronRight" size={12} color={colors.accent} />
             </Pressable>
           )}
         </View>

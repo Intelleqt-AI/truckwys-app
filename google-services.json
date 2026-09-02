@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "507878439420",
+    "project_id": "truckwys",
+    "storage_bucket": "truckwys.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:507878439420:android:ddd6b12d0660bb99741a79",
+        "android_client_info": {
+          "package_name": "za.co.truckwys.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCwGHdHWGy6n6WwV8WKn9wqGmElHv9_wWQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -90,6 +90,17 @@ export function useModelStats() {
 export const suggestLocations = (q: string) =>
   fetchData<unknown>(`location/suggest/?q=${encodeURIComponent(q)}`);
 
+// Recent/frequent picks, team-wide. With no query, returns frequent locations
+// for an empty-field focus; with one, returns matches to merge alongside
+// location/suggest/ (mirrors web's LocationInput.tsx).
+export const fetchRecentLocations = (q?: string) =>
+  fetchData<unknown>(`location/recent/${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+
+// Fire-and-forget: builds the recent-locations history, never blocks or
+// surfaces an error to the location-picking flow.
+export const recordLocationPick = (label: string, lat: number, lon: number) =>
+  postData({ url: 'location/recent/', data: { location_text: label, lat, lon } }).catch(() => {});
+
 export const calculateRoute = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'route/calculate/', data });
 

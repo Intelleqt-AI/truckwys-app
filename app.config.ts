@@ -12,7 +12,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // Must match the EAS project's own slug exactly — the CLI hard-errors on a
   // mismatch (see extra.eas.projectId below, @intelleqt/truckwys).
   slug: 'truckwys',
-  version: '1.0.0',
+  version: '1.0.2',
   updates: {
     url: 'https://u.expo.dev/0ef68ce5-03e0-46d7-b4c4-6fc1a9c5f170',
   },
@@ -26,6 +26,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   backgroundColor: DEEP,
   assetBundlePatterns: ['**/*'],
   ios: {
+    icon: {
+      dark: './assets/ios-icon-dark.png',
+      light: './assets/ios-icon-light.png',
+      tinted: './assets/ios-icon-tinted.png',
+    },
     // Phone-only for v1. App Review tests iPad when this is true, and the UI is
     // built for a phone (floating tab bar, pageSheet modals, 2-up stat grids).
     supportsTablet: false,
@@ -41,9 +46,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     entitlements: {
       'aps-environment': 'production',
     },
-    // Firebase needs GoogleService-Info.plist. Read from env so a build without
-    // Firebase configured still succeeds.
-    googleServicesFile: process.env.GOOGLE_SERVICES_INFO_PLIST ?? undefined,
+    // Firebase needs GoogleService-Info.plist. Committed (client-side Firebase
+    // identifiers, not real secrets) so the fingerprint runtime version hashes
+    // the same bytes on every machine and in EAS builds — see GOOGLE_SERVICES_*
+    // in PUSH_SETUP.md for how this file was obtained.
+    googleServicesFile: './GoogleService-Info.plist',
     infoPlist: {
       // Native app, HTTPS only, no proprietary cryptography — exempt.
       ITSAppUsesNonExemptEncryption: false,
@@ -80,8 +87,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     package: 'za.co.truckwys.mobile',
     // versionCode intentionally omitted — see the buildNumber comment under
     // ios above; same reasoning, same remote-version-source mechanism.
+    icon: './assets/icon.png',
     adaptiveIcon: {
-      backgroundColor: DEEP,
+      backgroundColor: "#FFFFFF",
+      // foregroundImage: './assets/android-icon-foreground.png',
       foregroundImage: './assets/android-icon-foreground.png',
       monochromeImage: './assets/android-icon-monochrome.png',
     },
@@ -89,7 +98,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Mandatory on Android 13+ (API 33) — without it the runtime prompt never
     // appears and notifications are silently dropped.
     permissions: ['POST_NOTIFICATIONS'],
-    googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? undefined,
+    // Committed for the same reason as ios.googleServicesFile above.
+    googleServicesFile: './google-services.json',
   },
   plugins: [
     'expo-secure-store',
@@ -126,8 +136,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         image: './assets/splash-icon.png',
         imageWidth: 160,
         resizeMode: 'contain',
-        backgroundColor: DEEP,
-        dark: { backgroundColor: DEEP },
+        backgroundColor: '#FFFFFF',
+        dark: {
+          image: "./assets/splash-icon-dark.png",
+          backgroundColor: DEEP
+        },
       },
     ],
   ],

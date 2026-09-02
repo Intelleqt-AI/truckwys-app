@@ -54,25 +54,48 @@ bundle/package `za.co.truckwys.mobile`:
 - Android → `google-services.json` downloaded, `project_id: truckwys`,
   `package_name: za.co.truckwys.mobile` confirmed
 
-Both files sit in the repo root (next to `app.config.ts`) and `.env` points at
-them:
-
-```
-GOOGLE_SERVICES_INFO_PLIST=./GoogleService-Info.plist
-GOOGLE_SERVICES_JSON=./google-services.json
-```
+Both files sit in the repo root (next to `app.config.ts`) and are **committed**
+— `app.config.ts` references them by literal path
+(`googleServicesFile: './google-services.json'` / `'./GoogleService-Info.plist'`).
+They're client-side Firebase identifiers, not secrets, and committing them
+keeps `runtimeVersion.policy: 'fingerprint'` reproducible on every machine and
+in EAS builds: the fingerprint hashes these files' *contents*, so an untracked
+or per-machine-different copy makes the local runtime version diverge from the
+one EAS computes and fails the build (`Runtime version calculated on local
+machine not equal to runtime version calculated during build`).
 
 Verified `npx expo config --type public` resolves both `googleServicesFile`
-paths correctly. Both filenames are gitignored — never commit them.
+paths correctly.
 
 ---
 
-## Part C — Give the cloud builds those two files ✅ DONE
+## Part C — Give the cloud builds those two files ✅ DONE (superseded)
 
-EAS builds run on Expo's machines and never see your local files. Uploaded both
-as **file-type** environment variables — EAS exposes a path at build time, which
-is exactly what `googleServicesFile` expects — to **all three** environments
-(`development`, `preview`, `production`):
+Originally uploaded both as **file-type** environment variables — EAS exposes a
+path at build time, which is exactly what `googleServicesFile` expects — to
+**all three** environments (`development`, `preview`, `production`), since
+EAS builds run on Expo's machines and never see your local files.
+
+**Superseded:** the files are now committed (Part B) and referenced by literal
+path, so `app.config.ts` no longer reads `GOOGLE_SERVICES_JSON` /
+`GOOGLE_SERVICES_INFO_PLIST` from the environment at all. Relying on the EAS
+file env vars made the fingerprint runtime version depend on whether a given
+machine happened to have the files locally too — that's what caused a
+"Runtime version calculated on local machine not equal to runtime version
+calculated during build" failure. The three EAS env vars below can be deleted
+once a build off the committed files is confirmed green; left in place they're
+just unused.
+
+```bash
+npx eas-cli env:delete --variable-name GOOGLE_SERVICES_JSON --environment development
+npx eas-cli env:delete --variable-name GOOGLE_SERVICES_JSON --environment preview
+npx eas-cli env:delete --variable-name GOOGLE_SERVICES_JSON --environment production
+npx eas-cli env:delete --variable-name GOOGLE_SERVICES_INFO_PLIST --environment development
+npx eas-cli env:delete --variable-name GOOGLE_SERVICES_INFO_PLIST --environment preview
+npx eas-cli env:delete --variable-name GOOGLE_SERVICES_INFO_PLIST --environment production
+```
+
+Original setup, for history:
 
 ```bash
 npx eas-cli env:create <environment> \

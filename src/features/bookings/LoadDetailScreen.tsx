@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { View, Alert } from 'react-native';
+import { View, Alert, Modal, Pressable, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -20,16 +21,19 @@ import {
   Label,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
-import { useLoad, updateLoadStatus, convertLoadToInvoice, uploadLoadPod, assignLoadDriver } from './api';
-import { AssignSheet, assignedIds } from './AssignSheet';
+import { RouteMap } from '@/components/RouteMap';
+import { useLoad, updateLoadStatus, uploadLoadPod } from './api';
+import { assignedIds } from './AssignDriverVehicleScreen';
 import { useSubscription } from '@/hooks/useSubscription';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL, stepIndexFor } from './constants';
-import { num, str, pick } from '@/lib/api/list';
+import { num, str, pick, asArray } from '@/lib/api/list';
+import { mediaUrl } from '@/lib/api/client';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
+import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'LoadDetail'>;
@@ -40,10 +44,13 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const qc = useQueryClient();
   const subscription = useSubscription();
+  const nav = useAppNavigation();
   const [busy, setBusy] = useState(false);
   const [podBusy, setPodBusy] = useState(false);
-  const [showAssign, setShowAssign] = useState(false);
-  const [assignBusy, setAssignBusy] = useState(false);
+  const [showDeliverModal, setShowDeliverModal] = useState(false);
+  const [showPodPreview, setShowPodPreview] = useState(false);
+  const [deliverBusy, setDeliverBusy] = useState(false);
+  const [uploadDeliverBusy, setUploadDeliverBusy] = useState(false);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this booking." />;
   const l = (data ?? {}) as Record<string, unknown>;
@@ -57,14 +64,48 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const ratePerKm = distance ? rate / distance : 0;
   const invoiced = status === 'INVOICED' || !!pick(l, ['invoice_id', 'invoice']);
   const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
+  const podDocumentUrl = str(pick(l, ['pod_document']));
+  const podReceivedBy = str(pick(l, ['pod_received_by']));
   const current = assignedIds(l);
   const hasAssignment = !!(current.driverId || current.vehicleId);
+  // Driver/vehicle are locked in once the load moves past Assigned — editing
+  // them mid-transit (or after delivery/invoicing/cancellation) would rewrite
+  // history that's already in motion. Mirrors web's Bookings.tsx.
+  const assignmentLocked = !['PENDING', 'ASSIGNED'].includes(status);
+  const invoiceId = str(pick(l, ['invoice_id']));
+
+  const stopsRaw = asArray<Record<string, unknown>>(pick(l, ['stops']));
+  const stopPoints = stopsRaw
+    .map((s) => ({ lat: num(pick(s, ['lat'])), lon: num(pick(s, ['lon'])) }))
+    .filter((p) => p.lat && p.lon);
+
+  // Real road-path polyline, carried over from the source quote on convert —
+  // older loads (converted before this field existed) fall back to RouteMap's
+  // dashed line.
+  const routeGeometry = asArray<Record<string, unknown>>(pick(l, ['route_geometry']))
+    .map((p) => ({ lat: num(pick(p, ['lat'])), lon: num(pick(p, ['lon'])) }))
+    .filter((p) => p.lat && p.lon);
+
+  const pickupLat = num(pick(l, ['pickup_lat']));
+  const pickupLon = num(pick(l, ['pickup_lng']));
+  const deliveryLat = num(pick(l, ['delivery_lat']));
+  const deliveryLon = num(pick(l, ['delivery_lng']));
+  const hasRouteCoords = !!(pickupLat && deliveryLat);
 
   // Each stage shows the one real fact the API actually records for it — the
   // Load model only has `created_at` and `actual_delivered_at` as genuine
   // per-stage timestamps, so nothing here is a guessed date.
+  // A status with no further transitions (e.g. INVOICED) is a dead end — render
+  // its own step as done (checkmark) instead of "current" (which would leave it
+  // permanently showing a hollow ring + pulsing halo with nothing left to do).
+  const isTerminal = transitions.length === 0;
   const timelineSteps: TimelineStep[] = LOAD_STEPS.map((step, i) => {
-    const base = { label: STATUS_LABEL(step), done: i < idx, current: i === idx, color: colors.accent };
+    const base = {
+      label: STATUS_LABEL(step),
+      done: i < idx || (isTerminal && i === idx),
+      current: !isTerminal && i === idx,
+      color: colors.accent,
+    };
     switch (step) {
       case 'PENDING': {
         const createdAt = str(pick(l, ['created_at']));
@@ -133,6 +174,27 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
   const changeStatus = (next: string) => {
     if (next === status || busy) return;
+    // Backend requires a vehicle to reach Assigned — driver is optional. If
+    // the vehicle is missing, open the assign screen right here instead of
+    // letting the PATCH 400. Confirming it also moves the status
+    // (activateOnAssign). Mirrors web's Bookings.tsx (vehicle-only check).
+    if (next === 'ASSIGNED' && !current.vehicleId) {
+      nav.openAssign({
+        mode: 'reassign',
+        loadId: id,
+        vehicleType: str(pick(l, ['vehicle_type'])) || undefined,
+        initialDriverId: current.driverId,
+        initialVehicleId: current.vehicleId,
+        activateOnAssign: true,
+      });
+      return;
+    }
+    // Give the user a chance to attach the POD right at the point of delivery
+    // — but don't force it, a plain PATCH to Delivered is still valid too.
+    if (next === 'DELIVERED') {
+      setShowDeliverModal(true);
+      return;
+    }
     // Cancelling a load that's already moving is destructive — confirm first.
     if (next === 'CANCELLED' && !['PENDING', 'LOADING'].includes(status)) {
       Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it.', [
@@ -142,37 +204,6 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       return;
     }
     doStatus(next);
-  };
-
-  const createInvoice = async () => {
-    setBusy(true);
-    try {
-      await convertLoadToInvoice(id);
-      // Creates an invoice, so the invoice list/finance totals move too —
-      // 'load' already covers invoices in the map.
-      refresh();
-      toast.success();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not create invoice');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitAssign = async (driverId: string, vehicleId: string) => {
-    if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
-    setAssignBusy(true);
-    try {
-      await assignLoadDriver(id, driverId ? Number(driverId) : null, vehicleId ? Number(vehicleId) : null);
-      // Availability changed for whoever was picked up or released.
-      refresh();
-      setShowAssign(false);
-      toast.success(driverId && vehicleId ? 'Assigned' : 'Unassigned');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not assign');
-    } finally {
-      setAssignBusy(false);
-    }
   };
 
   const uploadPod = async () => {
@@ -195,25 +226,69 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  const skipAndDeliver = async () => {
+    setDeliverBusy(true);
+    try {
+      await updateLoadStatus(id, 'DELIVERED');
+      refresh();
+      setShowDeliverModal(false);
+      toast.success();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Update failed');
+    } finally {
+      setDeliverBusy(false);
+    }
+  };
+
+  const uploadPodAndDeliver = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
+    if (res.canceled || !res.assets?.[0]) return;
+    const asset = res.assets[0];
+    setUploadDeliverBusy(true);
+    try {
+      const name = asset.fileName ?? `pod-${id}.jpg`;
+      const type = asset.mimeType ?? 'image/jpeg';
+      await uploadLoadPod(id, { uri: asset.uri, name, type });
+      // Backend flips IN_TRANSIT -> DELIVERED as a side effect of this call.
+      refresh();
+      setShowDeliverModal(false);
+      toast.success();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not upload POD');
+    } finally {
+      setUploadDeliverBusy(false);
+    }
+  };
+
   return (
     <SheetScreen
       eyebrow="Load detail"
       title={str(pick(l, ['load_number', 'reference']), 'Load')}
       onBack={() => navigation.goBack()}
       footer={
-        <View className="gap-2.5">
-          {!invoiced && (
-            <Button label="Create invoice" icon="receipt" loading={busy} onPress={createInvoice} fullWidth />
-          )}
-          <Button
-            label={hasPod ? 'POD uploaded' : 'Upload POD'}
-            icon="download"
-            variant="secondary"
-            loading={podBusy}
-            onPress={uploadPod}
-            fullWidth
-          />
-        </View>
+        // Nothing to do here before the load has moved past Pending — POD and
+        // invoicing both only make sense once the load is in motion.
+        status === 'PENDING' ? undefined : (
+          <View className="gap-2.5">
+            {invoiced && invoiceId && (
+              <Button
+                label="See invoice"
+                icon="receipt"
+                variant="secondary"
+                onPress={() => nav.openInvoice(invoiceId)}
+                fullWidth
+              />
+            )}
+            <Button
+              label={hasPod ? 'POD uploaded' : 'Upload POD'}
+              icon="download"
+              variant="secondary"
+              loading={podBusy}
+              onPress={hasPod ? () => setShowPodPreview(true) : uploadPod}
+              fullWidth
+            />
+          </View>
+        )
       }
     >
       <View className="mb-4 flex-row items-center gap-2.5">
@@ -292,6 +367,18 @@ export function LoadDetailScreen({ route, navigation }: Props) {
               {str(pick(l, ['pickup_city']))}
               {pick(l, ['pickup_state']) ? `, ${str(pick(l, ['pickup_state']))}` : ''}
             </Txt>
+            {stopsRaw.length > 0 && (
+              <View className="my-2">
+                <Label className="text-faint" style={{ fontSize: 9 }}>
+                  Stops ({stopsRaw.length})
+                </Label>
+                {stopsRaw.map((s, i) => (
+                  <Txt key={i} className="mt-0.5 text-caption text-muted">
+                    {i + 1}. {str(pick(s, ['location']))}
+                  </Txt>
+                ))}
+              </View>
+            )}
             <Mono className="my-3 text-caption text-faint">{str(pick(l, ['cargo']), 'General cargo')}</Mono>
             <Label className="text-faint" style={{ fontSize: 9 }}>
               Delivery · {formatDate(str(pick(l, ['delivery_date'])) || new Date().toISOString())}
@@ -307,6 +394,17 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         </View>
       </View>
 
+      {hasRouteCoords && (
+        <View className="mb-5">
+          <RouteMap
+            pickup={{ lat: pickupLat, lon: pickupLon }}
+            delivery={{ lat: deliveryLat, lon: deliveryLon }}
+            stops={stopPoints}
+            geometry={routeGeometry.length > 1 ? routeGeometry : undefined}
+          />
+        </View>
+      )}
+
       {/* Financials */}
       <Group label="Financials">
         <DetailRow label="Base rate" value={formatCurrency(rate)} />
@@ -321,8 +419,20 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       {/* Assignment */}
       <Group
         label="Assignment"
-        action={hasAssignment ? 'Reassign' : 'Assign'}
-        onAction={() => setShowAssign(true)}
+        action={assignmentLocked ? undefined : hasAssignment ? 'Reassign' : 'Assign'}
+        onAction={
+          assignmentLocked
+            ? undefined
+            : () =>
+                nav.openAssign({
+                  mode: 'reassign',
+                  loadId: id,
+                  vehicleType: str(pick(l, ['vehicle_type'])) || undefined,
+                  initialDriverId: current.driverId,
+                  initialVehicleId: current.vehicleId,
+                  activateOnAssign: false,
+                })
+        }
       >
         <DetailRow
           label="Driver"
@@ -337,18 +447,106 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         <DetailRow label="Quote" value={str(pick(l, ['quote_number', 'quote']), '—')} last />
       </Group>
 
-      {showAssign && (
-        <AssignSheet
-          mode="reassign"
-          // Web doesn't filter by type when re-assigning; we do, so the picker
-          // can't offer a truck that can't run this load.
-          vehicleType={str(pick(l, ['vehicle_type'])) || undefined}
-          initialDriverId={current.driverId}
-          initialVehicleId={current.vehicleId}
-          busy={assignBusy}
-          onConfirm={submitAssign}
-          onCancel={() => setShowAssign(false)}
-        />
+      {showDeliverModal && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowDeliverModal(false)}>
+          <Pressable
+            onPress={() => setShowDeliverModal(false)}
+            className="flex-1 items-center justify-center bg-black/65 px-6"
+          >
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+            >
+              <Txt className="text-heading font-semibold text-fg">Mark as delivered</Txt>
+              <Txt className="mb-4 mt-1.5 text-sub text-muted">
+                Attach a proof of delivery now, or skip it — you can still add one later from Upload POD.
+              </Txt>
+              <View className="gap-2.5">
+                <Button
+                  label="Upload POD & set delivered"
+                  icon="download"
+                  loading={uploadDeliverBusy}
+                  disabled={deliverBusy}
+                  onPress={uploadPodAndDeliver}
+                  fullWidth
+                />
+                <Button
+                  label="Skip & set delivered"
+                  variant="secondary"
+                  loading={deliverBusy}
+                  disabled={uploadDeliverBusy}
+                  onPress={skipAndDeliver}
+                  fullWidth
+                />
+                <Button
+                  label="Cancel"
+                  variant="secondary"
+                  disabled={deliverBusy || uploadDeliverBusy}
+                  onPress={() => setShowDeliverModal(false)}
+                  fullWidth
+                />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {showPodPreview && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowPodPreview(false)}>
+          <Pressable
+            onPress={() => setShowPodPreview(false)}
+            className="flex-1 items-center justify-center bg-black/65 px-6"
+          >
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+            >
+              <Txt className="text-heading font-semibold text-fg">Proof of delivery</Txt>
+              <Txt className="mb-4 mt-1.5 text-sub text-muted">{podReceivedBy || 'Received'}</Txt>
+              {podDocumentUrl ? (
+                /\.pdf($|\?)/i.test(podDocumentUrl) ? (
+                  <View className="mb-4">
+                    <Txt className="mb-3 text-sub text-muted">PDF document attached.</Txt>
+                    <Button
+                      label="Open PDF"
+                      icon="download"
+                      variant="secondary"
+                      onPress={() => WebBrowser.openBrowserAsync(mediaUrl(podDocumentUrl)!)}
+                      fullWidth
+                    />
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: mediaUrl(podDocumentUrl) }}
+                    style={{ width: '100%', aspectRatio: 1.2, borderRadius: 4, marginBottom: 16 }}
+                    resizeMode="contain"
+                  />
+                )
+              ) : (
+                <Txt className="mb-4 text-sub text-muted">
+                  No document file was attached — only a receipt name is on record.
+                </Txt>
+              )}
+              <View className="gap-2.5">
+                <Button
+                  label="Replace"
+                  variant="secondary"
+                  onPress={() => {
+                    setShowPodPreview(false);
+                    uploadPod();
+                  }}
+                  fullWidth
+                />
+                <Button
+                  label="Close"
+                  variant="secondary"
+                  onPress={() => setShowPodPreview(false)}
+                  fullWidth
+                />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       )}
     </SheetScreen>
   );

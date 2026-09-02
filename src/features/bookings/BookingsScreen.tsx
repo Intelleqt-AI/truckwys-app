@@ -3,7 +3,6 @@ import { View, Pressable, Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQueryClient } from '@tanstack/react-query';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
   AmbientGlow,
@@ -23,14 +22,11 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useQuotes, useLoads, convertQuoteToLoad } from './api';
-import { AssignSheet } from './AssignSheet';
+import { useQuotes, useLoads } from './api';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { formatCurrency, formatCurrencyCompact, formatPercent } from '@/lib/formatters';
-import { toast } from '@/lib/toast';
-import { invalidateFor } from '@/lib/queryInvalidation';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 
@@ -82,39 +78,16 @@ const QUOTE_FILTERS = [
   { label: 'Draft', value: 'DRAFT' },
   { label: 'Sent', value: 'SENT' },
   { label: 'Accepted', value: 'ACCEPTED' },
-  { label: 'In-Transit', value: 'IT' },
-  { label: 'Completed', value: 'COMPLETED' },
+  { label: 'Declined', value: 'DECLINED' },
 ];
 
 function QuotesTab() {
   const { data, isLoading, isError, refetch } = useQuotes();
+  const { data: loads } = useLoads();
   const { refreshing, onRefresh } = useManualRefresh(refetch);
   const [filter, setFilter] = useState('ALL');
-  // One sheet instance serves the whole list — the card only sets the target.
-  const [convertQuote, setConvertQuote] = useState<QuoteLite | null>(null);
-  const [convertBusy, setConvertBusy] = useState(false);
-  const { openQuote, openLoad } = useAppNavigation();
-  const qc = useQueryClient();
-
-  const convert = async (driverId: string, vehicleId: string) => {
-    if (!convertQuote) return;
-    setConvertBusy(true);
-    try {
-      const created = await convertQuoteToLoad(convertQuote.id, {
-        driver_id: driverId,
-        vehicle_id: vehicleId,
-      });
-      invalidateFor(qc, 'quote', 'load');
-      setConvertQuote(null);
-      toast.success(driverId && vehicleId ? 'Converted and assigned' : 'Converted to booking');
-      const loadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
-      if (loadId != null) openLoad(loadId as string | number);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not convert quote');
-    } finally {
-      setConvertBusy(false);
-    }
-  };
+  const [q, setQ] = useState('');
+  const { openQuote, openAssign, openLoad } = useAppNavigation();
 
   if (isLoading)
     return (
@@ -124,56 +97,75 @@ function QuotesTab() {
     );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load quotes." />;
 
-  const list = data.filter((q) => filter === 'ALL' || q.status === filter);
+  const list = data.filter(
+    (item) =>
+      (filter === 'ALL' || item.status === filter) &&
+      (!q || `${item.code} ${item.customer}`.toLowerCase().includes(q.toLowerCase())),
+  );
 
   return (
-    <>
-      <FlashList
-        data={list}
-        keyExtractor={(q) => String(q.id)}
-        showsVerticalScrollIndicator={false}
-        onRefresh={onRefresh}
-        refreshing={refreshing}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
-        ItemSeparatorComponent={() => <View className="h-2.5" />}
-        ListHeaderComponent={
+    <FlashList
+      data={list}
+      keyExtractor={(q) => String(q.id)}
+      showsVerticalScrollIndicator={false}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
+      ItemSeparatorComponent={() => <View className="h-2.5" />}
+      ListHeaderComponent={
+        <View className="mb-3">
           <View className="mb-3">
-            <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
+            <SearchField value={q} onChangeText={setQ} placeholder="Search quotes…" />
           </View>
-        }
-        ListEmptyComponent={
-          <EmptyState icon="file" title="No quotes" body="No quotes match this filter." />
-        }
-        renderItem={({ item }) => (
+          <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
+        </View>
+      }
+      ListEmptyComponent={
+        <EmptyState icon="file" title="No quotes" body="No quotes match this filter." />
+      }
+      renderItem={({ item }) => {
+        // The quote row carries its load once converted; fall back to scanning
+        // loads by their `quote` back-reference, matching QuoteDetailScreen.
+        const convertedFromQuote = pick(item.raw, ['load_id', 'load', 'booking_id']);
+        const convertedLoadId =
+          convertedFromQuote != null
+            ? (convertedFromQuote as string | number)
+            : ((loads ?? []).find(
+                (l) => String(pick(l.raw ?? {}, ['quote']) ?? '') === String(item.id),
+              )?.id ?? null);
+        return (
           <QuoteCard
             quote={item}
+            convertedLoadId={convertedLoadId}
             onPress={() => openQuote(item.id, item.raw)}
-            onConvert={() => setConvertQuote(item)}
+            onConvert={() =>
+              openAssign({
+                mode: 'convert',
+                quoteId: item.id,
+                reference: item.code,
+                vehicleType: str(pick(item.raw, ['vehicle_type'])) || undefined,
+              })
+            }
+            onViewBooking={() => openLoad(convertedLoadId!)}
           />
-        )}
-      />
-      {convertQuote && (
-        <AssignSheet
-          mode="convert"
-          reference={convertQuote.code}
-          vehicleType={str(pick(convertQuote.raw, ['vehicle_type'])) || undefined}
-          busy={convertBusy}
-          onConfirm={convert}
-          onCancel={() => setConvertQuote(null)}
-        />
-      )}
-    </>
+        );
+      }}
+    />
   );
 }
 
 function QuoteCard({
   quote,
+  convertedLoadId,
   onPress,
   onConvert,
+  onViewBooking,
 }: {
   quote: QuoteLite;
+  convertedLoadId: string | number | null;
   onPress: () => void;
   onConvert: () => void;
+  onViewBooking: () => void;
 }) {
   // Web offers → Booking on accepted cards in the list as well as on the
   // detail page (QuotesList.tsx).
@@ -188,8 +180,8 @@ function QuoteCard({
           <StatusPill status={quote.status} />
         </View>
         <Txt className="text-body font-medium text-fg">{quote.customer}</Txt>
-        <Txt className="mt-0.5 text-sub text-muted">
-          {quote.origin} → {quote.destination}
+        <Txt className="mt-0.5 text-sub text-muted" numberOfLines={1} ellipsizeMode="tail">
+          {[quote.origin, ...quote.stopLabels, quote.destination].join(' → ')}
         </Txt>
         <View className="mt-3 flex-row items-center justify-between">
           <Mono className="text-body font-semibold text-fg">{formatCurrency(quote.amount)}</Mono>
@@ -198,7 +190,7 @@ function QuoteCard({
           )}
         </View>
       </Pressable>
-      {accepted && (
+      {accepted && convertedLoadId == null && (
         <Pressable
           onPress={onConvert}
           className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
@@ -206,6 +198,15 @@ function QuoteCard({
           <Mono className="text-micro uppercase tracking-label text-accent">
             Convert to booking
           </Mono>
+          <Icon name="arrowRight" size={14} color="#4D9EFF" />
+        </Pressable>
+      )}
+      {accepted && convertedLoadId != null && (
+        <Pressable
+          onPress={onViewBooking}
+          className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
+        >
+          <Mono className="text-micro uppercase tracking-label text-accent">View booking</Mono>
           <Icon name="arrowRight" size={14} color="#4D9EFF" />
         </Pressable>
       )}

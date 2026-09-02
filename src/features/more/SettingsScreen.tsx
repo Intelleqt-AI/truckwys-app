@@ -1798,6 +1798,9 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   const flatPlan = (pick(d, ['flat_plan']) ?? {}) as Record<string, unknown>;
   const card = (pick(d, ['card']) ?? {}) as Record<string, unknown>;
   const grace = (pick(d, ['grace']) ?? {}) as Record<string, unknown>;
+  const updateCard = (pick(d, ['update_card']) ?? {}) as Record<string, unknown>;
+  const failedItems = asArray<Record<string, unknown>>(pick(updateCard, ['items']));
+  const failedTotal = num(pick(updateCard, ['total']));
 
   const planLabel =
     str(pick(flatPlan, ['label'])) || str(pick(d, ['plan', 'subscription_plan']), '—');
@@ -1846,6 +1849,32 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
             {graceExpires ? ` (until ${formatDate(graceExpires)})` : ''}.
           </Txt>
         </View>
+      )}
+
+      {failedItems.length > 0 && (
+        <>
+          <Group label="Failed charges">
+            {failedItems.map((item, i) => (
+              <DetailRow
+                key={i}
+                label={str(pick(item, ['label']), 'Charge')}
+                hint={`Failed ${formatDate(str(pick(item, ['failed_at'])))}`}
+                value={formatCurrency(num(pick(item, ['amount'])))}
+                valueColor={statusHues.warning}
+                mono={false}
+              />
+            ))}
+            <DetailRow
+              label="Total to clear everything"
+              value={formatCurrency(failedTotal)}
+              boldValue
+              last
+            />
+          </Group>
+          <Txt className="text-caption text-faint">
+            These clear together once you update your payment method on the web dashboard.
+          </Txt>
+        </>
       )}
 
       <Txt className="text-caption text-faint">

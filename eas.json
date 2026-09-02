@@ -38,6 +38,10 @@
         "ascApiKeyPath": "./AuthKey_4K7J2RNHWH.p8",
         "ascApiKeyIssuerId": "31f52362-55f1-4ab5-a09a-70a28ef05c7c",
         "ascApiKeyId": "4K7J2RNHWH"
+      },
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
       }
     }
   }

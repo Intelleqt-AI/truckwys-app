@@ -56,6 +56,10 @@ function fromRecord(r: Record<string, unknown>): VehicleTypeFormValues {
       pick(r, ['fuel_consumption_l_per_100km']) != null
         ? String(num(pick(r, ['fuel_consumption_l_per_100km'])))
         : '',
+    fuel_consumption_sensitivity_pct:
+      pick(r, ['fuel_consumption_sensitivity_pct']) != null
+        ? String(num(pick(r, ['fuel_consumption_sensitivity_pct'])))
+        : '',
     active: pick(r, ['active']) === false ? 'false' : 'true',
   };
 }
@@ -129,7 +133,7 @@ function FuelCostNote({ control }: { control: Control<VehicleTypeFormValues> }) 
   return (
     <Txt className="-mt-1 text-caption text-faint">
       Quotes for this type are costed at your company&apos;s {(fuelType || 'diesel').toLowerCase()}{' '}
-      price.
+      price, scaled up or down from Fuel use as a quote&apos;s load moves away from Capacity.
     </Txt>
   );
 }
@@ -183,6 +187,15 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
       // rather than being overwritten with a zero.
       ...(v.fuel_consumption_l_per_100km?.trim()
         ? { fuel_consumption_l_per_100km: parseNum(v.fuel_consumption_l_per_100km) ?? undefined }
+        : {}),
+      // Same reasoning — left out when blank so the backend's own 2% default
+      // stands, rather than sending 0 (which would switch the fuel-weight
+      // adjustment off entirely, unlike web which coerces a blank to 2).
+      ...(v.fuel_consumption_sensitivity_pct?.trim()
+        ? {
+            fuel_consumption_sensitivity_pct:
+              parseNum(v.fuel_consumption_sensitivity_pct) ?? undefined,
+          }
         : {}),
       active: v.active === 'true',
     };
@@ -323,6 +336,18 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                 />
               </View>
             </View>
+            {/* How much fuel use climbs per tonne once a quote's load passes
+            Capacity above — same field web calls "Fuel Sensitivity". Blank
+            leaves the backend's own 2%/tonne default in place. */}
+            <VTText
+              control={control}
+              name="fuel_consumption_sensitivity_pct"
+              anchors={anchors}
+              label="Fuel sensitivity (%/ton over capacity)"
+              placeholder="e.g. 2"
+              keyboardType="numeric"
+              numeric
+            />
             <FuelCostNote control={control} />
           </View>
 

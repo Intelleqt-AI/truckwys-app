@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
-import { asArray } from '@/lib/api/list';
+import { asArray, num, str, pick } from '@/lib/api/list';
 import { normalizeQuote, normalizeLoad, type QuoteLite, type LoadLite } from '@/types/domain';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
@@ -44,18 +44,50 @@ export function useLoad(id: string | number, preview?: Record<string, unknown>) 
 export interface VehicleType {
   id: number | string;
   name: string;
+  description?: string;
   fuel_consumption_l_per_100km?: number;
   /** Decides which of the company's per-fuel-type default prices a quote uses. */
   fuel_type?: string;
   base_rate?: number;
   available_vehicle_count?: number;
+  /** Reference tonnage for both the overload guard and the fuel formula's t_ref. */
   capacity?: number;
+  /** Extra fuel burned per tonne over `capacity`, as a percent (e.g. 2 = +2%/tonne). */
+  fuel_consumption_sensitivity_pct?: number;
+  active?: boolean;
+}
+
+// The backend serializes every decimal field as a JSON string ("38.00", not
+// 38) — DRF's COERCE_DECIMAL_TO_STRING default, which is unset in settings so
+// its own default (true) applies. `useVehicleTypesList` (fleet/api.ts) and the
+// inline vehicle-types query in more/SettingsScreen.tsx share this exact
+// ['vehicle-types'] query key, so all three must normalize identically —
+// whichever queryFn actually runs wins the shared cache entry for the other
+// two. Import this into both rather than re-parsing locally.
+export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
+  return {
+    id: (pick(r, ['id', 'pk']) as string | number) ?? '',
+    name: str(pick(r, ['name'])),
+    description: str(pick(r, ['description'])),
+    fuel_consumption_l_per_100km: num(pick(r, ['fuel_consumption_l_per_100km'])),
+    fuel_type: str(pick(r, ['fuel_type']), 'Diesel'),
+    base_rate: num(pick(r, ['base_rate'])),
+    available_vehicle_count:
+      pick(r, ['available_vehicle_count']) != null
+        ? num(pick(r, ['available_vehicle_count']))
+        : undefined,
+    capacity: num(pick(r, ['capacity'])),
+    fuel_consumption_sensitivity_pct: num(pick(r, ['fuel_consumption_sensitivity_pct'])),
+    // Absent (older records / no key at all) defaults to active, same as the
+    // backend's own `active = models.BooleanField(default=True)`.
+    active: pick(r, ['active']) !== false,
+  };
 }
 
 export function useVehicleTypes() {
   return useQuery<VehicleType[]>({
     queryKey: ['vehicle-types'],
-    queryFn: async () => asArray<VehicleType>(await fetchData('vehicle-types/')),
+    queryFn: async () => asArray(await fetchData('vehicle-types/')).map(normalizeVehicleType),
   });
 }
 

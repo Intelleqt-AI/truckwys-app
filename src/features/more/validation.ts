@@ -29,6 +29,12 @@ export function vehicleTypeSchema() {
     // the form could drift out of sync with.
     fuel_type: z.string().trim().min(1, 'Fuel type is required'),
     fuel_consumption_l_per_100km: numericOptionalField('Fuel use'),
+    // Backend's DecimalField(max_digits=4, decimal_places=2) caps this at
+    // 99.99 — 100+ would 400 on save.
+    fuel_consumption_sensitivity_pct: numericOptionalField('Fuel sensitivity').refine(
+      (v) => !v || (parseNum(v) ?? 0) <= 99.99,
+      "Fuel sensitivity can't be more than 99.99%",
+    ),
     // 'true' | 'false' as a string, matching the SelectField options it drives.
     active: z.string(),
   });
@@ -44,5 +50,6 @@ export const VEHICLE_TYPE_FIELD_ORDER: (keyof VehicleTypeFormValues)[] = [
   'base_rate',
   'fuel_type',
   'fuel_consumption_l_per_100km',
+  'fuel_consumption_sensitivity_pct',
   'active',
 ];

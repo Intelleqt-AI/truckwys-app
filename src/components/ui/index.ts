@@ -10,6 +10,7 @@ export {
   StatusPill,
   PipelineBadge,
   ConfidenceTag,
+  PressScale,
   toneForStatus,
   type Tone,
 } from './primitives';
@@ -25,6 +26,7 @@ export {
 export { SelectField, type Option } from './SelectField';
 export { DateField } from './DateField';
 export { ProfitCurve, type CurvePoint } from './ProfitCurve';
+export { Sparkline } from './Sparkline';
 export { Glass, GlassSolid } from './Glass';
 export { SwipeTabs } from './SwipeTabs';
 export {

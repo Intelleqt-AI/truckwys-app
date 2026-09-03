@@ -99,7 +99,12 @@ export function AppHeader({
   live?: boolean;
 }) {
   return (
-    <View className="flex-row items-end justify-between gap-3 pb-3.5 pt-2">
+    // items-center, not items-end: the title block (with or without an
+    // eyebrow) and `right` rarely share a height — e.g. Home/Fleet/Finance
+    // pass no eyebrow, so the title's ~28px row was bottom-aligning against a
+    // 44px bell/avatar row, landing its visual centre ~8px lower than the
+    // icons'. Centring the row aligns them regardless of either side's height.
+    <View className="flex-row items-center justify-between gap-3 pb-3.5 pt-2">
       <View className="flex-1">
         {eyebrow && <Label className="mb-1">{eyebrow}</Label>}
         <View className="flex-row items-center gap-2.5">

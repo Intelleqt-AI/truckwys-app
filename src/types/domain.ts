@@ -28,15 +28,19 @@ export const normalizeQuote = (q: Raw): QuoteLite => ({
   // Full-text locations first (matches QuoteDetailScreen.tsx / web's fixed
   // routing display), short city/state codes only as a fallback.
   origin: str(pick(q, ['pickup_location', 'origin_city', 'origin', 'pickup_city']), '—'),
-  destination: str(pick(q, ['delivery_location', 'destination_city', 'destination', 'delivery_city']), '—'),
+  destination: str(
+    pick(q, ['delivery_location', 'destination_city', 'destination', 'delivery_city']),
+    '—',
+  ),
   stopLabels: asArray<Raw>(pick(q, ['stops']))
     .map((s) => str(pick(s, ['location'])))
     .filter(Boolean),
   amount: num(pick(q, ['total_amount', 'price', 'amount', 'total'])),
   status: str(pick(q, ['status']), 'DRAFT').toUpperCase(),
-  marginPct: pick(q, ['margin_percent', 'marginPct', 'margin']) != null
-    ? num(pick(q, ['margin_percent', 'marginPct', 'margin']))
-    : undefined,
+  marginPct:
+    pick(q, ['margin_percent', 'marginPct', 'margin']) != null
+      ? num(pick(q, ['margin_percent', 'marginPct', 'margin']))
+      : undefined,
   confidence: pick(q, ['confidence']) != null ? num(pick(q, ['confidence'])) : undefined,
   validUntil: pick(q, ['valid_until', 'expiresAt', 'expires_at']) as string | undefined,
   raw: q,
@@ -66,6 +70,14 @@ export const normalizeLoad = (l: Raw): LoadLite => ({
   raw: l,
 });
 
+// One month of the revenue-vs-fuel-cost series the web dashboard charts
+// (Overview.tsx's "Revenue vs Fuel Cost" card) — same `dashboard/finance/`
+// response, just never threaded through on mobile until now.
+export interface TrendPoint {
+  revenue: number;
+  expenses: number;
+}
+
 export interface FinanceSummary {
   totalRevenue: number;
   revenueChangePct: number;
@@ -73,6 +85,7 @@ export interface FinanceSummary {
   marginChangePts: number;
   outstanding: number;
   dso: number;
+  monthlyTrend: TrendPoint[];
 }
 
 export const normalizeFinance = (f: Raw | null | undefined): FinanceSummary => ({
@@ -82,6 +95,10 @@ export const normalizeFinance = (f: Raw | null | undefined): FinanceSummary => (
   marginChangePts: num(pick(f ?? {}, ['margin_change_pts'])),
   outstanding: num(pick(f ?? {}, ['outstanding_invoices_total'])),
   dso: num(pick(f ?? {}, ['dso'])),
+  monthlyTrend: asArray<Raw>(pick(f ?? {}, ['monthly_trend'])).map((m) => ({
+    revenue: num(pick(m, ['revenue'])),
+    expenses: num(pick(m, ['expenses'])),
+  })),
 });
 
 export interface VehicleLite {
@@ -104,11 +121,16 @@ export const normalizeVehicle = (v: Raw): VehicleLite => {
     name: makeModel || str(pick(v, ['make_model', 'name']), '') || plate || 'Vehicle',
     plate,
     status: str(pick(v, ['status']), 'AVAILABLE').toUpperCase(),
-    aiHealthScore: pick(v, ['ai_health_score', 'health_score']) != null
-      ? num(pick(v, ['ai_health_score', 'health_score']))
-      : undefined,
-    fuelEfficiency: pick(v, ['fuel_efficiency_score']) != null ? num(pick(v, ['fuel_efficiency_score'])) : undefined,
-    uptime: pick(v, ['uptime_percentage']) != null ? num(pick(v, ['uptime_percentage'])) : undefined,
+    aiHealthScore:
+      pick(v, ['ai_health_score', 'health_score']) != null
+        ? num(pick(v, ['ai_health_score', 'health_score']))
+        : undefined,
+    fuelEfficiency:
+      pick(v, ['fuel_efficiency_score']) != null
+        ? num(pick(v, ['fuel_efficiency_score']))
+        : undefined,
+    uptime:
+      pick(v, ['uptime_percentage']) != null ? num(pick(v, ['uptime_percentage'])) : undefined,
     mileage: pick(v, ['mileage']) != null ? num(pick(v, ['mileage'])) : undefined,
     raw: v,
   };

@@ -1,21 +1,19 @@
-import { useCallback, useState } from 'react';
-import { View, Pressable, TouchableOpacity, Platform } from 'react-native';
-import { format } from 'date-fns';
+import { useState } from 'react';
+import { View, TouchableOpacity, Platform } from 'react-native';
+import Animated from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import {
   Screen,
   AppHeader,
   SectionLabel,
   StatCard,
-  Group,
   ListRow,
   Button,
   Avatar,
   Icon,
   IconButton,
-  Txt,
   Mono,
-  Label,
+  Txt,
   StatusPill,
   Banner,
   Fab,
@@ -23,6 +21,11 @@ import {
 import { HomeSkeleton, ErrorState } from '@/components/feedback';
 import { useOverview } from './api';
 import { useUnreadCount } from '@/features/more/api';
+import { CommandBar } from './CommandBar';
+import { HeroRevenue } from './HeroRevenue';
+import { UtilisationCard } from './UtilisationCard';
+import { HeaderClock } from './HeaderClock';
+import { SECTION_REVEAL, ROW_REVEAL } from './motion';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useRole, visibleTabs } from '@/lib/access';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -81,13 +84,6 @@ export function HomeScreen() {
   const { daysRemaining, expiresAt } = useGracePeriod(subscription.status, subscription.visible);
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
-  const heatColor = useCallback(
-    (v: number) =>
-      ['rgba(77,158,255,0.12)', 'rgba(77,158,255,0.3)', 'rgba(77,158,255,0.6)', colors.accent][v] ??
-      colors.line,
-    [colors],
-  );
-
   if (isLoading) return <HomeSkeleton />;
   if (isError || !data)
     return <ErrorState onRetry={refetch} message="Couldn't load your overview." />;
@@ -100,7 +96,6 @@ export function HomeScreen() {
     <View className="flex-1">
       <Screen onRefresh={onRefresh} refreshing={refreshing}>
         <AppHeader
-          eyebrow={format(new Date(), 'EEE · d MMM · yyyy')}
           title="Overview"
           live
           right={
@@ -143,6 +138,15 @@ export function HomeScreen() {
           }
         />
 
+        {/* Date on one line, ticking HH:mm:ss SAST on the next, under the
+            title rather than above it as an eyebrow — date+seconds+timezone
+            together don't fit one line, and the screen's own name should be
+            the first thing read, not a timestamp. Always South Africa's
+            time, like web's live clock — never the device's own timezone. */}
+        <View className="mb-5">
+          <HeaderClock />
+        </View>
+
         {subscription.visible && (
           <View className="mb-5">
             <Banner
@@ -153,217 +157,159 @@ export function HomeScreen() {
           </View>
         )}
 
-        {/* Command strip */}
-        <View className="mb-5 flex-row rounded-xs border border-line bg-surface py-3">
-          {[
-            {
-              label: 'Active loads',
-              value: String(data.activeLoads),
-              onPress: () => goTab('Bookings', { tab: 'orders' }),
-              warn: false,
-            },
-            // Fleet ready still reads fine for a driver; it just isn't tappable
-            // when the Fleet tab is hidden for their role.
-            {
-              label: 'Fleet ready',
-              value: `${data.activeVehicles}/${data.totalVehicles}`,
-              onPress: hasFleet ? () => goTab('Fleet') : undefined,
-              warn: false,
-            },
-            {
-              label: 'Advances',
-              value: String(data.advancesPending),
-              onPress: openMore,
-              warn: data.advancesPending > 0,
-            },
-          ].map((s, i) => (
-            <Pressable
-              key={s.label}
-              onPress={s.onPress}
-              className={`flex-1 items-center ${i ? 'border-l border-line' : ''}`}
-            >
-              <Label className="mb-1 text-faint" style={{ fontSize: 9 }}>
-                {s.label}
-              </Label>
-              <Mono
-                className={s.warn ? 'text-warning' : 'text-fg'}
-                style={{ fontSize: 20, fontWeight: '700' }}
-              >
-                {s.value}
-              </Mono>
-            </Pressable>
-          ))}
-        </View>
+        {/* Command bar — live clock + the three operational stats */}
+        <Animated.View entering={SECTION_REVEAL[0]}>
+          <CommandBar data={data} hasFleet={hasFleet} goTab={goTab} openMore={openMore} />
+        </Animated.View>
 
-        {/* Finance metrics */}
-        <View className="mb-5 gap-3">
+        {/* Hero — total revenue + the revenue-vs-fuel sparkline */}
+        <Animated.View entering={SECTION_REVEAL[1]} className="mb-5">
+          <HeroRevenue
+            finance={f}
+            onPress={hasFinance ? () => goTab('Finance', { tab: 'reports' }) : undefined}
+          />
+        </Animated.View>
+
+        {/* Bento pair — net margin / outstanding */}
+        <Animated.View entering={SECTION_REVEAL[2]} className="mb-5 flex-row gap-3">
           <StatCard
-            label="Total revenue"
-            value={formatCurrencyCompact(f.totalRevenue)}
+            label="Net margin"
+            value={formatPercent(f.netMarginPct)}
             delta={
-              f.revenueChangePct
-                ? `${f.revenueChangePct > 0 ? '+' : ''}${formatPercent(f.revenueChangePct)}`
+              f.marginChangePts
+                ? `${f.marginChangePts > 0 ? '+' : ''}${formatNumber(f.marginChangePts, { maximumFractionDigits: 1 })} pts`
                 : undefined
             }
-            deltaTone={f.revenueChangePct >= 0 ? 'up' : 'down'}
+            deltaTone={f.marginChangePts >= 0 ? 'up' : 'down'}
           />
-          <View className="flex-row gap-3">
-            <StatCard
-              label="Net margin"
-              // The API sends this unrounded (views_finance.py has no round()),
-              // so interpolating it read "60.604509130638846%".
-              value={formatPercent(f.netMarginPct)}
-              delta={
-                f.marginChangePts
-                  ? `${f.marginChangePts > 0 ? '+' : ''}${formatNumber(f.marginChangePts, { maximumFractionDigits: 1 })} pts`
-                  : undefined
-              }
-              deltaTone={f.marginChangePts >= 0 ? 'up' : 'down'}
-            />
-            <StatCard
-              label="Outstanding"
-              value={formatCurrencyCompact(f.outstanding)}
-              sub={f.dso ? `DSO ${formatNumber(f.dso, { maximumFractionDigits: 1 })}d` : undefined}
-            />
-          </View>
-        </View>
+          <StatCard
+            label="Outstanding"
+            value={formatCurrencyCompact(f.outstanding)}
+            // Whole days, like web's `Math.round(financeData.dso)` — the API
+            // sends this unrounded too, so without rounding it read "DSO 89.9d"
+            // instead of a clean day count.
+            sub={f.dso ? `DSO ${formatNumber(Math.round(f.dso))}d` : undefined}
+          />
+        </Animated.View>
 
-        {/* Utilisation heatmap */}
-        <Group label="Fleet utilisation · 28 days">
-          <View className="p-4">
-            <View className="mb-3.5 flex-row items-end justify-between">
-              <View>
-                <Mono className="text-fg" style={{ fontSize: 24, fontWeight: '600' }}>
-                  {data.totalVehicles
-                    ? Math.round((data.activeVehicles / data.totalVehicles) * 100)
-                    : 0}
-                  %
-                </Mono>
-                <Txt className="mt-0.5 text-caption text-muted">
-                  {data.activeVehicles} of {data.totalVehicles} vehicles active
-                </Txt>
-              </View>
-              <View className="items-end">
-                <Label className="text-faint">Active loads</Label>
-                <Mono className="text-accent" style={{ fontSize: 18, fontWeight: '600' }}>
-                  {data.activeLoads}
-                </Mono>
-              </View>
-            </View>
-            {[0, 1].map((row) => (
-              <View key={row} className={`flex-row gap-1 ${row === 0 ? 'mb-1' : ''}`}>
-                {data.heat.slice(row * 14, row * 14 + 14).map((v, i) => (
-                  <View
-                    key={i}
-                    className="flex-1 rounded-xs"
-                    style={{ aspectRatio: 1, backgroundColor: heatColor(v) }}
-                  />
-                ))}
-              </View>
-            ))}
-          </View>
-        </Group>
+        {/* Fleet utilisation heatmap */}
+        <Animated.View entering={SECTION_REVEAL[3]}>
+          <UtilisationCard
+            activeVehicles={data.activeVehicles}
+            totalVehicles={data.totalVehicles}
+            activeLoads={data.activeLoads}
+            heat={data.heat}
+          />
+        </Animated.View>
 
         {/* Recent quotes */}
-        <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'quotes' })}>
-          Recent quotes
-        </SectionLabel>
-        <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
-          {recentQuotes.length === 0 ? (
-            <Txt className="p-4 text-center text-caption text-faint">No quotes yet</Txt>
-          ) : (
-            recentQuotes.map((q, i) => (
-              <ListRow
-                key={q.id}
-                leading={<Avatar name={q.customer} size={38} />}
-                title={q.customer}
-                subtitle={[q.origin, ...q.stopLabels, q.destination].join(' → ')}
-                trailing={
-                  <View className="items-end gap-1">
-                    <Mono className="text-callout font-semibold text-fg">
-                      {formatCurrency(q.amount, { maximumFractionDigits: 0 })}
-                    </Mono>
-                    <View>
-                      <StatusPill status={q.status} />
-                    </View>
-                  </View>
-                }
-                onPress={() => openQuote(q.id, q.raw)}
-                last={i === recentQuotes.length - 1}
-              />
-            ))
-          )}
-        </View>
+        <Animated.View entering={SECTION_REVEAL[4]}>
+          <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'quotes' })}>
+            Recent quotes
+          </SectionLabel>
+          <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
+            {recentQuotes.length === 0 ? (
+              <Txt className="p-4 text-center text-caption text-faint">No quotes yet</Txt>
+            ) : (
+              recentQuotes.map((q, i) => (
+                <Animated.View key={q.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                  <ListRow
+                    leading={<Avatar name={q.customer} size={38} />}
+                    title={q.customer}
+                    subtitle={[q.origin, ...q.stopLabels, q.destination].join(' → ')}
+                    trailing={
+                      <View className="items-end gap-1">
+                        <Mono className="text-callout font-semibold text-fg">
+                          {formatCurrency(q.amount, { maximumFractionDigits: 0 })}
+                        </Mono>
+                        <View>
+                          <StatusPill status={q.status} />
+                        </View>
+                      </View>
+                    }
+                    onPress={() => openQuote(q.id, q.raw)}
+                    last={i === recentQuotes.length - 1}
+                  />
+                </Animated.View>
+              ))
+            )}
+          </View>
+        </Animated.View>
 
         {/* Recent bookings */}
-        <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'orders' })}>
-          Recent bookings
-        </SectionLabel>
-        <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
-          {recentLoads.length === 0 ? (
-            <Txt className="p-4 text-center text-caption text-faint">No bookings yet</Txt>
-          ) : (
-            recentLoads.map((l, i) => (
-              <ListRow
-                key={l.id}
-                leading={<Icon name="truck" size={22} color={colors.muted} />}
-                title={l.loadNumber}
-                subtitle={l.customer}
-                trailing={
-                  <View className="items-end gap-1">
-                    <Mono className="text-caption text-muted">
-                      {l.pickupState} → {l.deliveryState}
-                    </Mono>
-                    <StatusPill status={l.status} />
-                  </View>
-                }
-                onPress={() => openLoad(l.id, l.raw)}
-                last={i === recentLoads.length - 1}
-              />
-            ))
-          )}
-        </View>
+        <Animated.View entering={SECTION_REVEAL[5]}>
+          <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'orders' })}>
+            Recent bookings
+          </SectionLabel>
+          <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
+            {recentLoads.length === 0 ? (
+              <Txt className="p-4 text-center text-caption text-faint">No bookings yet</Txt>
+            ) : (
+              recentLoads.map((l, i) => (
+                <Animated.View key={l.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                  <ListRow
+                    leading={<Icon name="truck" size={22} color={colors.muted} />}
+                    title={l.loadNumber}
+                    subtitle={l.customer}
+                    trailing={
+                      <View className="items-end gap-1">
+                        <Mono className="text-caption text-muted">
+                          {l.pickupState} → {l.deliveryState}
+                        </Mono>
+                        <StatusPill status={l.status} />
+                      </View>
+                    }
+                    onPress={() => openLoad(l.id, l.raw)}
+                    last={i === recentLoads.length - 1}
+                  />
+                </Animated.View>
+              ))
+            )}
+          </View>
+        </Animated.View>
 
         {/* Quick actions */}
-        <SectionLabel>Quick actions</SectionLabel>
-        <View className="flex-row flex-wrap gap-2.5">
-          <View className="flex-1" style={{ minWidth: '46%' }}>
-            <Button label="New quote" icon="plus" onPress={() => createQuote()} fullWidth />
+        <Animated.View entering={SECTION_REVEAL[6]}>
+          <SectionLabel>Quick actions</SectionLabel>
+          <View className="flex-row flex-wrap gap-2.5">
+            <View className="flex-1" style={{ minWidth: '46%' }}>
+              <Button label="New quote" icon="plus" onPress={() => createQuote()} fullWidth />
+            </View>
+            {/* Finance shortcuts only exist when the role actually has that tab —
+                navigating to a screen the navigator never registered is a no-op. */}
+            {hasFinance && (
+              <>
+                <View className="flex-1" style={{ minWidth: '46%' }}>
+                  <Button
+                    label="Invoices"
+                    icon="receipt"
+                    variant="secondary"
+                    onPress={() => goTab('Finance', { tab: 'invoices' })}
+                    fullWidth
+                  />
+                </View>
+                <View className="flex-1" style={{ minWidth: '46%' }}>
+                  <Button
+                    label="Add expense"
+                    icon="dollar"
+                    variant="secondary"
+                    onPress={() => goTab('Finance', { tab: 'expenses' })}
+                    fullWidth
+                  />
+                </View>
+                <View className="flex-1" style={{ minWidth: '46%' }}>
+                  <Button
+                    label="Reports"
+                    icon="chart"
+                    variant="secondary"
+                    onPress={() => goTab('Finance', { tab: 'reports' })}
+                    fullWidth
+                  />
+                </View>
+              </>
+            )}
           </View>
-          {/* Finance shortcuts only exist when the role actually has that tab —
-              navigating to a screen the navigator never registered is a no-op. */}
-          {hasFinance && (
-            <>
-              <View className="flex-1" style={{ minWidth: '46%' }}>
-                <Button
-                  label="Invoices"
-                  icon="receipt"
-                  variant="secondary"
-                  onPress={() => goTab('Finance', { tab: 'invoices' })}
-                  fullWidth
-                />
-              </View>
-              <View className="flex-1" style={{ minWidth: '46%' }}>
-                <Button
-                  label="Add expense"
-                  icon="dollar"
-                  variant="secondary"
-                  onPress={() => goTab('Finance', { tab: 'expenses' })}
-                  fullWidth
-                />
-              </View>
-              <View className="flex-1" style={{ minWidth: '46%' }}>
-                <Button
-                  label="Reports"
-                  icon="chart"
-                  variant="secondary"
-                  onPress={() => goTab('Finance', { tab: 'reports' })}
-                  fullWidth
-                />
-              </View>
-            </>
-          )}
-        </View>
+        </Animated.View>
       </Screen>
       {/* Long-press for the voice/AI entry point — undiscoverable alone, so
           it's a second path onto the same screen, not the only one. */}

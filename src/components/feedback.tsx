@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import { View, Modal } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { Screen, EmptyState, Button, Txt, LogoMark } from '@/components/ui';
 
 // ── Shimmer block ──────────────────────────────────────────────────────────
@@ -49,7 +55,10 @@ export function ListSkeleton({ rows = 5 }: { rows?: number }) {
   return (
     <View className="gap-2.5">
       {Array.from({ length: rows }).map((_, i) => (
-        <View key={i} className="flex-row items-center gap-3 rounded-xs border border-line bg-surface p-4">
+        <View
+          key={i}
+          className="flex-row items-center gap-3 rounded-xs border border-line bg-surface p-4"
+        >
           <Skeleton width={38} height={38} radius={100} />
           <View className="flex-1 gap-2">
             <Skeleton width="60%" height={14} />
@@ -63,6 +72,9 @@ export function ListSkeleton({ rows = 5 }: { rows?: number }) {
 }
 
 // ── Home skeleton ───────────────────────────────────────────────────────────
+// Mirrors HomeScreen's shape block-for-block: header, command bar, the
+// revenue hero (now taller — value + sparkline + footer stats), the bento
+// pair, the utilisation card, then the two recent-activity lists.
 export function HomeSkeleton() {
   return (
     <Screen>
@@ -70,8 +82,8 @@ export function HomeSkeleton() {
         <Skeleton width={90} height={11} className="mb-2" />
         <Skeleton width={160} height={26} />
       </View>
-      <Skeleton height={64} className="mb-5" />
-      <Skeleton height={92} className="mb-3" />
+      <Skeleton height={72} className="mb-5" />
+      <Skeleton height={240} className="mb-5" />
       <View className="mb-5 flex-row gap-3">
         <Skeleton width="48%" height={92} />
         <Skeleton width="48%" height={92} />
@@ -113,7 +125,11 @@ function BreathingLogo() {
   const t = useSharedValue(0);
   const spin = useSharedValue(0);
   useEffect(() => {
-    t.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
+    t.value = withRepeat(
+      withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true,
+    );
     spin.value = withRepeat(withTiming(1, { duration: 4000, easing: Easing.linear }), -1, false);
   }, [t, spin]);
   const style = useAnimatedStyle(() => ({

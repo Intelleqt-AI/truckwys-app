@@ -1,16 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { View, Alert, Pressable, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import {
-  Screen,
-  Group,
-  Avatar,
-  Txt,
-  Mono,
-  Label,
-  Icon,
-  type IconName,
-} from '@/components/ui';
+import Constants from 'expo-constants';
+import { Screen, Group, Avatar, Txt, Mono, Label, Icon, type IconName } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { useRole, canSeeInsights, canSeeFinanceFeatures, canAccessSettings } from '@/lib/access';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
@@ -42,6 +34,7 @@ const SECTIONS: MenuItem[][] = [
 ];
 
 export function MoreScreen() {
+  const version = Constants.expoConfig?.version ?? '1.0.0';
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const { nav } = useAppNavigation();
@@ -94,9 +87,15 @@ export function MoreScreen() {
     <Screen topInset={false} contentClassName="pt-3">
       {/* Profile header */}
       <View className="mb-5 flex-row items-center gap-3 rounded-xs border border-line bg-surface p-4">
-        <Avatar name={user?.name ?? user?.email} uri={mediaUrl(user?.avatar as string | undefined)} size={48} />
+        <Avatar
+          name={user?.name ?? user?.email}
+          uri={mediaUrl(user?.avatar as string | undefined)}
+          size={48}
+        />
         <View className="flex-1">
-          <Txt className="text-heading font-semibold text-fg">{user?.name ?? user?.email ?? 'Operator'}</Txt>
+          <Txt className="text-heading font-semibold text-fg">
+            {user?.name ?? user?.email ?? 'Operator'}
+          </Txt>
           <Mono className="mt-0.5 text-caption text-muted">{user?.email}</Mono>
         </View>
         {user?.role && <Label className="text-accent">{user.role}</Label>}
@@ -143,7 +142,7 @@ export function MoreScreen() {
         </Pressable>
       </Group>
 
-      <Mono className="mt-2 text-center text-micro text-faint">Truckwys · v1.0.0</Mono>
+      <Mono className="mt-2 text-center text-micro text-faint">Truckwys · v{version}</Mono>
     </Screen>
   );
 }

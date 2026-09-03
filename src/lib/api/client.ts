@@ -103,9 +103,9 @@ api.interceptors.response.use(
 
 // ---- Thin helpers (mirror the web API surface) ----
 
-export const fetchData = async <T = unknown>(url: string): Promise<T> => {
+export const fetchData = async <T = unknown>(url: string, signal?: AbortSignal): Promise<T> => {
   if (!url) throw new Error('No URL provided');
-  const res = await api.get<T>(url);
+  const res = await api.get<T>(url, signal ? { signal } : undefined);
   return res.data;
 };
 

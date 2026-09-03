@@ -33,10 +33,10 @@ export function UtilisationCard({
 
   return (
     <Group label="Fleet utilisation · 28 days">
-      <View className="p-4">
+      <View className="p-3.5">
         <View className="mb-3.5 flex-row items-end justify-between">
           <View>
-            <Mono className="text-fg" style={{ fontSize: 24, fontWeight: '600' }}>
+            <Mono className="text-fg" style={{ fontSize: 20, fontWeight: '600' }}>
               {totalVehicles ? Math.round((activeVehicles / totalVehicles) * 100) : 0}%
             </Mono>
             <Txt className="mt-0.5 text-caption text-muted">
@@ -60,13 +60,13 @@ export function UtilisationCard({
                 // A fixed height, not aspectRatio: 1 — square cells across 7
                 // narrow columns made each row ~45-50px tall (4 rows ≈
                 // 180-200px), noticeably taller than the original 2-row grid.
-                style={{ height: 14, backgroundColor: heatColor(v) }}
+                style={{ height: 11, backgroundColor: heatColor(v) }}
               />
             ))}
           </View>
         ))}
         {totalVehicles > 0 && (
-          <Txt className="mt-3 text-caption text-faint">
+          <Txt className="mt-2.5 text-caption text-faint">
             {available} vehicle{available === 1 ? '' : 's'} available
           </Txt>
         )}

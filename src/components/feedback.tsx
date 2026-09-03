@@ -71,10 +71,34 @@ export function ListSkeleton({ rows = 5 }: { rows?: number }) {
   );
 }
 
-// ── Home skeleton ───────────────────────────────────────────────────────────
-// Mirrors HomeScreen's shape block-for-block: header, command bar, the
-// revenue hero (now taller — value + sparkline + footer stats), the bento
-// pair, the utilisation card, then the two recent-activity lists.
+// ── Home section skeletons ──────────────────────────────────────────────────
+// HomeScreen used to gate its entire body behind one skeleton until all six
+// of its underlying requests returned. It now renders each section as soon as
+// its own data lands, so these are exported individually — one per section —
+// rather than as a single fixed block.
+export function CommandBarSkeleton() {
+  return <Skeleton height={72} className="mb-5" />;
+}
+
+export function HeroSkeleton() {
+  return <Skeleton height={190} className="mb-5" />;
+}
+
+export function BentoSkeleton() {
+  return (
+    <View className="mb-5 flex-row gap-3">
+      <Skeleton width="48%" height={78} />
+      <Skeleton width="48%" height={78} />
+    </View>
+  );
+}
+
+export function UtilisationSkeleton() {
+  return <Skeleton height={160} className="mb-5" />;
+}
+
+// Mirrors the shape above, block-for-block, for anywhere that still wants the
+// whole thing as one unit.
 export function HomeSkeleton() {
   return (
     <Screen>
@@ -82,15 +106,25 @@ export function HomeSkeleton() {
         <Skeleton width={90} height={11} className="mb-2" />
         <Skeleton width={160} height={26} />
       </View>
-      <Skeleton height={72} className="mb-5" />
-      <Skeleton height={240} className="mb-5" />
-      <View className="mb-5 flex-row gap-3">
-        <Skeleton width="48%" height={92} />
-        <Skeleton width="48%" height={92} />
-      </View>
-      <Skeleton height={180} className="mb-5" />
+      <CommandBarSkeleton />
+      <HeroSkeleton />
+      <BentoSkeleton />
+      <UtilisationSkeleton />
       <ListSkeleton rows={3} />
     </Screen>
+  );
+}
+
+// ── Inline section error ────────────────────────────────────────────────────
+// A single dead endpoint used to blank the whole Home dashboard via one
+// shared isLoading/isError gate. This is the section-scoped equivalent —
+// small enough to sit inside a still-otherwise-working screen.
+export function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <View className="mb-5 items-center gap-2 rounded-xs border border-line bg-surface p-4">
+      <Txt className="text-center text-caption text-faint">{message}</Txt>
+      <Button label="Retry" variant="secondary" icon="route" onPress={onRetry} />
+    </View>
   );
 }
 

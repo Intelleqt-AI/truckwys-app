@@ -32,9 +32,15 @@ export function HeroRevenue({
 
   const last = finance.monthlyTrend.at(-1);
   const fuelRatioPct = last && last.revenue > 0 ? (last.expenses / last.revenue) * 100 : undefined;
+  // Web's chart-card footer hardcodes this to "↑ improving" regardless of the
+  // actual number — derived from the real revenue delta here instead, so a
+  // month that's actually declining can't get told it's improving.
+  const trendUp = finance.revenueChangePct >= 0;
+
+  const monthLabels = finance.monthlyTrend.slice(-4).map((p) => p.month?.slice(5) ?? '');
 
   const content = (
-    <Card className="overflow-hidden p-5">
+    <Card className="overflow-hidden p-3.5">
       <LinearGradient
         pointerEvents="none"
         colors={[colors.glow, 'transparent']}
@@ -42,19 +48,23 @@ export function HeroRevenue({
       />
       <View className="flex-row items-start justify-between">
         <Label className="text-faint">Total revenue</Label>
-        {delta && (
-          <Mono className="text-micro" style={{ color: deltaColor }}>
-            {delta}
-          </Mono>
-        )}
+        {/* Web's separate "Revenue vs Fuel Cost" chart-card title, folded up
+            here (see file header) — top-right, stacked above the delta,
+            smaller than the rest of this row so it reads as a caption. */}
+        <View className="items-end">
+          {/* <Mono className="text-nano text-faint">Revenue vs Fuel Cost (Last 30 Days)</Mono> */}
+          {delta && (
+            <Mono className="mt-0.5 text-micro" style={{ color: deltaColor }}>
+              {delta}
+            </Mono>
+          )}
+        </View>
       </View>
-      <Mono className="mt-2 tracking-display text-fg" style={{ fontSize: 32, fontWeight: '600' }}>
+      <Mono className="mt-1.5 tracking-display text-fg" style={{ fontSize: 22, fontWeight: '600' }}>
         {formatCurrency(revenue, { maximumFractionDigits: 0 })}
       </Mono>
-      {/* Legend — same swatches/labels as web's chart-card header (top-right
-          of the chart), so the two lines below are identifiable without
-          having to guess which is revenue and which is fuel cost. */}
-      <View className="mt-3 flex-row items-center justify-end gap-3">
+
+      <View className="mt-1.5 flex-row items-center justify-end gap-3">
         <View className="flex-row items-center gap-1.5">
           <View style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: colors.accent }} />
           <Mono className="text-nano text-muted">Revenue</Mono>
@@ -66,24 +76,43 @@ export function HeroRevenue({
           <Mono className="text-nano text-muted">Fuel cost</Mono>
         </View>
       </View>
-      <View className="mt-1.5">
-        <Sparkline points={finance.monthlyTrend} />
+      <View className="mt-1">
+        <Sparkline points={finance.monthlyTrend} height={56} />
       </View>
-      {/* Net margin is deliberately not repeated here — it's the bento tile
-          right below this card, and showing the same number twice on one
-          screen read as a mistake, not confirmation. Web's chart-card footer
-          also had a hardcoded "Trend ↑ improving" stat; that's fake, not
-          derived, so it's omitted rather than copied. */}
-      {fuelRatioPct != null && (
-        <View className="mt-4 flex-row border-t border-line pt-3.5">
-          <Mono className="text-caption text-muted">
+      {monthLabels.some(Boolean) && (
+        <View className="mt-1 flex-row justify-between">
+          {monthLabels.map((m, i) => (
+            <Mono key={i} className="text-nano text-faint">
+              {m}
+            </Mono>
+          ))}
+        </View>
+      )}
+
+      <View className="mt-2 flex-row flex-wrap gap-1.5 border-t border-line pt-2">
+        <Mono className="text-nano text-faint">Revenue vs Fuel Cost (Last 30 Days)</Mono>
+        {/* <Mono className="text-micro text-muted">
+          Net Margin{' '}
+          <Mono className="text-micro text-accent">{formatPercent(finance.netMarginPct)}</Mono>
+        </Mono> */}
+        {fuelRatioPct != null && (
+          <Mono className="text-nano text-muted">
             Fuel/Rev ratio{' '}
-            <Mono className="text-caption text-warning">
+            <Mono className="text-nano text-warning">
               {formatNumber(fuelRatioPct, { maximumFractionDigits: 0 })}%
             </Mono>
           </Mono>
-        </View>
-      )}
+        )}
+        <Mono className="text-nano text-muted">
+          Trend{' '}
+          <Mono
+            className="text-nano"
+            style={{ color: trendUp ? statusHues.success : statusHues.danger }}
+          >
+            {trendUp ? '↑ improving' : '↓ declining'}
+          </Mono>
+        </Mono>
+      </View>
     </Card>
   );
 

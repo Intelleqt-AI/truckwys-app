@@ -12,31 +12,65 @@ export const useLoads = () => useInfiniteList('loads', 'loads/', normalizeLoad);
 // Neither `quotes/` nor `loads/` exposes a way to answer this in one request —
 // the Quote payload carries no load_id (Load.quote is a FK the other way, not
 // on Quote's serializer) and LoadViewSet has no ?quote= filter — so this pages
-// through every load once, in the background, decoupled from the paginated
-// (partially-loaded) Orders/History lists so the lookup stays correct
-// regardless of how far the user has scrolled those.
+// through every load once, decoupled from the paginated (partially-loaded)
+// Orders/History lists so the lookup stays correct regardless of how far the
+// user has scrolled those.
+//
+// Only worth doing at all when a visible quote is ACCEPTED/APPROVED and
+// doesn't already carry its own load_id — the → Booking button is the only
+// consumer. `enabled` below skips the whole thing otherwise (most companies,
+// most of the time), and when it does run, page 1's `count` lets every
+// remaining page fire in parallel instead of chaining N sequential round
+// trips — the previous `for(;;)` loop meant 500 loads = 25 requests back to
+// back, each pulling the full load payload just to read two fields.
+type PageEnvelope<T> = { count: number; next: string | null; results: T[] } | T[];
+
+const MAX_LOOKUP_PAGES = 25; // 500 loads at DRF's PAGE_SIZE=20 — generous ceiling, not a real limit for any tenant seen so far.
+
 interface LoadQuoteRef {
   id: string | number;
   quote: string | number | null;
 }
 
-export function useLoadsForConvertLookup() {
-  return useQuery<LoadQuoteRef[]>({
+function toRef(r: Record<string, unknown>): LoadQuoteRef {
+  return {
+    id: pick(r, ['id', 'pk']) as string | number,
+    quote: (pick(r, ['quote']) as string | number) ?? null,
+  };
+}
+
+/** Any visible quote that's accepted but doesn't already know its load id. */
+export function needsLoadsLookup(quotes: { status: string; raw: Record<string, unknown> }[]): boolean {
+  return quotes.some(
+    (q) =>
+      ['ACCEPTED', 'APPROVED'].includes(q.status) &&
+      pick(q.raw, ['load_id', 'load', 'booking_id']) == null,
+  );
+}
+
+export function useLoadsForConvertLookup(enabled: boolean) {
+  return useQuery<Map<string, string | number>>({
     queryKey: ['loads-lookup'],
-    queryFn: async () => {
-      const out: LoadQuoteRef[] = [];
-      let page = 1;
-      for (;;) {
-        const res = await fetchData<
-          { count: number; next: string | null; results: Record<string, unknown>[] } | Record<string, unknown>[]
-        >(`loads/?page=${page}`);
-        const rows = asArray<Record<string, unknown>>(res);
-        for (const r of rows) {
-          out.push({ id: pick(r, ['id', 'pk']) as string | number, quote: (pick(r, ['quote']) as string | number) ?? null });
-        }
-        if (Array.isArray(res) || !res.next) break;
-        page += 1;
+    enabled,
+    // The mapping barely moves — a quote converts once — so there's no need
+    // to re-walk the table on every 5-minute-stale remount.
+    staleTime: 10 * 60 * 1000,
+    queryFn: async ({ signal }) => {
+      const first = await fetchData<PageEnvelope<Record<string, unknown>>>('loads/?page=1', signal);
+      const refs = asArray<Record<string, unknown>>(first).map(toRef);
+
+      if (!Array.isArray(first) && first.next) {
+        const totalPages = Math.min(MAX_LOOKUP_PAGES, Math.ceil(first.count / 20));
+        const rest = await Promise.all(
+          Array.from({ length: totalPages - 1 }, (_, i) =>
+            fetchData<PageEnvelope<Record<string, unknown>>>(`loads/?page=${i + 2}`, signal),
+          ),
+        );
+        for (const page of rest) refs.push(...asArray<Record<string, unknown>>(page).map(toRef));
       }
+
+      const out = new Map<string, string | number>();
+      for (const r of refs) if (r.quote != null) out.set(String(r.quote), r.id);
       return out;
     },
   });

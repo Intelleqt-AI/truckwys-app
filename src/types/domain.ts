@@ -76,6 +76,8 @@ export const normalizeLoad = (l: Raw): LoadLite => ({
 export interface TrendPoint {
   revenue: number;
   expenses: number;
+  /** "YYYY-MM", for the chart's month-tick labels (web slices to "MM"). */
+  month?: string;
 }
 
 export interface FinanceSummary {
@@ -98,6 +100,7 @@ export const normalizeFinance = (f: Raw | null | undefined): FinanceSummary => (
   monthlyTrend: asArray<Raw>(pick(f ?? {}, ['monthly_trend'])).map((m) => ({
     revenue: num(pick(m, ['revenue'])),
     expenses: num(pick(m, ['expenses'])),
+    month: str(pick(m, ['month'])) || undefined,
   })),
 });
 

@@ -22,7 +22,7 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useQuotes, useLoads, useLoadsForConvertLookup } from './api';
+import { useQuotes, useLoads, useLoadsForConvertLookup, needsLoadsLookup } from './api';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
@@ -54,6 +54,7 @@ export function BookingsScreen({ route }: Props) {
         ]}
         value={tab}
         onChange={setTab}
+        lazy
       >
         <QuotesTab />
         <OrdersTab />
@@ -91,7 +92,9 @@ function QuotesTab() {
     hasMore,
     isFetching,
   } = useQuotes();
-  const { data: loads } = useLoadsForConvertLookup();
+  // Only worth walking the loads table when a visible quote is accepted but
+  // doesn't already carry its own load id — see needsLoadsLookup.
+  const { data: loadByQuote } = useLoadsForConvertLookup(needsLoadsLookup(data));
   const { refreshing, onRefresh } = useManualRefresh(refresh);
   const [filter, setFilter] = useState('ALL');
   const [q, setQ] = useState('');
@@ -147,7 +150,7 @@ function QuotesTab() {
         const convertedLoadId =
           convertedFromQuote != null
             ? (convertedFromQuote as string | number)
-            : ((loads ?? []).find((l) => String(l.quote ?? '') === String(item.id))?.id ?? null);
+            : (loadByQuote?.get(String(item.id)) ?? null);
         return (
           <QuoteCard
             quote={item}

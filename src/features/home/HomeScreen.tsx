@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, TouchableOpacity, Platform } from 'react-native';
 import Animated from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -18,7 +18,14 @@ import {
   Banner,
   Fab,
 } from '@/components/ui';
-import { HomeSkeleton, ErrorState } from '@/components/feedback';
+import {
+  CommandBarSkeleton,
+  HeroSkeleton,
+  BentoSkeleton,
+  UtilisationSkeleton,
+  ListSkeleton,
+  SectionError,
+} from '@/components/feedback';
 import { useOverview } from './api';
 import { useUnreadCount } from '@/features/more/api';
 import { CommandBar } from './CommandBar';
@@ -70,8 +77,18 @@ function subscriptionBannerMessage(
 }
 
 export function HomeScreen() {
-  const { data, isLoading, isError, refetch } = useOverview();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
+  // Three independent queries (see home/api.ts) instead of one fused query —
+  // each section below renders as soon as its own data lands rather than
+  // waiting on all six original endpoints behind a single skeleton.
+  const { finance, jobs, fleet } = useOverview();
+  const refetchAll = useCallback(
+    () => Promise.all([finance.refetch(), jobs.refetch(), fleet.refetch()]),
+    // refetch identity is stable per query (React Query), same as
+    // useManualRefresh's own refetch dependency below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [finance.refetch, jobs.refetch, fleet.refetch],
+  );
+  const { refreshing, onRefresh } = useManualRefresh(refetchAll);
   const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } =
     useAppNavigation();
   const { data: unread } = useUnreadCount();
@@ -84,13 +101,13 @@ export function HomeScreen() {
   const { daysRemaining, expiresAt } = useGracePeriod(subscription.status, subscription.visible);
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
-  if (isLoading) return <HomeSkeleton />;
-  if (isError || !data)
-    return <ErrorState onRetry={refetch} message="Couldn't load your overview." />;
-
-  const { finance: f } = data;
-  const recentQuotes = data.quotes.slice(0, 4);
-  const recentLoads = data.loads.slice(0, 4);
+  const f = finance.data?.finance;
+  // CommandBar and UtilisationCard each need one field from both jobs and
+  // fleet, so they wait on the slower of those two — still just two of the
+  // six original endpoints, not all of them.
+  const commandReady = !!jobs.data && !!fleet.data;
+  const recentQuotes = jobs.data?.quotes.slice(0, 4) ?? [];
+  const recentLoads = jobs.data?.loads.slice(0, 4) ?? [];
 
   return (
     <View className="flex-1">
@@ -143,7 +160,7 @@ export function HomeScreen() {
             together don't fit one line, and the screen's own name should be
             the first thing read, not a timestamp. Always South Africa's
             time, like web's live clock — never the device's own timezone. */}
-        <View className="mb-5">
+        <View className="-mt-2 mb-5">
           <HeaderClock />
         </View>
 
@@ -159,47 +176,85 @@ export function HomeScreen() {
 
         {/* Command bar — live clock + the three operational stats */}
         <Animated.View entering={SECTION_REVEAL[0]}>
-          <CommandBar data={data} hasFleet={hasFleet} goTab={goTab} openMore={openMore} />
+          {commandReady ? (
+            <CommandBar
+              data={{
+                activeLoads: jobs.data!.activeLoads,
+                activeVehicles: fleet.data!.activeVehicles,
+                totalVehicles: fleet.data!.totalVehicles,
+                advancesPending: fleet.data!.advancesPending,
+              }}
+              hasFleet={hasFleet}
+              goTab={goTab}
+              openMore={openMore}
+            />
+          ) : (jobs.isError && !jobs.data) || (fleet.isError && !fleet.data) ? (
+            <SectionError message="Couldn't load your stats." onRetry={refetchAll} />
+          ) : (
+            <CommandBarSkeleton />
+          )}
         </Animated.View>
 
         {/* Hero — total revenue + the revenue-vs-fuel sparkline */}
-        <Animated.View entering={SECTION_REVEAL[1]} className="mb-5">
-          <HeroRevenue
-            finance={f}
-            onPress={hasFinance ? () => goTab('Finance', { tab: 'reports' }) : undefined}
-          />
+        <Animated.View entering={SECTION_REVEAL[1]}>
+          {f ? (
+            <View className="mb-5">
+              <HeroRevenue
+                finance={f}
+                onPress={hasFinance ? () => goTab('Finance', { tab: 'reports' }) : undefined}
+              />
+            </View>
+          ) : finance.isError ? (
+            <SectionError message="Couldn't load revenue." onRetry={() => finance.refetch()} />
+          ) : (
+            <HeroSkeleton />
+          )}
         </Animated.View>
 
         {/* Bento pair — net margin / outstanding */}
-        <Animated.View entering={SECTION_REVEAL[2]} className="mb-5 flex-row gap-3">
-          <StatCard
-            label="Net margin"
-            value={formatPercent(f.netMarginPct)}
-            delta={
-              f.marginChangePts
-                ? `${f.marginChangePts > 0 ? '+' : ''}${formatNumber(f.marginChangePts, { maximumFractionDigits: 1 })} pts`
-                : undefined
-            }
-            deltaTone={f.marginChangePts >= 0 ? 'up' : 'down'}
-          />
-          <StatCard
-            label="Outstanding"
-            value={formatCurrencyCompact(f.outstanding)}
-            // Whole days, like web's `Math.round(financeData.dso)` — the API
-            // sends this unrounded too, so without rounding it read "DSO 89.9d"
-            // instead of a clean day count.
-            sub={f.dso ? `DSO ${formatNumber(Math.round(f.dso))}d` : undefined}
-          />
+        <Animated.View entering={SECTION_REVEAL[2]}>
+          {f ? (
+            <View className="mb-5 flex-row gap-3">
+              <StatCard
+                compact
+                label="Net margin"
+                value={formatPercent(f.netMarginPct)}
+                delta={
+                  f.marginChangePts
+                    ? `${f.marginChangePts > 0 ? '+' : ''}${formatNumber(f.marginChangePts, { maximumFractionDigits: 1 })} pts`
+                    : undefined
+                }
+                deltaTone={f.marginChangePts >= 0 ? 'up' : 'down'}
+              />
+              <StatCard
+                compact
+                label="Outstanding"
+                value={formatCurrencyCompact(f.outstanding)}
+                // Whole days, like web's `Math.round(financeData.dso)` — the
+                // API sends this unrounded too, so without rounding it read
+                // "DSO 89.9d" instead of a clean day count.
+                sub={f.dso ? `DSO ${formatNumber(Math.round(f.dso))}d` : undefined}
+              />
+            </View>
+          ) : (
+            <BentoSkeleton />
+          )}
         </Animated.View>
 
         {/* Fleet utilisation heatmap */}
         <Animated.View entering={SECTION_REVEAL[3]}>
-          <UtilisationCard
-            activeVehicles={data.activeVehicles}
-            totalVehicles={data.totalVehicles}
-            activeLoads={data.activeLoads}
-            heat={data.heat}
-          />
+          {commandReady ? (
+            <UtilisationCard
+              activeVehicles={fleet.data!.activeVehicles}
+              totalVehicles={fleet.data!.totalVehicles}
+              activeLoads={jobs.data!.activeLoads}
+              heat={jobs.data!.heat}
+            />
+          ) : (jobs.isError && !jobs.data) || (fleet.isError && !fleet.data) ? (
+            <SectionError message="Couldn't load fleet utilisation." onRetry={refetchAll} />
+          ) : (
+            <UtilisationSkeleton />
+          )}
         </Animated.View>
 
         {/* Recent quotes */}
@@ -207,33 +262,41 @@ export function HomeScreen() {
           <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'quotes' })}>
             Recent quotes
           </SectionLabel>
-          <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
-            {recentQuotes.length === 0 ? (
-              <Txt className="p-4 text-center text-caption text-faint">No quotes yet</Txt>
-            ) : (
-              recentQuotes.map((q, i) => (
-                <Animated.View key={q.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
-                  <ListRow
-                    leading={<Avatar name={q.customer} size={38} />}
-                    title={q.customer}
-                    subtitle={[q.origin, ...q.stopLabels, q.destination].join(' → ')}
-                    trailing={
-                      <View className="items-end gap-1">
-                        <Mono className="text-callout font-semibold text-fg">
-                          {formatCurrency(q.amount, { maximumFractionDigits: 0 })}
-                        </Mono>
-                        <View>
-                          <StatusPill status={q.status} />
+          {!jobs.data && jobs.isError ? (
+            <SectionError message="Couldn't load recent quotes." onRetry={() => jobs.refetch()} />
+          ) : !jobs.data ? (
+            <View className="mb-5">
+              <ListSkeleton rows={3} />
+            </View>
+          ) : (
+            <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
+              {recentQuotes.length === 0 ? (
+                <Txt className="p-4 text-center text-caption text-faint">No quotes yet</Txt>
+              ) : (
+                recentQuotes.map((q, i) => (
+                  <Animated.View key={q.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                    <ListRow
+                      leading={<Avatar name={q.customer} size={38} />}
+                      title={q.customer}
+                      subtitle={[q.origin, ...q.stopLabels, q.destination].join(' → ')}
+                      trailing={
+                        <View className="items-end gap-1">
+                          <Mono className="text-callout font-semibold text-fg">
+                            {formatCurrency(q.amount, { maximumFractionDigits: 0 })}
+                          </Mono>
+                          <View>
+                            <StatusPill status={q.status} />
+                          </View>
                         </View>
-                      </View>
-                    }
-                    onPress={() => openQuote(q.id, q.raw)}
-                    last={i === recentQuotes.length - 1}
-                  />
-                </Animated.View>
-              ))
-            )}
-          </View>
+                      }
+                      onPress={() => openQuote(q.id, q.raw)}
+                      last={i === recentQuotes.length - 1}
+                    />
+                  </Animated.View>
+                ))
+              )}
+            </View>
+          )}
         </Animated.View>
 
         {/* Recent bookings */}
@@ -241,31 +304,39 @@ export function HomeScreen() {
           <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'orders' })}>
             Recent bookings
           </SectionLabel>
-          <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
-            {recentLoads.length === 0 ? (
-              <Txt className="p-4 text-center text-caption text-faint">No bookings yet</Txt>
-            ) : (
-              recentLoads.map((l, i) => (
-                <Animated.View key={l.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
-                  <ListRow
-                    leading={<Icon name="truck" size={22} color={colors.muted} />}
-                    title={l.loadNumber}
-                    subtitle={l.customer}
-                    trailing={
-                      <View className="items-end gap-1">
-                        <Mono className="text-caption text-muted">
-                          {l.pickupState} → {l.deliveryState}
-                        </Mono>
-                        <StatusPill status={l.status} />
-                      </View>
-                    }
-                    onPress={() => openLoad(l.id, l.raw)}
-                    last={i === recentLoads.length - 1}
-                  />
-                </Animated.View>
-              ))
-            )}
-          </View>
+          {!jobs.data && jobs.isError ? (
+            <SectionError message="Couldn't load recent bookings." onRetry={() => jobs.refetch()} />
+          ) : !jobs.data ? (
+            <View className="mb-5">
+              <ListSkeleton rows={3} />
+            </View>
+          ) : (
+            <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
+              {recentLoads.length === 0 ? (
+                <Txt className="p-4 text-center text-caption text-faint">No bookings yet</Txt>
+              ) : (
+                recentLoads.map((l, i) => (
+                  <Animated.View key={l.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                    <ListRow
+                      leading={<Icon name="truck" size={22} color={colors.muted} />}
+                      title={l.loadNumber}
+                      subtitle={l.customer}
+                      trailing={
+                        <View className="items-end gap-1">
+                          <Mono className="text-caption text-muted">
+                            {l.pickupState} → {l.deliveryState}
+                          </Mono>
+                          <StatusPill status={l.status} />
+                        </View>
+                      }
+                      onPress={() => openLoad(l.id, l.raw)}
+                      last={i === recentLoads.length - 1}
+                    />
+                  </Animated.View>
+                ))
+              )}
+            </View>
+          )}
         </Animated.View>
 
         {/* Quick actions */}

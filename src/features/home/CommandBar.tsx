@@ -1,9 +1,17 @@
 import { View } from 'react-native';
 import { Mono, Label, PressScale } from '@/components/ui';
-import type { OverviewData } from './api';
 import type { useAppNavigation } from '@/navigation/useAppNavigation';
 
 type Stat = { label: string; value: string; onPress?: () => void; warn: boolean };
+
+// Sourced from two independent overview queries (jobs' activeLoads, fleet's
+// activeVehicles/totalVehicles/advancesPending) — see home/api.ts.
+export interface CommandBarData {
+  activeLoads: number;
+  activeVehicles: number;
+  totalVehicles: number;
+  advancesPending: number;
+}
 
 // ── CommandBar: the three operational stats (Active loads / Fleet ready /
 // Advances pending), web parity for copy. Equal-width (`flex-1`) columns —
@@ -17,7 +25,7 @@ export function CommandBar({
   goTab,
   openMore,
 }: {
-  data: Pick<OverviewData, 'activeLoads' | 'activeVehicles' | 'totalVehicles' | 'advancesPending'>;
+  data: CommandBarData;
   hasFleet: boolean;
   goTab: ReturnType<typeof useAppNavigation>['goTab'];
   openMore: () => void;

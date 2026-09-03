@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Pressable, Platform } from 'react-native';
+import { View, Pressable, Platform, ActivityIndicator } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,7 +22,7 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useQuotes, useLoads } from './api';
+import { useQuotes, useLoads, useLoadsForConvertLookup } from './api';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
@@ -82,9 +82,17 @@ const QUOTE_FILTERS = [
 ];
 
 function QuotesTab() {
-  const { data, isLoading, isError, refetch } = useQuotes();
-  const { data: loads } = useLoads();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
+  const {
+    combinedData: data,
+    isLoading,
+    isError,
+    refresh,
+    loadMore,
+    hasMore,
+    isFetching,
+  } = useQuotes();
+  const { data: loads } = useLoadsForConvertLookup();
+  const { refreshing, onRefresh } = useManualRefresh(refresh);
   const [filter, setFilter] = useState('ALL');
   const [q, setQ] = useState('');
   const { openQuote, openAssign, openLoad } = useAppNavigation();
@@ -95,7 +103,7 @@ function QuotesTab() {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load quotes." />;
+  if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load quotes." />;
 
   const list = data.filter(
     (item) =>
@@ -110,6 +118,8 @@ function QuotesTab() {
       showsVerticalScrollIndicator={false}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      onEndReached={() => hasMore && !isFetching && loadMore()}
+      onEndReachedThreshold={0.5}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ItemSeparatorComponent={() => <View className="h-2.5" />}
       ListHeaderComponent={
@@ -119,6 +129,13 @@ function QuotesTab() {
           </View>
           <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
         </View>
+      }
+      ListFooterComponent={
+        isFetching ? (
+          <View className="py-4">
+            <ActivityIndicator />
+          </View>
+        ) : null
       }
       ListEmptyComponent={
         <EmptyState icon="file" title="No quotes" body="No quotes match this filter." />
@@ -130,9 +147,7 @@ function QuotesTab() {
         const convertedLoadId =
           convertedFromQuote != null
             ? (convertedFromQuote as string | number)
-            : ((loads ?? []).find(
-                (l) => String(pick(l.raw ?? {}, ['quote']) ?? '') === String(item.id),
-              )?.id ?? null);
+            : ((loads ?? []).find((l) => String(l.quote ?? '') === String(item.id))?.id ?? null);
         return (
           <QuoteCard
             quote={item}
@@ -216,8 +231,16 @@ function QuoteCard({
 
 // ── Orders / History (loads) ───────────────────────────────────────────────
 function OrdersTab() {
-  const { data, isLoading, isError, refetch } = useLoads();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
+  const {
+    combinedData: data,
+    isLoading,
+    isError,
+    refresh,
+    loadMore,
+    hasMore,
+    isFetching,
+  } = useLoads();
+  const { refreshing, onRefresh } = useManualRefresh(refresh);
   const [filter, setFilter] = useState('ALL');
   const { openLoad } = useAppNavigation();
 
@@ -227,7 +250,7 @@ function OrdersTab() {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load orders." />;
+  if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load orders." />;
 
   const active = data.filter((l) => ACTIVE.includes(l.status));
   const list = active.filter((l) => filter === 'ALL' || l.status === filter);
@@ -239,6 +262,8 @@ function OrdersTab() {
       onOpen={openLoad}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      onEndReached={() => hasMore && !isFetching && loadMore()}
+      isFetchingMore={isFetching}
       stats={[
         { label: 'Active orders', value: String(active.length) },
         {
@@ -262,8 +287,16 @@ function OrdersTab() {
 }
 
 function HistoryTab() {
-  const { data, isLoading, isError, refetch } = useLoads();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
+  const {
+    combinedData: data,
+    isLoading,
+    isError,
+    refresh,
+    loadMore,
+    hasMore,
+    isFetching,
+  } = useLoads();
+  const { refreshing, onRefresh } = useManualRefresh(refresh);
   const [filter, setFilter] = useState('ALL');
   const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();
@@ -274,7 +307,7 @@ function HistoryTab() {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load history." />;
+  if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load history." />;
 
   const done = data.filter((l) => DONE.includes(l.status));
   const list = done.filter(
@@ -290,6 +323,8 @@ function HistoryTab() {
       onOpen={openLoad}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      onEndReached={() => hasMore && !isFetching && loadMore()}
+      isFetchingMore={isFetching}
       search={{ value: q, onChange: setQ }}
       stats={[
         { label: 'Completed', value: String(done.filter((l) => l.status !== 'CANCELLED').length) },
@@ -319,6 +354,8 @@ function LoadList({
   search,
   onRefresh,
   refreshing,
+  onEndReached,
+  isFetchingMore,
 }: {
   list: LoadLite[];
   onOpen: (id: string | number, preview?: Record<string, unknown>) => void;
@@ -329,6 +366,8 @@ function LoadList({
   search?: { value: string; onChange: (v: string) => void };
   onRefresh?: () => void;
   refreshing?: boolean;
+  onEndReached?: () => void;
+  isFetchingMore?: boolean;
 }) {
   return (
     <FlashList
@@ -336,8 +375,17 @@ function LoadList({
       keyExtractor={(l) => String(l.id)}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      onEndReached={onEndReached}
+      onEndReachedThreshold={0.5}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
+      ListFooterComponent={
+        isFetchingMore ? (
+          <View className="py-4">
+            <ActivityIndicator />
+          </View>
+        ) : null
+      }
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3 flex-row flex-wrap justify-between">

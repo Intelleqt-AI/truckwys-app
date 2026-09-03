@@ -1,20 +1,44 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
-import { normalizeQuote, normalizeLoad, type QuoteLite, type LoadLite } from '@/types/domain';
+import { useInfiniteList } from '@/lib/api/useInfiniteList';
+import { normalizeQuote, normalizeLoad } from '@/types/domain';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
-export function useQuotes() {
-  return useQuery<QuoteLite[]>({
-    queryKey: ['quotes'],
-    queryFn: async () => asArray(await fetchData('quotes/')).map(normalizeQuote),
-  });
+export const useQuotes = () => useInfiniteList('quotes', 'quotes/', normalizeQuote);
+export const useLoads = () => useInfiniteList('loads', 'loads/', normalizeLoad);
+
+// Background-only: resolves which load (if any) a quote converted to.
+// Neither `quotes/` nor `loads/` exposes a way to answer this in one request —
+// the Quote payload carries no load_id (Load.quote is a FK the other way, not
+// on Quote's serializer) and LoadViewSet has no ?quote= filter — so this pages
+// through every load once, in the background, decoupled from the paginated
+// (partially-loaded) Orders/History lists so the lookup stays correct
+// regardless of how far the user has scrolled those.
+interface LoadQuoteRef {
+  id: string | number;
+  quote: string | number | null;
 }
 
-export function useLoads() {
-  return useQuery<LoadLite[]>({
-    queryKey: ['loads'],
-    queryFn: async () => asArray(await fetchData('loads/')).map(normalizeLoad),
+export function useLoadsForConvertLookup() {
+  return useQuery<LoadQuoteRef[]>({
+    queryKey: ['loads-lookup'],
+    queryFn: async () => {
+      const out: LoadQuoteRef[] = [];
+      let page = 1;
+      for (;;) {
+        const res = await fetchData<
+          { count: number; next: string | null; results: Record<string, unknown>[] } | Record<string, unknown>[]
+        >(`loads/?page=${page}`);
+        const rows = asArray<Record<string, unknown>>(res);
+        for (const r of rows) {
+          out.push({ id: pick(r, ['id', 'pk']) as string | number, quote: (pick(r, ['quote']) as string | number) ?? null });
+        }
+        if (Array.isArray(res) || !res.next) break;
+        page += 1;
+      }
+      return out;
+    },
   });
 }
 

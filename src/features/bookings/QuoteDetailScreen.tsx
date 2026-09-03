@@ -25,7 +25,7 @@ import { RouteMap } from '@/components/RouteMap';
 import {
   useQuote,
   sendQuote,
-  useLoads,
+  useLoadsForConvertLookup,
   recordQuoteOutcome,
   deleteQuote,
   downloadQuotePdf,
@@ -78,7 +78,7 @@ const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toL
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
   const subscription = useSubscription();
-  const { data: loads } = useLoads();
+  const { data: loads } = useLoadsForConvertLookup();
   const { id, preview } = route.params;
   const { data, isError, refetch } = useQuote(id, preview);
   const qc = useQueryClient();
@@ -193,8 +193,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const convertedLoadId =
     convertedFromQuote != null
       ? (convertedFromQuote as string | number)
-      : ((loads ?? []).find((l) => String(pick(l.raw ?? {}, ['quote']) ?? '') === String(id))?.id ??
-        null);
+      : ((loads ?? []).find((l) => String(l.quote ?? '') === String(id))?.id ?? null);
   const outcome = str(pick(q, ['outcome'])).toLowerCase();
   // Web only offers won/lost capture while the quote is still open.
   const canRecordOutcome = !outcome && ['SENT', 'DRAFT'].includes(status);

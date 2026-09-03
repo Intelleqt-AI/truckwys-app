@@ -44,10 +44,10 @@ const RISK = ['risk-scores', 'customer-risk'];
 const ASSIGN = ['drivers-available-for-assign', 'vehicles-available-for-assign'];
 
 const MAP: Record<DomainEvent, string[]> = {
-  quote: ['quotes', 'quote', 'customer-quotes', 'quote-model-stats', ...DASHBOARD, ...FINANCE, ...RISK],
+  quote: ['quotes', 'quote', 'customer-quotes', 'quote-model-stats', 'loads-lookup', ...DASHBOARD, ...FINANCE, ...RISK],
   // A load's status drives revenue recognition, fleet utilisation and the
   // Home heatmap; delivering one can also auto-raise an invoice.
-  load: ['loads', 'load', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
+  load: ['loads', 'load', 'loads-lookup', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
   invoice: ['invoices', 'invoice', 'invoice-payments', 'customer', ...DASHBOARD, ...FINANCE, ...RISK],
   payment: ['invoices', 'invoice', 'invoice-payments', ...DASHBOARD, ...FINANCE, ...RISK],
   expense: ['expenses', 'vehicle-loads', ...DASHBOARD, ...FINANCE],
@@ -65,7 +65,7 @@ const MAP: Record<DomainEvent, string[]> = {
   'vehicle-type': ['vehicle-types', ...ASSIGN],
   // The agent acts on real records on the server and doesn't report which, so
   // this one is deliberately broad.
-  copilot: ['agent-proposals', 'quotes', 'quote', 'loads', 'load', 'invoices', 'invoice', ...DASHBOARD, ...FINANCE],
+  copilot: ['agent-proposals', 'quotes', 'quote', 'loads', 'load', 'loads-lookup', 'invoices', 'invoice', ...DASHBOARD, ...FINANCE],
 };
 
 /**

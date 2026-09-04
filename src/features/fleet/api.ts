@@ -7,6 +7,7 @@ import {
   type VehicleLite,
   type DriverLite,
 } from '@/types/domain';
+import { normalizeVehicleType } from '@/features/bookings/api';
 
 export function useVehicles() {
   return useQuery<VehicleLite[]>({
@@ -71,7 +72,12 @@ export interface VehicleTypeOption {
 export function useVehicleTypesList() {
   return useQuery<VehicleTypeOption[]>({
     queryKey: ['vehicle-types'],
-    queryFn: async () => asArray<VehicleTypeOption>(await fetchData('vehicle-types/')),
+    // Shares its query key with bookings/api.ts's useVehicleTypes and
+    // SettingsScreen's own vehicle-types query — see normalizeVehicleType's
+    // comment. Must use the same normalizer, or whichever of the three
+    // queryFns actually fetches leaves the other two reading raw decimal
+    // strings ("14.00") out of the shared cache entry.
+    queryFn: async () => asArray(await fetchData('vehicle-types/')).map(normalizeVehicleType),
   });
 }
 

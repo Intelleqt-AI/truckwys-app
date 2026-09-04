@@ -44,7 +44,11 @@ const RISK = ['risk-scores', 'customer-risk'];
 const ASSIGN = ['drivers-available-for-assign', 'vehicles-available-for-assign'];
 
 const MAP: Record<DomainEvent, string[]> = {
-  quote: ['quotes', 'quote', 'customer-quotes', 'quote-model-stats', ...DASHBOARD, ...FINANCE, ...RISK],
+  // 'loads-lookup' only maps a quote to the load it converted to, so it only
+  // needs to move when a quote does — putting it on every 'load'/'copilot'
+  // event as well used to restart the (now-gated, still non-trivial) walk of
+  // the loads table on almost any write in the app.
+  quote: ['quotes', 'quote', 'customer-quotes', 'quote-model-stats', 'loads-lookup', ...DASHBOARD, ...FINANCE, ...RISK],
   // A load's status drives revenue recognition, fleet utilisation and the
   // Home heatmap; delivering one can also auto-raise an invoice.
   load: ['loads', 'load', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],

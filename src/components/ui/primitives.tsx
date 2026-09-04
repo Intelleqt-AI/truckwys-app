@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   View,
   Pressable,
+  TouchableOpacity,
   ActivityIndicator,
   type ViewProps,
   type PressableProps,
@@ -13,6 +14,7 @@ import Animated, {
   withRepeat,
   withTiming,
   withSequence,
+  withSpring,
 } from 'react-native-reanimated';
 import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
@@ -403,5 +405,64 @@ export function ConfidenceTag({ value }: { value: number }) {
         {formatConfidence(value)}
       </Mono>
     </View>
+  );
+}
+
+// ── PressScale: spring scale-down on press, the house tap feel ────────────
+// Same press-in/release spring TabBar.tsx already uses for tab items, so a
+// tappable module (Home's hero, bento tiles, list rows) feels consistent
+// with the rest of the app instead of each screen inventing its own cue.
+// Built on TouchableOpacity, with its own opacity feedback turned off
+// (activeOpacity=1) so the scale is the only cue — no double feedback.
+//
+// `className` sizes/borders the OUTER Animated.View only — that's the element
+// actually participating in a caller's flex layout (e.g. `flex-1` plus
+// `border-l` for a divided column in a flex-row). It used to be duplicated
+// onto the inner TouchableOpacity too, which rendered a caller's border
+// TWICE — once on each box's edge, ~1px apart (the outer box's own border
+// width) — a doubled/misaligned divider rather than one clean hairline.
+//
+// `center`, not `className`, controls the inner TouchableOpacity: it applies
+// `items-center justify-center` for a cell whose children (e.g. a stacked
+// label+value) should sit centred rather than stretch edge-to-edge. Leaving
+// the outer box's own alignItems at its flexbox default (`stretch`) is what
+// makes the *touch target* still fill the whole column even when `center` is
+// set — only the inner content is centred, not the box that contains it.
+export function PressScale({
+  onPress,
+  onLongPress,
+  disabled,
+  className = '',
+  center = false,
+  children,
+}: {
+  onPress?: () => void;
+  onLongPress?: () => void;
+  disabled?: boolean;
+  className?: string;
+  center?: boolean;
+  children: ReactNode;
+}) {
+  const scale = useSharedValue(1);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  return (
+    <Animated.View style={style} className={className}>
+      <TouchableOpacity
+        activeOpacity={1}
+        disabled={disabled}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        onPressIn={() => {
+          scale.value = withSpring(0.97, { damping: 18, stiffness: 320, mass: 0.5 });
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, { damping: 15, stiffness: 200, mass: 0.6 });
+        }}
+        className={center ? 'items-center justify-center' : undefined}
+      >
+        {children}
+      </TouchableOpacity>
+    </Animated.View>
   );
 }

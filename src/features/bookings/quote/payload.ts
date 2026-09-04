@@ -83,7 +83,7 @@ export function buildQuotePayload(
     fuel_surcharge: costs.fuelCost,
     toll_charges: costs.tollCost,
     driver_allowance: costs.driver,
-    additional_charges: costs.weightSurcharge + costs.crossBorderCost + serviceCharge,
+    additional_charges: costs.crossBorderCost + serviceCharge,
     total_amount: costs.total,
     margin_percentage: costs.marginPct,
     notes,

@@ -33,19 +33,26 @@ export function StatCard({
   delta,
   deltaTone = 'neutral',
   sub,
+  compact = false,
 }: {
   label: string;
   value: string;
   delta?: string;
   deltaTone?: 'up' | 'down' | 'neutral';
   sub?: string;
+  // Smaller padding/value size — opt-in so the 17+ other screens using this
+  // component are unaffected. Home's bento pair is the only current user.
+  compact?: boolean;
 }) {
   const deltaColor =
     deltaTone === 'up' ? statusHues.success : deltaTone === 'down' ? statusHues.danger : undefined;
   return (
-    <Card className="flex-1 p-4">
+    <Card className={`flex-1 ${compact ? 'p-3' : 'p-4'}`}>
       <Label className="text-faint">{label}</Label>
-      <Mono className="mt-2 text-fg tracking-display" style={{ fontSize: 24, fontWeight: '600' }}>
+      <Mono
+        className={`${compact ? 'mt-1.5' : 'mt-2'} text-fg tracking-display`}
+        style={{ fontSize: compact ? 20 : 24, fontWeight: '600' }}
+      >
         {value}
       </Mono>
       <View className="mt-1 flex-row items-center gap-2">

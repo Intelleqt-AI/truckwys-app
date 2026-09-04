@@ -133,6 +133,14 @@ const SNAP = SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`);
 // recomputed per render.
 const SECTION_ORDER: SectionId[] = ['client', 'route', 'load', 'schedule', 'price'];
 
+// A load can't legally exceed the selected vehicle's rated capacity by more
+// than the Road Traffic Act's 5% tolerance — past that it's an offence, and
+// well past it it's not a chargeable "surcharge", it's a different kind of
+// job (abnormal-load permits, escorts, route approval). No legitimate price
+// bump exists below capacity, so this blocks the quote instead of pricing it
+// — mirrors web's QuoteBuilder.tsx weightBlockedMessage.
+const OVERLOAD_TOLERANCE = 1.05;
+
 export function CreateQuoteScreen({ route, navigation }: Props) {
   const prefill = route.params?.prefill as Record<string, unknown> | undefined;
   const editId = route.params?.quoteId;
@@ -595,7 +603,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     return (vtypes ?? [])
       .filter((v) => (v.available_vehicle_count ?? 1) > 0)
       .filter((v) => (seen.has(v.name) ? false : (seen.add(v.name), true)))
-      .map((v) => ({ label: v.name, value: v.name }));
+      .map((v) => ({
+        label: v.capacity ? `${v.name} (${v.capacity}t)` : v.name,
+        value: v.name,
+      }));
   }, [vtypes]);
 
   // Same four prerequisites as before, but as a list rather than a boolean, so
@@ -606,6 +617,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [customerId, vehicleType, pickup, delivery, weightKg],
   );
   const ready = priceGaps.length === 0;
+
+  // Overload guard (mirrors web's QuoteBuilder.tsx) — a plain function of the
+  // selected type's capacity and the entered weight, both already in tonnes,
+  // so this needs no debounce/effect like the route calc below.
+  const vehicleCapacityTons =
+    Number((vtypes ?? []).find((v) => v.name === vehicleType)?.capacity) || 0;
+  const weightBlockedMessage = useMemo(() => {
+    if (!vehicleCapacityTons || weightTons == null || weightTons <= vehicleCapacityTons)
+      return '';
+    if (weightTons <= vehicleCapacityTons * OVERLOAD_TOLERANCE) {
+      return `${weightTons}t exceeds the ${vehicleType}'s rated capacity of ${vehicleCapacityTons}t. Even within the legal 5% tolerance this is an overload — pick a larger vehicle or reduce the weight.`;
+    }
+    return `${weightTons}t is well beyond the ${vehicleType}'s ${vehicleCapacityTons}t capacity. This needs an abnormal-load permit (route approval, possibly escorts) and can't be priced through a standard quote.`;
+  }, [vehicleCapacityTons, weightTons, vehicleType]);
 
   // Route calc (debounced 500ms, stale-guarded).
   useEffect(() => {
@@ -1200,6 +1225,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!pickup?.lat || !delivery?.lat)
       return toast.error('Set a collection point and drop-off first');
     if (routeBlockedMessage) return toast.error(routeBlockedMessage);
+    if (weightBlockedMessage) return toast.error(weightBlockedMessage);
     if (send) {
       if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
       const missing: string[] = [];
@@ -1362,14 +1388,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const priceEmptyMessage = useMemo(() => {
     if (priceGaps.length) return `Add ${formatGapList(priceGaps)} to see pricing.`;
     if (routeBlockedMessage) return "This route isn't allowed, so there's nothing to price.";
+    if (weightBlockedMessage) return "This load is overloaded, so there's nothing to price.";
     if (routeBusy) return 'Working out the price…';
     return 'No route found between these points yet.';
-  }, [priceGaps, routeBlockedMessage, routeBusy]);
+  }, [priceGaps, routeBlockedMessage, weightBlockedMessage, routeBusy]);
 
   // Footer status strip, by precedence: a suspended subscription (not
   // tappable — nothing here fixes it) → a route refused by company policy
-  // (tap to review) → outstanding field issues once a Send has been
-  // attempted (tap to jump to the first one) → nothing, the resting state.
+  // (tap to review) → a load overloaded for the selected vehicle (tap to
+  // review) → outstanding field issues once a Send has been attempted (tap
+  // to jump to the first one) → nothing, the resting state.
   const footerStrip = useMemo<FooterStrip | null>(() => {
     if (subscription.blocked) {
       return { tone: 'danger', message: subscription.notice ?? 'Subscription inactive' };
@@ -1379,6 +1407,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         tone: 'danger',
         message: 'Route not allowed — tap to review',
         onPress: () => jumpTo('route'),
+      };
+    }
+    if (weightBlockedMessage) {
+      return {
+        tone: 'danger',
+        // Short — this strip crops on longer messages (see QuoteFooterActions).
+        // The full explanation is in the Price section's danger card + toast.
+        message: 'Overloaded — tap to review',
+        onPress: () => jumpTo('load'),
       };
     }
     if (!submitAttempted) return null;
@@ -1398,6 +1435,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     subscription.blocked,
     subscription.notice,
     routeBlockedMessage,
+    weightBlockedMessage,
     submitAttempted,
     issues,
     jumpTo,
@@ -1422,8 +1460,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             calculating={routeBusy || aiBusy}
             strip={footerStrip}
             busy={busy}
-            saveDisabled={subscription.blocked}
-            sendDisabled={subscription.blocked || !!routeBlockedMessage}
+            saveDisabled={subscription.blocked || !!weightBlockedMessage}
+            sendDisabled={subscription.blocked || !!routeBlockedMessage || !!weightBlockedMessage}
             onSaveDraft={onSaveDraft}
             onSend={onSend}
           />
@@ -1444,6 +1482,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       busy,
       subscription.blocked,
       routeBlockedMessage,
+      weightBlockedMessage,
       onSaveDraft,
       onSend,
     ],
@@ -1773,7 +1812,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             </QuoteSection>
 
             <QuoteSection id="price" label="Price" onLayout={registerSectionY}>
-              {ready && !routeBlockedMessage && costs.total > 0 ? (
+              {/* A load past the selected vehicle's capacity replaces the whole
+              cost breakdown — same as web, there's no legitimate price to show. */}
+              {ready && !routeBlockedMessage && weightBlockedMessage ? (
+                <View className="rounded-xs border border-danger bg-danger-bg p-4">
+                  <Txt className="text-callout font-semibold text-danger">
+                    Overloaded for this vehicle
+                  </Txt>
+                  <Txt className="mt-1.5 text-sub text-muted">{weightBlockedMessage}</Txt>
+                </View>
+              ) : ready && !routeBlockedMessage && costs.total > 0 ? (
                 <>
                   <AiRecommendationCard
                     estimateLoading={estimateLoading}

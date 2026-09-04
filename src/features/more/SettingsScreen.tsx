@@ -65,6 +65,7 @@ import {
   type NotificationChannel,
   type NotificationPrefs,
 } from './api';
+import { normalizeVehicleType } from '@/features/bookings/api';
 import { formatCurrency, formatDate, formatRelativeTime, parseNum } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
@@ -392,7 +393,10 @@ function VehicleTypesSection() {
   const { nav } = useAppNavigation();
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['vehicle-types'],
-    queryFn: async () => asArray(await fetchData('vehicle-types/')),
+    // Shares its query key with bookings/api.ts's useVehicleTypes and
+    // fleet/api.ts's useVehicleTypesList — must normalize identically, see
+    // normalizeVehicleType's comment.
+    queryFn: async () => asArray(await fetchData('vehicle-types/')).map(normalizeVehicleType),
     retry: false,
   });
   // Memoised so `sorted`/`activeCount` below don't re-derive on every render
@@ -413,8 +417,8 @@ function VehicleTypesSection() {
   const sorted = useMemo(
     () =>
       [...list].sort((a, b) => {
-        const ra = a as Record<string, unknown>;
-        const rb = b as Record<string, unknown>;
+        const ra = a as unknown as Record<string, unknown>;
+        const rb = b as unknown as Record<string, unknown>;
         const activeA = pick(ra, ['active']) !== false;
         const activeB = pick(rb, ['active']) !== false;
         if (activeA !== activeB) return activeA ? -1 : 1;
@@ -423,7 +427,9 @@ function VehicleTypesSection() {
     [list],
   );
   const activeCount = useMemo(
-    () => list.filter((t) => pick(t as Record<string, unknown>, ['active']) !== false).length,
+    () =>
+      list.filter((t) => pick(t as unknown as Record<string, unknown>, ['active']) !== false)
+        .length,
     [list],
   );
 
@@ -536,12 +542,13 @@ function VehicleTypesSection() {
 
           <View>
             {sorted.map((t, i) => {
-              const r = t as Record<string, unknown>;
+              const r = t as unknown as Record<string, unknown>;
               const tid = String(pick(r, ['id']) ?? i);
               const cap = num(pick(r, ['capacity']));
               const rate = num(pick(r, ['base_rate']));
               const fuelType = str(pick(r, ['fuel_type']));
               const consumption = num(pick(r, ['fuel_consumption_l_per_100km']));
+              const sensitivity = num(pick(r, ['fuel_consumption_sensitivity_pct']));
               const description = str(pick(r, ['description']));
               const isActive = pick(r, ['active']) !== false;
               const isSel = selected.has(tid);
@@ -556,6 +563,7 @@ function VehicleTypesSection() {
                 rate ? `R ${rate}/km` : null,
                 fuelType || null,
                 consumption ? `${consumption} L/100km` : null,
+                consumption && sensitivity ? `+${sensitivity}%/t over capacity` : null,
               ]
                 .filter(Boolean)
                 .join(' · ');
@@ -1138,8 +1146,6 @@ function CompanySection() {
   const [baseRate, setBaseRate] = useState('');
   const [tollRate, setTollRate] = useState('');
   const [slaHours, setSlaHours] = useState('');
-  const [surchargeThreshold, setSurchargeThreshold] = useState('');
-  const [surchargePct, setSurchargePct] = useState('');
   // One default price per fuel type. Diesel keeps the legacy field name
   // (fuel_price_per_litre) because it predates the other three, and it's the
   // only one the column can't hold NULL for.
@@ -1181,8 +1187,6 @@ function CompanySection() {
     seedNum(['fuel_price_electric'], setFuelElectric);
     seedNum(['fuel_price_hybrid'], setFuelHybrid);
     seedNum(['default_sla_hours'], setSlaHours);
-    seedNum(['weight_surcharge_threshold_kg'], setSurchargeThreshold);
-    seedNum(['weight_surcharge_pct'], setSurchargePct);
     setAllowCrossBorder(pick(data, ['allow_cross_border']) === false ? 'no' : 'yes');
     const logo = str(pick(data, ['logo_url']));
     if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
@@ -1196,8 +1200,6 @@ function CompanySection() {
     // API, which is not a JSON number at all.
     const numericFields: [string, string][] = [
       ['Quote validity', validityDays],
-      ['Weight surcharge', surchargePct],
-      ['Weight surcharge threshold', surchargeThreshold],
       ['Base rate / km', baseRate],
       ['Toll rate / km', tollRate],
       ['Diesel price', fuelPrice],
@@ -1214,10 +1216,6 @@ function CompanySection() {
     const validityNum = parseNum(validityDays);
     if (validityNum != null && (validityNum < 1 || validityNum > 365)) {
       return toast.error('Quote validity must be between 1 and 365 days');
-    }
-    const surchargeNum = parseNum(surchargePct);
-    if (surchargeNum != null && (surchargeNum < 0 || surchargeNum > 100)) {
-      return toast.error('Weight surcharge must be between 0 and 100%');
     }
     for (const [label, v] of numericFields) {
       const n = parseNum(v);
@@ -1261,8 +1259,6 @@ function CompanySection() {
         fuel_price_electric: clearableNum(fuelElectric),
         fuel_price_hybrid: clearableNum(fuelHybrid),
         default_sla_hours: optionalNum(slaHours),
-        weight_surcharge_threshold_kg: optionalNum(surchargeThreshold),
-        weight_surcharge_pct: optionalNum(surchargePct),
       });
       invalidateFor(qc, 'company');
       toast.success();
@@ -1511,27 +1507,6 @@ function CompanySection() {
         value={slaHours}
         onChangeText={setSlaHours}
       />
-      <View className="flex-row gap-3">
-        <View className="flex-1">
-          <TextField
-            label="Surcharge over (kg)"
-            placeholder="e.g. 5 000"
-            keyboardType="number-pad"
-            numeric
-            value={surchargeThreshold}
-            onChangeText={setSurchargeThreshold}
-          />
-        </View>
-        <View className="flex-1">
-          <TextField
-            label="Surcharge (%)"
-            placeholder="e.g. 15"
-            keyboardType="decimal-pad"
-            value={surchargePct}
-            onChangeText={setSurchargePct}
-          />
-        </View>
-      </View>
 
       {/* ── Fuel price defaults ───────────────────────────────────────────── */}
       <View className="mt-1 flex-row items-center justify-between">

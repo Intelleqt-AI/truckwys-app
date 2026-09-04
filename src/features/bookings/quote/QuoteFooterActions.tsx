@@ -89,9 +89,12 @@ function QuoteFooterActionsImpl({
             message truncates instead.
             While !ready this half holds prose, not a number, so it goes back to
             flex-1 and yields: a shrink-0 parent is content-sized, which would
-            collapse the flex-1 hint inside it to zero width. */}
-        <View className={`flex-row items-center gap-2 ${ready ? 'shrink-0' : 'flex-1'}`}>
-          {ready ? (
+            collapse the flex-1 hint inside it to zero width.
+            While a strip is up, this half renders nothing at all (see below) —
+            content-sized still applies, so it collapses to ~0 and the row's
+            justify-between hands the strip the room it just gave up. */}
+        <View className={`flex-row items-center gap-2 ${!strip && !ready ? 'flex-1' : 'shrink-0'}`}>
+          {strip ? null : ready ? (
             <>
               <Mono
                 className="text-callout font-semibold text-accent"
@@ -100,10 +103,9 @@ function QuoteFooterActionsImpl({
               >
                 {formatCurrency(total)}
               </Mono>
-              {/* Dropped while a strip is up rather than allowed to compete with
-                  it: a blocking message outranks the margin, and dropping the
-                  chip returns ~80pt to the total. */}
-              {statsTrusted && total > 0 && !strip && (
+              {/* strip is already excluded by the branch above; the check here
+                  used to be `!strip` on its own but that's now redundant. */}
+              {statsTrusted && total > 0 && (
                 <Mono className="shrink-0 text-micro text-muted" maxFontSizeMultiplier={1.2}>
                   · {formatPercent(marginPct, 0)} margin
                 </Mono>
@@ -140,8 +142,12 @@ function QuoteFooterActionsImpl({
             accessibilityLabel={strip.message}
             className="min-w-0 flex-shrink flex-row items-center justify-end gap-1"
           >
+            {/* One notch smaller than every other footer label (text-nano, not
+                text-micro) — this strip carries the longest messages in the
+                footer (e.g. the overload warning), and a single 26px line
+                still has to fit them next to the chevron. */}
             <Mono
-              className={`shrink text-micro ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
+              className={`shrink text-nano ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
               numberOfLines={1}
               maxFontSizeMultiplier={1.2}
             >

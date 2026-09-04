@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { View, Pressable } from 'react-native';
 import { Group, DetailRow, Icon, Txt, Mono } from '@/components/ui';
-import { formatCurrency, formatNumber, formatPercent } from '@/lib/formatters';
+import { formatCurrency, formatNumber } from '@/lib/formatters';
 import type { CostBreakdown } from './costs';
 
 /**
@@ -35,7 +35,7 @@ function CostBreakdownCardImpl({
           squeezed out the amount it was explaining. */}
       <DetailRow
         label="Fuel"
-        hint={`${costs.consumption} L/100km @ ${formatCurrency(costs.fuelPrice)}`}
+        hint={`${costs.consumption.toFixed(1)} L/100km @ ${formatCurrency(costs.fuelPrice)}`}
         value={formatCurrency(costs.fuelCost)}
         boldValue
       />
@@ -76,14 +76,6 @@ function CostBreakdownCardImpl({
         />
       )}
       <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} boldValue />
-      {costs.weightSurcharge > 0 && (
-        <DetailRow
-          label="Weight surcharge"
-          hint={formatPercent(costs.surchargePct)}
-          value={formatCurrency(costs.weightSurcharge)}
-          boldValue
-        />
-      )}
       <DetailRow
         label="Base rate"
         hint={`${vehicleType || '—'} · ${formatCurrency(baseRateNum)}/km`}

@@ -122,6 +122,37 @@ export const formatDate = (
 export const formatDateTime = (date: string | Date): string =>
   formatDate(date, { hour: '2-digit', minute: '2-digit', hour12: false });
 
+// Truckwys operates in South Africa — currency is always ZAR regardless of
+// device region, and web's live clock (Overview.tsx's formatDate/formatTime)
+// always computes with an explicit Africa/Johannesburg timezone regardless of
+// what timezone the browser itself is in. These match that exactly, for the
+// same reason: "what time is it for the business" must never depend on which
+// timezone the viewing device happens to be set to (a phone in Bangladesh
+// showing its own local time here would just be showing the wrong time).
+const SAST = 'Africa/Johannesburg';
+
+export const formatOperationalDate = (date: Date): string =>
+  date.toLocaleDateString('en-ZA', {
+    timeZone: SAST,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
+// Seconds + a trailing "SAST" label, matching web's clock exactly. The
+// "SAST" is hardcoded rather than derived — this app is always South Africa
+// time, same reasoning as currency always being ZAR regardless of device
+// region, so it isn't worth threading through as a parameter.
+export const formatOperationalTime = (date: Date): string =>
+  `${date.toLocaleTimeString('en-ZA', {
+    timeZone: SAST,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })} SAST`;
+
 export const formatRelativeTime = (date: string | Date): string => {
   const dateObj = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(dateObj.getTime())) return '—';
@@ -142,7 +173,8 @@ export const getConfidenceLevel = (confidence: number): 'high' | 'medium' | 'low
 };
 
 export const formatCompactNumber = (value: number): string => {
-  if (value >= 1_000_000) return `${formatNumber(value / 1_000_000, { maximumFractionDigits: 1 })}M`;
+  if (value >= 1_000_000)
+    return `${formatNumber(value / 1_000_000, { maximumFractionDigits: 1 })}M`;
   if (value >= 1000) return `${formatNumber(value / 1000, { maximumFractionDigits: 1 })}K`;
   return formatNumber(value);
 };

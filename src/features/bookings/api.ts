@@ -1,20 +1,78 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
-import { asArray } from '@/lib/api/list';
-import { normalizeQuote, normalizeLoad, type QuoteLite, type LoadLite } from '@/types/domain';
+import { asArray, num, str, pick } from '@/lib/api/list';
+import { useInfiniteList } from '@/lib/api/useInfiniteList';
+import { normalizeQuote, normalizeLoad } from '@/types/domain';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
-export function useQuotes() {
-  return useQuery<QuoteLite[]>({
-    queryKey: ['quotes'],
-    queryFn: async () => asArray(await fetchData('quotes/')).map(normalizeQuote),
-  });
+export const useQuotes = () => useInfiniteList('quotes', 'quotes/', normalizeQuote);
+export const useLoads = () => useInfiniteList('loads', 'loads/', normalizeLoad);
+
+// Background-only: resolves which load (if any) a quote converted to.
+// Neither `quotes/` nor `loads/` exposes a way to answer this in one request —
+// the Quote payload carries no load_id (Load.quote is a FK the other way, not
+// on Quote's serializer) and LoadViewSet has no ?quote= filter — so this pages
+// through every load once, decoupled from the paginated (partially-loaded)
+// Orders/History lists so the lookup stays correct regardless of how far the
+// user has scrolled those.
+//
+// Only worth doing at all when a visible quote is ACCEPTED/APPROVED and
+// doesn't already carry its own load_id — the → Booking button is the only
+// consumer. `enabled` below skips the whole thing otherwise (most companies,
+// most of the time), and when it does run, page 1's `count` lets every
+// remaining page fire in parallel instead of chaining N sequential round
+// trips — the previous `for(;;)` loop meant 500 loads = 25 requests back to
+// back, each pulling the full load payload just to read two fields.
+type PageEnvelope<T> = { count: number; next: string | null; results: T[] } | T[];
+
+const MAX_LOOKUP_PAGES = 25; // 500 loads at DRF's PAGE_SIZE=20 — generous ceiling, not a real limit for any tenant seen so far.
+
+interface LoadQuoteRef {
+  id: string | number;
+  quote: string | number | null;
 }
 
-export function useLoads() {
-  return useQuery<LoadLite[]>({
-    queryKey: ['loads'],
-    queryFn: async () => asArray(await fetchData('loads/')).map(normalizeLoad),
+function toRef(r: Record<string, unknown>): LoadQuoteRef {
+  return {
+    id: pick(r, ['id', 'pk']) as string | number,
+    quote: (pick(r, ['quote']) as string | number) ?? null,
+  };
+}
+
+/** Any visible quote that's accepted but doesn't already know its load id. */
+export function needsLoadsLookup(quotes: { status: string; raw: Record<string, unknown> }[]): boolean {
+  return quotes.some(
+    (q) =>
+      ['ACCEPTED', 'APPROVED'].includes(q.status) &&
+      pick(q.raw, ['load_id', 'load', 'booking_id']) == null,
+  );
+}
+
+export function useLoadsForConvertLookup(enabled: boolean) {
+  return useQuery<Map<string, string | number>>({
+    queryKey: ['loads-lookup'],
+    enabled,
+    // The mapping barely moves — a quote converts once — so there's no need
+    // to re-walk the table on every 5-minute-stale remount.
+    staleTime: 10 * 60 * 1000,
+    queryFn: async ({ signal }) => {
+      const first = await fetchData<PageEnvelope<Record<string, unknown>>>('loads/?page=1', signal);
+      const refs = asArray<Record<string, unknown>>(first).map(toRef);
+
+      if (!Array.isArray(first) && first.next) {
+        const totalPages = Math.min(MAX_LOOKUP_PAGES, Math.ceil(first.count / 20));
+        const rest = await Promise.all(
+          Array.from({ length: totalPages - 1 }, (_, i) =>
+            fetchData<PageEnvelope<Record<string, unknown>>>(`loads/?page=${i + 2}`, signal),
+          ),
+        );
+        for (const page of rest) refs.push(...asArray<Record<string, unknown>>(page).map(toRef));
+      }
+
+      const out = new Map<string, string | number>();
+      for (const r of refs) if (r.quote != null) out.set(String(r.quote), r.id);
+      return out;
+    },
   });
 }
 
@@ -44,18 +102,50 @@ export function useLoad(id: string | number, preview?: Record<string, unknown>) 
 export interface VehicleType {
   id: number | string;
   name: string;
+  description?: string;
   fuel_consumption_l_per_100km?: number;
   /** Decides which of the company's per-fuel-type default prices a quote uses. */
   fuel_type?: string;
   base_rate?: number;
   available_vehicle_count?: number;
+  /** Reference tonnage for both the overload guard and the fuel formula's t_ref. */
   capacity?: number;
+  /** Extra fuel burned per tonne over `capacity`, as a percent (e.g. 2 = +2%/tonne). */
+  fuel_consumption_sensitivity_pct?: number;
+  active?: boolean;
+}
+
+// The backend serializes every decimal field as a JSON string ("38.00", not
+// 38) — DRF's COERCE_DECIMAL_TO_STRING default, which is unset in settings so
+// its own default (true) applies. `useVehicleTypesList` (fleet/api.ts) and the
+// inline vehicle-types query in more/SettingsScreen.tsx share this exact
+// ['vehicle-types'] query key, so all three must normalize identically —
+// whichever queryFn actually runs wins the shared cache entry for the other
+// two. Import this into both rather than re-parsing locally.
+export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
+  return {
+    id: (pick(r, ['id', 'pk']) as string | number) ?? '',
+    name: str(pick(r, ['name'])),
+    description: str(pick(r, ['description'])),
+    fuel_consumption_l_per_100km: num(pick(r, ['fuel_consumption_l_per_100km'])),
+    fuel_type: str(pick(r, ['fuel_type']), 'Diesel'),
+    base_rate: num(pick(r, ['base_rate'])),
+    available_vehicle_count:
+      pick(r, ['available_vehicle_count']) != null
+        ? num(pick(r, ['available_vehicle_count']))
+        : undefined,
+    capacity: num(pick(r, ['capacity'])),
+    fuel_consumption_sensitivity_pct: num(pick(r, ['fuel_consumption_sensitivity_pct'])),
+    // Absent (older records / no key at all) defaults to active, same as the
+    // backend's own `active = models.BooleanField(default=True)`.
+    active: pick(r, ['active']) !== false,
+  };
 }
 
 export function useVehicleTypes() {
   return useQuery<VehicleType[]>({
     queryKey: ['vehicle-types'],
-    queryFn: async () => asArray<VehicleType>(await fetchData('vehicle-types/')),
+    queryFn: async () => asArray(await fetchData('vehicle-types/')).map(normalizeVehicleType),
   });
 }
 

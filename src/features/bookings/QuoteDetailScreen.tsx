@@ -25,7 +25,8 @@ import { RouteMap } from '@/components/RouteMap';
 import {
   useQuote,
   sendQuote,
-  useLoads,
+  useLoadsForConvertLookup,
+  needsLoadsLookup,
   recordQuoteOutcome,
   deleteQuote,
   downloadQuotePdf,
@@ -78,9 +79,15 @@ const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toL
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
   const subscription = useSubscription();
-  const { data: loads } = useLoads();
   const { id, preview } = route.params;
   const { data, isError, refetch } = useQuote(id, preview);
+  const q = (data ?? {}) as Record<string, unknown>;
+  const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
+  // Only worth walking the loads table when this quote is accepted but
+  // doesn't already carry its own load id — see bookings/api.ts.
+  const { data: loadByQuote } = useLoadsForConvertLookup(
+    !!data && needsLoadsLookup([{ status, raw: q }]),
+  );
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
@@ -97,9 +104,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const [customReason, setCustomReason] = useState('');
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this quote." />;
-  const q = (data ?? {}) as Record<string, unknown>;
 
-  const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
   const total = num(pick(q, ['total_amount', 'price']));
   const marginPct = num(pick(q, ['margin_percentage', 'margin_percent', 'margin']));
   const confidence = str(pick(q, ['confidence']));
@@ -193,8 +198,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const convertedLoadId =
     convertedFromQuote != null
       ? (convertedFromQuote as string | number)
-      : ((loads ?? []).find((l) => String(pick(l.raw ?? {}, ['quote']) ?? '') === String(id))?.id ??
-        null);
+      : (loadByQuote?.get(String(id)) ?? null);
   const outcome = str(pick(q, ['outcome'])).toLowerCase();
   // Web only offers won/lost capture while the quote is still open.
   const canRecordOutcome = !outcome && ['SENT', 'DRAFT'].includes(status);

@@ -41,8 +41,6 @@ export interface CostBreakdown {
   tollFree: boolean;
   crossBorderCost: number;
   baseCost: number;
-  weightSurcharge: number;
-  surchargePct: number;
   driver: number;
   total: number;
   directCost: number;
@@ -70,10 +68,23 @@ export function computeCosts({
     num(pick(currentRoute, ['distance_km'])) || num(pick(routeData ?? {}, ['distance_km']));
   const legs = tripType === 'ROUND_TRIP' ? 2 : 1;
   const chargeDistance = distance * legs;
-  const surchargePctBase = num(pick(company ?? {}, ['weight_surcharge_pct'])) || 15;
 
   const selectedVt = (vtypes ?? []).find((v) => v.name === vehicleType);
-  const consumption = selectedVt?.fuel_consumption_l_per_100km ?? FUEL_FALLBACK[vehicleType] ?? 32;
+  // A heavier load genuinely burns more fuel — consumptionRef (the type's
+  // configured L/100km) is scaled by how far this quote's own weight sits
+  // from the type's reference tonnage (its "capacity"), compounding at
+  // `sensitivity`%/tonne (mirrors web's QuoteBuilder.tsx). Skipped entirely
+  // (falls back to the flat rate, pre-fix behavior) when the type has no
+  // capacity set — guessing a reference tonnage would be worse than no
+  // adjustment at all.
+  const consumptionRef =
+    Number(selectedVt?.fuel_consumption_l_per_100km) || FUEL_FALLBACK[vehicleType] || 32;
+  const refCapacityTons = Number(selectedVt?.capacity) || 0;
+  const sensitivity = (Number(selectedVt?.fuel_consumption_sensitivity_pct) || 2) / 100;
+  const consumption =
+    refCapacityTons > 0
+      ? consumptionRef * Math.pow(1 + sensitivity, weightKg / 1000 - refCapacityTons)
+      : consumptionRef;
   // Price the fuel this vehicle type actually burns, at the company's default
   // for that fuel — it used to always use the live national DIESEL price no
   // matter what was selected. Falls back to the diesel default when the
@@ -115,14 +126,10 @@ export function computeCosts({
       legs,
   );
 
-  const threshold = num(pick(company ?? {}, ['weight_surcharge_threshold_kg'])) || 5000;
   const baseCost = Math.round(chargeDistance * baseRateNum);
-  const weightSurcharge =
-    weightKg > threshold ? Math.round((baseCost * surchargePctBase) / 100) : 0;
   const driver = driverNum;
 
-  const total =
-    baseCost + fuelCost + tollCost + crossBorderCost + driver + weightSurcharge + serviceCharge;
+  const total = baseCost + fuelCost + tollCost + crossBorderCost + driver + serviceCharge;
   const directCost = total - serviceCharge;
   const marginPct = total > 0 ? Math.round(((total - directCost) / total) * 100) : 0;
   const duration =
@@ -141,8 +148,6 @@ export function computeCosts({
     tollFree,
     crossBorderCost,
     baseCost,
-    weightSurcharge,
-    surchargePct: surchargePctBase,
     driver,
     total,
     directCost,

@@ -35,4 +35,14 @@ export const authApi = {
 
   passwordResetConfirm: (email: string, code: string, new_password: string) =>
     postData({ url: 'auth/password-reset/confirm/', data: { email, code, new_password } }),
+
+  // Web -> app handoff: the web app (already signed in, e.g. right after a
+  // register or a login) mints a single-use, short-TTL code and hands it to
+  // the app via a truckwys://auth/callback?code=... link. This exchanges that
+  // code for a normal session — see useAuthHandoff.
+  exchangeHandoff: (code: string) =>
+    postData<{ token: string; user: AuthUser }>({
+      url: 'auth/handoff/exchange/',
+      data: { code },
+    }),
 };

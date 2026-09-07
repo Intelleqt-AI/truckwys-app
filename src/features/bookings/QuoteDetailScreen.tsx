@@ -45,6 +45,8 @@ import {
 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useDemo } from '@/hooks/useDemo';
+import { DEMO_EMAIL_SIMULATED } from '@/lib/demoStatus';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -79,6 +81,7 @@ const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toL
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
   const subscription = useSubscription();
+  const demo = useDemo();
   const { id, preview } = route.params;
   const { data, isError, refetch } = useQuote(id, preview);
   const q = (data ?? {}) as Record<string, unknown>;
@@ -230,7 +233,27 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   // quote is sent first, then handed off.
   const sendViaEmail = () => {
     setSendOpen(false);
-    void run(setSendBusy, () => sendQuote(id), 'Quote emailed to client');
+    setSendBusy(true);
+    sendQuote(id)
+      .then((res) => {
+        refresh();
+        // The backend still returns 200 in demo mode (send_to_customer skips
+        // the real email — core/services/quote_share.py) — fall back to
+        // demo.isDemo when the reason is absent, same as web's QuoteDetail.tsx.
+        const skippedForDemo =
+          (str(pick(res ?? {}, ['email_skipped_reason'])) || (demo.isDemo ? 'demo_mode' : '')) ===
+          'demo_mode';
+        if (skippedForDemo) {
+          // toast.success is silent by app-wide policy (src/lib/toast.tsx) —
+          // this caveat matters enough to actually show, so it goes through
+          // the one visible channel even though nothing failed.
+          toast.error(DEMO_EMAIL_SIMULATED);
+        } else {
+          toast.success('Quote emailed to client');
+        }
+      })
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Action failed'))
+      .finally(() => setSendBusy(false));
   };
 
   const sendViaWhatsApp = async () => {

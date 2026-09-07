@@ -38,6 +38,7 @@ import {
   TextField,
   DateField,
   Button,
+  Banner,
   Icon,
   Txt,
   Label,
@@ -73,6 +74,9 @@ import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useDemo } from '@/hooks/useDemo';
+import { DEMO_QUOTA_MESSAGE } from '@/lib/demoStatus';
+import { useAuthStore } from '@/stores/authStore';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import type { AppStackParamList } from '@/navigation/types';
 import {
@@ -163,6 +167,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // (PlanLimitsMiddleware), so gate it here too rather than letting the user
   // build a whole quote and take a 403 on save.
   const subscription = useSubscription();
+  // A demo session's one free quote is enforced server-side too
+  // (QuoteViewSet.create) — gate here for the same reason as subscription.
+  const demo = useDemo();
 
   const [customerId, setCustomerId] = useState('');
   const [vehicleType, setVehicleType] = useState('');
@@ -1226,6 +1233,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       return toast.error('Set a collection point and drop-off first');
     if (routeBlockedMessage) return toast.error(routeBlockedMessage);
     if (weightBlockedMessage) return toast.error(weightBlockedMessage);
+    // Only the initial CREATE consumes the session's one quote — patching an
+    // already-created quote (savedId.current set) doesn't hit this again.
+    if (demo.quotaExceeded && !savedId.current) return toast.error(DEMO_QUOTA_MESSAGE);
     if (send) {
       if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
       const missing: string[] = [];
@@ -1244,6 +1254,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         const created = await createQuote(payload);
         id = pick(created, ['id', 'pk']) as string | number;
         savedId.current = id;
+        // Demo's one-quote flag flips server-side on this same 201 — refresh
+        // now so a second attempt shows "Demo quota reached" proactively
+        // instead of only failing reactively on the next save's 403. Web
+        // relies on its tab-focus refetch for this; the app has no
+        // equivalent while the user stays on this screen.
+        if (demo.isDemo) void useAuthStore.getState().refreshUser();
       }
       let emailSent = false;
       if (send && id) {
@@ -1812,9 +1828,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             </QuoteSection>
 
             <QuoteSection id="price" label="Price" onLayout={registerSectionY}>
-              {/* A load past the selected vehicle's capacity replaces the whole
-              cost breakdown — same as web, there's no legitimate price to show. */}
-              {ready && !routeBlockedMessage && weightBlockedMessage ? (
+              {/* Demo's one-quote cap outranks route/weight/loading — same
+              precedence as web's QuoteBuilder.tsx (billingBlocked → not ready →
+              quotaExceeded → route → weight → results). Only applies to a
+              fresh quote — editing an already-saved one (savedId.current set)
+              never hits this. */}
+              {ready && demo.quotaExceeded && !savedId.current ? (
+                <Banner tone="danger" message={DEMO_QUOTA_MESSAGE} />
+              ) : /* A load past the selected vehicle's capacity replaces the whole
+              cost breakdown — same as web, there's no legitimate price to show. */
+              ready && !routeBlockedMessage && weightBlockedMessage ? (
                 <View className="rounded-xs border border-danger bg-danger-bg p-4">
                   <Txt className="text-callout font-semibold text-danger">
                     Overloaded for this vehicle

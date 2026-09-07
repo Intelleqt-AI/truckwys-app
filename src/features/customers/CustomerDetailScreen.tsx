@@ -21,6 +21,7 @@ import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CustomerDetail'>;
@@ -37,6 +38,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
   const { data: quotesData } = useCustomerQuotes(id);
   const { openQuote } = useAppNavigation();
   const qc = useQueryClient();
+  const demo = useDemo();
   const [busy, setBusy] = useState(false);
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this customer." />;
@@ -51,6 +53,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
   const terms = str(pick(c, ['payment_terms_default']), 'NET30').toUpperCase();
 
   const toggleActive = async () => {
+    if (demo.block()) return;
     setBusy(true);
     try {
       await updateCustomer(id, { status: active ? 'INACTIVE' : 'ACTIVE', is_active: !active });
@@ -63,7 +66,8 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
     }
   };
 
-  const confirmDelete = () =>
+  const confirmDelete = () => {
+    if (demo.block()) return;
     Alert.alert('Delete customer', `Permanently delete ${name}?`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -81,6 +85,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
         },
       },
     ]);
+  };
 
   return (
     <SheetScreen
@@ -89,7 +94,10 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
       actionIcon="edit"
-      onAction={() => navigation.navigate('AddCustomer', { id, preview: c })}
+      onAction={() => {
+        if (demo.block()) return;
+        navigation.navigate('AddCustomer', { id, preview: c });
+      }}
       footer={
         <View className="gap-2.5">
           <Button

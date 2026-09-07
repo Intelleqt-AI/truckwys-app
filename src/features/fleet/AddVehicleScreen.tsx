@@ -28,6 +28,7 @@ import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
 import { useErrorShake } from '@/hooks/useErrorShake';
+import { useDemo } from '@/hooks/useDemo';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import type { AppStackParamList } from '@/navigation/types';
@@ -184,6 +185,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   const preview = (route.params?.preview ?? {}) as Record<string, unknown>;
   const editing = editId != null;
   const qc = useQueryClient();
+  const demo = useDemo();
   const { data: types } = useVehicleTypesList();
   const { data: drivers } = useDrivers();
   // Re-fetches on edit instead of trusting `preview` forever — the previous
@@ -296,6 +298,8 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   });
 
   const onValid = async (v: VehicleFormValues) => {
+    // Vehicles are fixed seeded data in the demo company.
+    if (demo.block()) return;
     // Starts closing the keyboard the instant Save is tapped, rather than
     // leaving it up behind SaveSuccessOverlay.
     void dismissKeyboard();

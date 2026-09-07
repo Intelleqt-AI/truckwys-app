@@ -25,6 +25,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { status as statusHues } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'DriverDetail'>;
@@ -40,6 +41,7 @@ export function DriverDetailScreen({ route, navigation }: Props) {
   const { openLoad } = useAppNavigation();
   const { colors } = useTheme();
   const qc = useQueryClient();
+  const demo = useDemo();
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this driver." />;
   const d = (data ?? {}) as Record<string, unknown>;
@@ -57,6 +59,7 @@ export function DriverDetailScreen({ route, navigation }: Props) {
 
   const setStatus = async (next: string) => {
     if (next === status) return;
+    if (demo.block()) return;
     try {
       await updateDriver(id, { status: next });
       invalidateFor(qc, 'driver');
@@ -66,7 +69,8 @@ export function DriverDetailScreen({ route, navigation }: Props) {
     }
   };
 
-  const confirmDelete = () =>
+  const confirmDelete = () => {
+    if (demo.block()) return;
     Alert.alert('Delete driver', `Permanently delete ${name}?`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -84,6 +88,7 @@ export function DriverDetailScreen({ route, navigation }: Props) {
         },
       },
     ]);
+  };
 
   return (
     <SheetScreen
@@ -91,7 +96,10 @@ export function DriverDetailScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
       actionIcon="edit"
-      onAction={() => navigation.navigate('AddDriver', { id, preview: d })}
+      onAction={() => {
+        if (demo.block()) return;
+        navigation.navigate('AddDriver', { id, preview: d });
+      }}
       footer={<Button label="Delete driver" variant="danger" icon="x" onPress={confirmDelete} fullWidth />}
     >
       <View className="mb-4 flex-row items-center gap-3">

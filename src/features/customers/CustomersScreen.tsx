@@ -19,6 +19,7 @@ import { num, str, pick } from '@/lib/api/list';
 import { useCustomers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 
@@ -30,11 +31,20 @@ export function CustomersScreen({ navigation }: Props) {
   const { data, isLoading, isError, refetch } = useCustomers();
   const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { openCustomer } = useAppNavigation();
+  const demo = useDemo();
   const [q, setQ] = useState('');
 
+  // Customers are fixed seeded data in the demo company — creation happens
+  // server-side too (400 "fixed demo data"), but stopping here avoids the
+  // round trip and lets the toast fire on the tap itself.
+  const handleAdd = useCallback(() => {
+    if (demo.block()) return;
+    navigation.navigate('AddCustomer');
+  }, [demo, navigation]);
+
   const renderAdd = useCallback(
-    () => <IconButton name="plus" accessibilityLabel="Add customer" onPress={() => navigation.navigate('AddCustomer')} />,
-    [navigation],
+    () => <IconButton name="plus" accessibilityLabel="Add customer" onPress={handleAdd} />,
+    [handleAdd],
   );
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -89,7 +99,7 @@ export function CustomersScreen({ navigation }: Props) {
               icon="users"
               title="No customers yet"
               body="Add your first customer to start quoting."
-              action={<Button label="Add customer" icon="plus" onPress={() => navigation.navigate('AddCustomer')} />}
+              action={<Button label="Add customer" icon="plus" onPress={handleAdd} />}
             />
           }
           renderItem={({ item }) => (

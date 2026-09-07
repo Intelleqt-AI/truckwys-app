@@ -11,6 +11,7 @@ import { str, num, pick } from '@/lib/api/list';
 import { parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddCustomer'>;
@@ -63,6 +64,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
   const preview = (route.params?.preview ?? {}) as Record<string, unknown>;
   const editing = editId != null;
   const qc = useQueryClient();
+  const demo = useDemo();
   const [busy, setBusy] = useState(false);
   const [paymentTerms, setPaymentTerms] = useState(str(pick(preview, ['payment_terms_default']), 'NET30'));
   const [status, setStatus] = useState(str(pick(preview, ['status'])).toUpperCase() || 'ACTIVE');
@@ -84,6 +86,10 @@ export function AddCustomerScreen({ route, navigation }: Props) {
   });
 
   const onSubmit = async (v: Values) => {
+    // Defense in depth — the entry points that reach this screen already
+    // block, but customers are fixed seeded data in the demo company, so this
+    // is the actual save.
+    if (demo.block()) return;
     setBusy(true);
     const payload: Record<string, unknown> = {
       name: v.name.trim(),

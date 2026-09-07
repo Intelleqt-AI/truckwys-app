@@ -72,6 +72,8 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { subscriptionStatusDetail, subscriptionStatusLabel } from '@/lib/subscriptionStatus';
+import { useDemo } from '@/hooks/useDemo';
+import { DEMO_UNAVAILABLE_MESSAGE } from '@/lib/demoStatus';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Settings'>;
@@ -205,6 +207,7 @@ function ProfileSection() {
   const user = useAuthStore((s) => s.user);
   const refreshUser = useAuthStore((s) => s.refreshUser);
   const qc = useQueryClient();
+  const demo = useDemo();
   const [seeded, setSeeded] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -236,6 +239,7 @@ function ProfileSection() {
   }, [me, user, seeded]);
 
   const save = async () => {
+    if (demo.block()) return;
     setBusy(true);
     try {
       await updateProfile({
@@ -258,6 +262,7 @@ function ProfileSection() {
   };
 
   const pickAvatar = async () => {
+    if (demo.block()) return;
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -391,6 +396,7 @@ function VehicleTypesSection() {
   const qc = useQueryClient();
   const { colors } = useTheme();
   const { nav } = useAppNavigation();
+  const demo = useDemo();
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['vehicle-types'],
     // Shares its query key with bookings/api.ts's useVehicleTypes and
@@ -434,6 +440,7 @@ function VehicleTypesSection() {
   );
 
   const removeOne = (t: Record<string, unknown>, tid: string) => {
+    if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
     const rawId = pick(t, ['id']) as string | number;
     Alert.alert('Delete vehicle type', `Delete "${str(pick(t, ['name']), 'this type')}"?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -472,6 +479,7 @@ function VehicleTypesSection() {
 
   const batchDelete = () => {
     if (selected.size === 0) return;
+    if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
     Alert.alert('Delete vehicle types', `Delete ${selected.size} selected type(s)?`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -516,7 +524,10 @@ function VehicleTypesSection() {
             <IconButton
               name="plus"
               accessibilityLabel="Add vehicle type"
-              onPress={() => nav.navigate('AddVehicleType')}
+              onPress={() => {
+                if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
+                nav.navigate('AddVehicleType');
+              }}
             />
           )}
         </View>
@@ -553,11 +564,13 @@ function VehicleTypesSection() {
               const isActive = pick(r, ['active']) !== false;
               const isSel = selected.has(tid);
               const isDeleting = deletingIds.has(tid);
-              const openEdit = () =>
+              const openEdit = () => {
+                if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
                 nav.navigate('AddVehicleType', {
                   id: pick(r, ['id']) as string | number,
                   preview: r,
                 });
+              };
               const meta = [
                 cap ? `${cap} t` : null,
                 rate ? `R ${rate}/km` : null,
@@ -701,6 +714,7 @@ const NOTIF_CHANNELS: {
 function NotificationsSection() {
   const { data } = useNotificationPrefs();
   const qc = useQueryClient();
+  const demo = useDemo();
   const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -711,13 +725,16 @@ function NotificationsSection() {
 
   const state = prefs ?? NOTIFICATION_DEFAULTS;
 
-  const toggle = (channel: NotificationChannel, key: string, value: boolean) =>
+  const toggle = (channel: NotificationChannel, key: string, value: boolean) => {
+    if (demo.block()) return;
     setPrefs((p) => {
       const base = p ?? NOTIFICATION_DEFAULTS;
       return { ...base, [channel]: { ...base[channel], [key]: value } };
     });
+  };
 
   const save = async () => {
+    if (demo.block()) return;
     setBusy(true);
     try {
       await updateNotificationPrefs(state);
@@ -764,11 +781,13 @@ function NotificationsSection() {
 }
 
 function SecuritySection() {
+  const demo = useDemo();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = async () => {
+    if (demo.block()) return;
     if (next.length < 8) return toast.error('New password must be at least 8 characters');
     // Confirm is client-side only — the endpoint takes current + new.
     if (next !== confirmPw) return toast.error('New passwords do not match');
@@ -798,6 +817,7 @@ function SecuritySection() {
 
   const confirmDelete = async () => {
     if (!deletePassword) return;
+    if (demo.block()) return;
     setDeleteBusy(true);
     try {
       await deleteAccount(deletePassword);
@@ -822,6 +842,7 @@ function SecuritySection() {
   // User.security_settings behind auth/security-settings/ — the old code
   // PATCHed auth/me/ with a field that doesn't exist, so nothing persisted.
   const setPref = async (key: keyof SecuritySettings, v: boolean) => {
+    if (demo.block()) return;
     try {
       await updateSecuritySettings({ [key]: v });
       invalidateFor(qc, 'security');
@@ -831,6 +852,9 @@ function SecuritySection() {
   };
 
   const revokeMany = async (scope: 'others' | 'all') => {
+    // Every demo visitor shares one Django user — "log out all sessions"
+    // would sign every other visitor's demo session out too.
+    if (demo.block()) return;
     try {
       await revokeSessions(scope);
       if (scope === 'all') {
@@ -846,6 +870,7 @@ function SecuritySection() {
   };
 
   const revoke = async (id: string) => {
+    if (demo.block()) return;
     try {
       await revokeSession(id);
       await qc.invalidateQueries({ queryKey: ['sessions'] });
@@ -1123,6 +1148,7 @@ const DIESEL_DEFAULT_PRICE = 23.5;
 function CompanySection() {
   const { data } = useCompanyProfile();
   const qc = useQueryClient();
+  const demo = useDemo();
   const [seeded, setSeeded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
@@ -1194,6 +1220,7 @@ function CompanySection() {
   }, [data, seeded]);
 
   const save = async () => {
+    if (demo.block()) return;
     // Every numeric box is validated through parseNum first. The old guards
     // compared Number(v) against bounds, and BOTH sides of a comparison are
     // false for NaN — so a comma value passed every check and NaN went to the
@@ -1336,6 +1363,7 @@ function CompanySection() {
   })();
 
   const uploadLogo = async () => {
+    if (demo.block()) return;
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -1592,12 +1620,14 @@ function UsersSection() {
   const { data } = useUsers();
   const meId = useAuthStore((st) => st.user?.id);
   const qc = useQueryClient();
+  const demo = useDemo();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('OPERATOR');
   const [busy, setBusy] = useState(false);
   const refresh = () => invalidateFor(qc, 'user');
 
   const invite = async () => {
+    if (demo.block()) return;
     if (!email.trim()) return toast.error('Enter an email');
     setBusy(true);
     try {
@@ -1613,6 +1643,7 @@ function UsersSection() {
   };
 
   const changeRole = async (id: string, r: string) => {
+    if (demo.block()) return;
     try {
       await updateUserRole(id, r);
       await refresh();
@@ -1622,7 +1653,8 @@ function UsersSection() {
     }
   };
 
-  const remove = (id: string, name: string) =>
+  const remove = (id: string, name: string) => {
+    if (demo.block()) return;
     Alert.alert('Remove user', `Remove ${name}?`, [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -1639,6 +1671,7 @@ function UsersSection() {
         },
       },
     ]);
+  };
 
   return (
     <View className="gap-5">

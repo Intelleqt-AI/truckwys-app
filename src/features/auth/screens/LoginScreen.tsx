@@ -24,7 +24,7 @@ import { loginSchema, type LoginValues } from '../schemas';
 import { authApi, DEMO_CREDENTIALS } from '../api';
 import { isOtpRequired } from '@/types/auth';
 import { useAuthStore } from '@/stores/authStore';
-import { PRIVACY_POLICY_URL, TERMS_URL, SITE_URL } from '@/lib/legal';
+import { PRIVACY_POLICY_URL, TERMS_URL, WEB_APP_URL } from '@/lib/legal';
 import { toast } from '@/lib/toast';
 import { DEMO_UNAVAILABLE_LOGIN_MESSAGE } from '@/lib/demoStatus';
 import type { AuthStackParamList } from '@/navigation/types';
@@ -204,11 +204,17 @@ export function LoginScreen({ navigation }: Props) {
 
         <Animated.View entering={FadeInDown.delay(380).duration(400)}>
           {/* Accounts are created on the web dashboard only — tapping the URL
-                hands off to the browser rather than signing in inline. */}
+                hands off to the browser rather than signing in inline. Points at
+                WEB_APP_URL's root, not the marketing site: ProtectedLayout in
+                truckwyas-frontend/src/App.tsx redirects a signed-out visitor
+                straight to /login, so this lands them on the web app's own
+                login/signup, not just an informational page. (Deliberate call —
+                see the web-app-auth-handoff plan notes on why this differs from
+                the earlier App Store 3.1.1-driven "point at marketing" default.) */}
           <View className="flex-row flex-wrap items-center justify-center">
             <Txt className="text-sub text-muted">New to Truckwys? Create your account at </Txt>
             <Pressable
-              onPress={() => void WebBrowser.openBrowserAsync(SITE_URL)}
+              onPress={() => void WebBrowser.openBrowserAsync(WEB_APP_URL)}
               hitSlop={6}
               className="flex-row items-center gap-1"
               accessibilityRole="link"

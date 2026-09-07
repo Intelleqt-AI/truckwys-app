@@ -12,6 +12,8 @@ import { resolveNotificationLink } from '@/lib/notificationLink';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { toast } from '@/lib/toast';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useDemo } from '@/hooks/useDemo';
+import { DEMO_UNAVAILABLE_MESSAGE } from '@/lib/demoStatus';
 import type { AppStackParamList } from '@/navigation/types';
 import {
   CONVERSATIONS_KEY,
@@ -48,6 +50,7 @@ export function CopilotScreen({ navigation }: Props) {
   const { colors } = useTheme();
   const qc = useQueryClient();
   const rootNav = useNavigation();
+  const demo = useDemo();
 
   const conversationId = useCopilotStore((s) => s.conversationId);
   const setConversationId = useCopilotStore((s) => s.setConversationId);
@@ -310,6 +313,13 @@ export function CopilotScreen({ navigation }: Props) {
   const confirmProposal = useCallback(
     async (p: Proposal) => {
       if (proposalBusy || conversationId == null) return;
+      // Chat and proposal *generation* stay open in demo (web gates no AI at
+      // all, and the backend has no demo check on this endpoint either) —
+      // but execute performs real create/update writes across quotes, loads
+      // and invoices in the shared demo company, so only this step is blocked.
+      // (Reads demo.isDemo directly, not demo.block(), so this callback's
+      // deps stay a stable primitive rather than a new object every render.)
+      if (demo.isDemo) return toast.error(DEMO_UNAVAILABLE_MESSAGE);
       setProposalBusy(true);
       const convId = conversationId;
       try {
@@ -345,7 +355,7 @@ export function CopilotScreen({ navigation }: Props) {
         setProposalBusy(false);
       }
     },
-    [proposalBusy, conversationId, qc],
+    [proposalBusy, conversationId, qc, demo.isDemo],
   );
 
   const rejectProposal = useCallback(

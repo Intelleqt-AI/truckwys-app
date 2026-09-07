@@ -29,6 +29,8 @@ import { dismissKeyboard } from '@/lib/keyboard';
 import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
+import { useDemo } from '@/hooks/useDemo';
+import { DEMO_UNAVAILABLE_MESSAGE } from '@/lib/demoStatus';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddVehicleType'>;
@@ -143,6 +145,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
   const editing = editId != null;
   const preview = (route.params?.preview ?? {}) as Record<string, unknown>;
   const qc = useQueryClient();
+  const demo = useDemo();
 
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -172,6 +175,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
   });
 
   const onValid = async (v: VehicleTypeFormValues) => {
+    if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
     // Starts closing the keyboard the instant Save is tapped, rather than
     // leaving it up behind SaveSuccessOverlay.
     void dismissKeyboard();
@@ -223,6 +227,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
 
   const confirmDelete = () => {
     if (!editing) return;
+    if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
     Alert.alert('Delete vehicle type', `Delete "${getValues('name').trim() || 'this type'}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {

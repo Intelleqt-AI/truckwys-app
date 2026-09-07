@@ -38,6 +38,7 @@ import { dismissKeyboard } from '@/lib/keyboard';
 import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
+import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddDriver'>;
@@ -211,6 +212,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
   const editId = route.params?.id;
   const editing = editId != null;
   const qc = useQueryClient();
+  const demo = useDemo();
   const { data: full } = useDriver(editId ?? '', route.params?.preview, editing);
   const { data: vehicles } = useVehicles();
   const [busy, setBusy] = useState(false);
@@ -284,6 +286,8 @@ export function AddDriverScreen({ route, navigation }: Props) {
   });
 
   const onValid = async (v: DriverFormValues) => {
+    // Drivers are fixed seeded data in the demo company.
+    if (demo.block()) return;
     // Starts closing the keyboard the instant Save is tapped, rather than
     // leaving it up behind SaveSuccessOverlay.
     void dismissKeyboard();

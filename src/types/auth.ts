@@ -10,6 +10,11 @@ export interface AuthUser {
   phone?: string;
   avatar?: string | null;
   company?: number | { id: number; name?: string } | null;
+  /** True for the single shared public demo company (Company.is_demo). */
+  is_demo?: boolean;
+  /** Per-UserSession (this login's own token), not per-company — whether
+   *  THIS demo session has already used its one free quote. */
+  demo_quote_used?: boolean;
   [key: string]: unknown;
 }
 

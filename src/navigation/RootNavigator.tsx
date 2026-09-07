@@ -13,6 +13,7 @@ import { useAuthStore, forceSignOut } from '@/stores/authStore';
 import { setUnauthorizedHandler } from '@/lib/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
 import { WEB_APP_URL } from '@/lib/legal';
+import { useAuthHandoff } from '@/features/auth/useAuthHandoff';
 import type { AppStackParamList } from './types';
 
 // Build a React Navigation theme from our tokens so native transitions/backgrounds
@@ -67,6 +68,12 @@ export function RootNavigator() {
     void hydrate();
     return () => setUnauthorizedHandler(null);
   }, [hydrate]);
+
+  // Listens for a web -> app auth handoff link (truckwys://auth/callback) and
+  // signs the user in when one arrives. Must run before the loading gate below
+  // and regardless of authed/guest status — see useAuthHandoff for why this
+  // can't just go through the `linking` config underneath.
+  useAuthHandoff();
 
   useEffect(() => {
     if (status !== 'loading') void SplashScreen.hideAsync();

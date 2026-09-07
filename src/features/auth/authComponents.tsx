@@ -3,6 +3,7 @@ import {
   View,
   Pressable,
   TextInput,
+  TouchableOpacity,
   ActivityIndicator,
   Platform,
   useWindowDimensions,
@@ -405,6 +406,46 @@ export function SignInButton({
         )}
       </Pressable>
     </Animated.View>
+  );
+}
+
+// ── DemoButton: secondary "View Demo" CTA below the main Sign in button ────
+// There's no secondary/outline variant in the auth stack to reuse — the
+// generic Button in primitives.tsx (uppercase mono, rounded-xs) doesn't match
+// this screen's look, so this borrows SignInButton's geometry (min-h-[56px],
+// rounded-lg) but stays visually lighter: outlined, not filled, no glow.
+export function DemoButton({
+  onPress,
+  loading,
+  disabled,
+}: {
+  onPress: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+}) {
+  const { colors } = useTheme();
+  const off = !!loading || !!disabled;
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={off}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel="View Demo"
+      accessibilityState={{ disabled: off, busy: !!loading }}
+      className="min-h-[56px] flex-row items-center justify-center gap-2 rounded-lg border"
+      style={{
+        borderColor: colors.lineActive,
+        opacity: off ? 0.6 : 1,
+      }}
+    >
+      {loading ? (
+        <ActivityIndicator color={colors.fg} />
+      ) : (
+        <Txt className="text-heading font-semibold text-fg">View Demo</Txt>
+      )}
+    </TouchableOpacity>
   );
 }
 

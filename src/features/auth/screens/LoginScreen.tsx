@@ -16,15 +16,17 @@ import {
   LoginHero,
   SignInField,
   SignInButton,
+  DemoButton,
   InlineError,
   useErrorShake,
 } from '../authComponents';
 import { loginSchema, type LoginValues } from '../schemas';
-import { authApi } from '../api';
+import { authApi, DEMO_CREDENTIALS } from '../api';
 import { isOtpRequired } from '@/types/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { PRIVACY_POLICY_URL, TERMS_URL, SITE_URL } from '@/lib/legal';
 import { toast } from '@/lib/toast';
+import { DEMO_UNAVAILABLE_LOGIN_MESSAGE } from '@/lib/demoStatus';
 import type { AuthStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
@@ -33,7 +35,10 @@ export function LoginScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const setSession = useAuthStore((s) => s.setSession);
-  const [submitting, setSubmitting] = useState(false);
+  // Tracks WHICH action is in flight, not just whether one is — Sign in and
+  // View Demo each need their own busy state so tapping one doesn't make the
+  // other button appear to be the one submitting.
+  const [pending, setPending] = useState<'form' | 'demo' | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const { progress } = useReanimatedKeyboardAnimation();
 
@@ -45,25 +50,42 @@ export function LoginScreen({ navigation }: Props) {
 
   const { shakeStyle, trigger: triggerShake } = useErrorShake();
 
-  const onSubmit = async (values: LoginValues) => {
+  // Shared by the real form submit and the demo button below — both just hand
+  // a set of credentials to the same login call. `isDemo` only changes what a
+  // 401 is reported as: the shared demo login has no dedicated endpoint, so
+  // if the demo company hasn't been seeded yet it 401s exactly like a wrong
+  // password would, and "Incorrect email or password" would be nonsense after
+  // tapping "View Demo".
+  const submitLogin = async (credentials: LoginValues, isDemo = false) => {
     setServerError(null);
-    setSubmitting(true);
+    setPending(isDemo ? 'demo' : 'form');
     try {
-      const res = await authApi.login(values.username.trim(), values.password);
+      const res = await authApi.login(credentials.username, credentials.password);
       if (isOtpRequired(res)) {
         navigation.navigate('VerifyOtp', { pendingToken: res.pending_token, email: res.email });
       } else {
         await setSession(res.token, res.user);
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Sign in failed';
+      const status = e instanceof Error ? (e as Error & { status?: number }).status : undefined;
+      const message =
+        isDemo && status === 401
+          ? DEMO_UNAVAILABLE_LOGIN_MESSAGE
+          : e instanceof Error
+            ? e.message
+            : 'Sign in failed';
       setServerError(message);
       toast.error(message);
       triggerShake();
     } finally {
-      setSubmitting(false);
+      setPending(null);
     }
   };
+
+  const onSubmit = (values: LoginValues) =>
+    submitLogin({ username: values.username.trim(), password: values.password });
+
+  const handleDemoLogin = () => submitLogin(DEMO_CREDENTIALS, true);
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
@@ -157,7 +179,20 @@ export function LoginScreen({ navigation }: Props) {
           <SignInButton
             label="Sign in"
             onPress={handleSubmit(onSubmit, triggerShake)}
-            loading={submitting}
+            loading={pending === 'form'}
+            disabled={pending === 'demo'}
+          />
+        </Animated.View>
+
+        {/* No signup screen exists in the app (accounts are created on the web
+              dashboard, below) — a zero-friction demo entry matters more here
+              than on web. Neither button can be pressed while the other's
+              request is in flight, but each shows its own busy state. */}
+        <Animated.View entering={FadeInDown.delay(340).duration(400)} style={{ marginTop: 12 }}>
+          <DemoButton
+            onPress={handleDemoLogin}
+            loading={pending === 'demo'}
+            disabled={pending === 'form'}
           />
         </Animated.View>
 

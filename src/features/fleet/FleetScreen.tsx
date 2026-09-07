@@ -22,6 +22,7 @@ import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useVehicles, useDrivers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useDemo } from '@/hooks/useDemo';
 import type { TabParamList, FleetTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 
@@ -47,6 +48,7 @@ export function FleetScreen({ route }: Props) {
   const [tab, setTab] = useState<FleetTab>(route.params?.tab ?? 'vehicles');
   const insets = useSafeAreaInsets();
   const { nav } = useAppNavigation();
+  const demo = useDemo();
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
       <AmbientGlow />
@@ -57,7 +59,11 @@ export function FleetScreen({ route }: Props) {
             <IconButton
               name="plus"
               accessibilityLabel={tab === 'vehicles' ? 'Add vehicle' : 'Add driver'}
-              onPress={() => nav.navigate(tab === 'vehicles' ? 'AddVehicle' : 'AddDriver')}
+              onPress={() => {
+                // Vehicles/drivers are fixed seeded data in the demo company.
+                if (demo.block()) return;
+                nav.navigate(tab === 'vehicles' ? 'AddVehicle' : 'AddDriver');
+              }}
             />
           }
         />

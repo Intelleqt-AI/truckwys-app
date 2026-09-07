@@ -6,6 +6,7 @@ import { registerForPush, presentForeground, syncBadge } from '@/lib/push';
 import { resolveNotificationLink } from '@/lib/notificationLink';
 import { invalidateForServerEvent } from '@/lib/queryInvalidation';
 import { useUnreadCount } from '@/features/more/api';
+import { useAuthStore } from '@/stores/authStore';
 import type { AppStackParamList } from '@/navigation/types';
 
 // Push wiring for the signed-in app. Mounted inside AppNavigator so a
@@ -34,6 +35,10 @@ export function usePushNotifications() {
   useEffect(() => {
     if (registered.current) return;
     registered.current = true;
+    // Every demo visitor shares one Django user, so registering this device's
+    // FCM token against it would collect tokens from unrelated visitors on
+    // one account and cross-deliver their notifications to each other.
+    if (useAuthStore.getState().user?.is_demo) return;
     void registerForPush().catch(() => {
       // Denied permission or an offline first launch is not an error worth
       // interrupting the user for — the in-app list still works.

@@ -30,6 +30,7 @@ import {
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
+import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'VehicleDetail'>;
@@ -60,6 +61,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
   const { openLoad } = useAppNavigation();
   const { colors } = useTheme();
   const qc = useQueryClient();
+  const demo = useDemo();
   const [tab, setTab] = useState<'overview' | 'financial'>('overview');
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this vehicle." />;
@@ -85,6 +87,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
 
   const setStatus = async (next: string) => {
     if (next === status) return;
+    if (demo.block()) return;
     try {
       await updateVehicle(id, { status: next });
       invalidateFor(qc, 'vehicle');
@@ -94,7 +97,8 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
     }
   };
 
-  const confirmDelete = () =>
+  const confirmDelete = () => {
+    if (demo.block()) return;
     Alert.alert('Delete vehicle', 'This permanently removes the vehicle. Continue?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -112,6 +116,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
         },
       },
     ]);
+  };
 
   return (
     <SheetScreen
@@ -120,7 +125,10 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
       actionIcon="edit"
-      onAction={() => navigation.navigate('AddVehicle', { id, preview: v })}
+      onAction={() => {
+        if (demo.block()) return;
+        navigation.navigate('AddVehicle', { id, preview: v });
+      }}
       footer={<Button label="Delete vehicle" variant="danger" icon="x" onPress={confirmDelete} fullWidth />}
     >
       <View className="mb-4 flex-row">

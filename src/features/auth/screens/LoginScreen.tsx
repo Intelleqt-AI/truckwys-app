@@ -16,7 +16,7 @@ import {
   LoginHero,
   SignInField,
   SignInButton,
-  DemoButton,
+  DemoLink,
   InlineError,
   useErrorShake,
 } from '../authComponents';
@@ -36,7 +36,7 @@ export function LoginScreen({ navigation }: Props) {
   const { colors } = useTheme();
   const setSession = useAuthStore((s) => s.setSession);
   // Tracks WHICH action is in flight, not just whether one is — Sign in and
-  // View Demo each need their own busy state so tapping one doesn't make the
+  // View demo each need their own busy state so tapping one doesn't make the
   // other button appear to be the one submitting.
   const [pending, setPending] = useState<'form' | 'demo' | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -184,18 +184,6 @@ export function LoginScreen({ navigation }: Props) {
           />
         </Animated.View>
 
-        {/* No signup screen exists in the app (accounts are created on the web
-              dashboard, below) — a zero-friction demo entry matters more here
-              than on web. Neither button can be pressed while the other's
-              request is in flight, but each shows its own busy state. */}
-        <Animated.View entering={FadeInDown.delay(340).duration(400)} style={{ marginTop: 12 }}>
-          <DemoButton
-            onPress={handleDemoLogin}
-            loading={pending === 'demo'}
-            disabled={pending === 'form'}
-          />
-        </Animated.View>
-
         {/* Absorbs the leftover space on tall screens so the footer sits near
               the bottom of the screen instead of right under the button. On a
               short screen (or with the keyboard up) this just collapses to the
@@ -203,6 +191,21 @@ export function LoginScreen({ navigation }: Props) {
         <View style={{ flex: 1, minHeight: 28 }} />
 
         <Animated.View entering={FadeInDown.delay(380).duration(400)}>
+          {/* Demo access lives down here, not under Sign in: it's a side door, and a
+                full-width second button was competing with the real CTA. Still the last
+                in-app action before the two external links below. No signup screen
+                exists in the app (accounts are created on the web dashboard, below) —
+                a zero-friction demo entry matters more here than on web. Neither
+                action can be pressed while the other's request is in flight, but each
+                shows its own busy state. */}
+          <View className="mb-5">
+            <DemoLink
+              onPress={handleDemoLogin}
+              loading={pending === 'demo'}
+              disabled={pending === 'form'}
+            />
+          </View>
+
           {/* Accounts are created on the web dashboard only — tapping the URL
                 hands off to the browser rather than signing in inline. Points at
                 WEB_APP_URL's root, not the marketing site: ProtectedLayout in

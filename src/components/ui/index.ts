@@ -51,6 +51,7 @@ export {
 export { SheetScreen } from './Sheet';
 export { SwipeRow } from './SwipeRow';
 export { SaveSuccessOverlay } from './SaveSuccessOverlay';
+export { SigningInOverlay } from './SigningInOverlay';
 export { Logo } from './Logo';
 export { LogoMark } from './LogoMark';
 export { Banner, type BannerTone } from './Banner';

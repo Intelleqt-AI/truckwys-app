@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { View } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -14,6 +15,7 @@ import { setUnauthorizedHandler } from '@/lib/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
 import { WEB_APP_URL } from '@/lib/legal';
 import { useAuthHandoff } from '@/features/auth/useAuthHandoff';
+import { SigningInOverlay } from '@/components/ui';
 import type { AppStackParamList } from './types';
 
 // Build a React Navigation theme from our tokens so native transitions/backgrounds
@@ -72,8 +74,11 @@ export function RootNavigator() {
   // Listens for a web -> app auth handoff link (truckwys://auth/callback) and
   // signs the user in when one arrives. Must run before the loading gate below
   // and regardless of authed/guest status — see useAuthHandoff for why this
-  // can't just go through the `linking` config underneath.
-  useAuthHandoff();
+  // can't just go through the `linking` config underneath. `pending` drives
+  // the brief "Signing you in…" overlay below, covering the gap where status
+  // has already settled to 'guest' (so Login renders) but the code exchange
+  // is still in flight — without it that gap looks like nothing is happening.
+  const { pending: handoffPending } = useAuthHandoff();
 
   useEffect(() => {
     if (status !== 'loading') void SplashScreen.hideAsync();
@@ -82,10 +87,19 @@ export function RootNavigator() {
   if (status === 'loading') return null; // splash stays visible
 
   return (
-    // Deep links only resolve against the authed stack; a link arriving while
-    // signed out lands on Login and is dropped, which is the correct behaviour.
-    <NavigationContainer theme={navTheme} linking={status === 'authed' ? linking : undefined}>
-      {status === 'authed' ? <AppNavigator /> : <AuthStack />}
-    </NavigationContainer>
+    // Wrapping View (not a bare fragment) so SigningInOverlay's `absolute
+    // inset-0` has a same-size, non-scrolling ancestor to fill — same
+    // requirement SaveSuccessOverlay documents for itself.
+    <View style={{ flex: 1 }}>
+      {/* Deep links only resolve against the authed stack; a link arriving
+          while signed out lands on Login and is dropped, which is correct. */}
+      <NavigationContainer theme={navTheme} linking={status === 'authed' ? linking : undefined}>
+        {status === 'authed' ? <AppNavigator /> : <AuthStack />}
+      </NavigationContainer>
+      {/* status !== 'authed' guard is defense in depth: setSession and
+          setPending(false) land in the same tick on success, but this keeps
+          a stuck overlay impossible even if that ever changed. */}
+      <SigningInOverlay visible={handoffPending && status !== 'authed'} />
+    </View>
   );
 }

@@ -409,12 +409,14 @@ export function SignInButton({
   );
 }
 
-// ── DemoButton: secondary "View Demo" CTA below the main Sign in button ────
-// There's no secondary/outline variant in the auth stack to reuse — the
-// generic Button in primitives.tsx (uppercase mono, rounded-xs) doesn't match
-// this screen's look, so this borrows SignInButton's geometry (min-h-[56px],
-// rounded-lg) but stays visually lighter: outlined, not filled, no glow.
-export function DemoButton({
+// ── DemoLink: quiet demo entry, tucked into the login footer ───────────────
+// Deliberately NOT a button — the outlined 56px version it replaced read as a
+// co-equal second CTA and competed with Sign in. Muted (not accent) and
+// mostly unadorned so it stays discoverable without drawing the eye; the
+// underline (dropped while disabled, matching AuthTextLink) is the only cue
+// that it's tappable. `hitSlop` keeps the 44pt tap target (TAP_MIN) that the
+// 18px line height alone can't give.
+export function DemoLink({
   onPress,
   loading,
   disabled,
@@ -430,21 +432,22 @@ export function DemoButton({
     <TouchableOpacity
       onPress={onPress}
       disabled={off}
-      activeOpacity={0.7}
+      activeOpacity={0.5}
+      hitSlop={12}
       accessibilityRole="button"
-      accessibilityLabel="View Demo"
+      accessibilityLabel="View demo"
       accessibilityState={{ disabled: off, busy: !!loading }}
-      className="min-h-[56px] flex-row items-center justify-center gap-2 rounded-lg border"
-      style={{
-        borderColor: colors.lineActive,
-        opacity: off ? 0.6 : 1,
-      }}
+      className="min-h-[20px] items-center justify-center self-center"
     >
-      {loading ? (
-        <ActivityIndicator color={colors.fg} />
-      ) : (
-        <Txt className="text-heading font-semibold text-fg">View Demo</Txt>
-      )}
+      <Txt
+        className="text-sub"
+        style={{
+          color: off ? colors.faint : colors.muted,
+          textDecorationLine: off ? 'none' : 'underline',
+        }}
+      >
+        {loading ? 'Opening demo…' : 'View demo'}
+      </Txt>
     </TouchableOpacity>
   );
 }

@@ -12,7 +12,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // Must match the EAS project's own slug exactly — the CLI hard-errors on a
   // mismatch (see extra.eas.projectId below, @intelleqt/truckwys).
   slug: 'truckwys',
-  version: '1.0.2',
+  version: '1.0.3',
   updates: {
     url: 'https://u.expo.dev/0ef68ce5-03e0-46d7-b4c4-6fc1a9c5f170',
   },

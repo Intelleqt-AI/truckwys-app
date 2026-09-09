@@ -93,10 +93,12 @@ export function MoreScreen() {
           size={48}
         />
         <View className="flex-1">
-          <Txt className="text-heading font-semibold text-fg">
+          <Txt className="text-lg font-medium" numberOfLines={1}>
             {user?.name ?? user?.email ?? 'Operator'}
           </Txt>
-          <Mono className="mt-0.5 text-caption text-muted">{user?.email}</Mono>
+          <Mono className="mt-0.5 text-caption text-muted" numberOfLines={1}>
+            {user?.email}
+          </Mono>
         </View>
         {user?.role && <Label className="text-accent">{user.role}</Label>}
       </View>

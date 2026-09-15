@@ -1829,28 +1829,22 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             </QuoteSection>
 
             <QuoteSection id="schedule" label="Schedule & terms" onLayout={registerSectionY}>
-              <View className="flex-row gap-3">
-                <View className="flex-1">
-                  <DateField
-                    label="Pickup date"
-                    required
-                    value={pickupDate}
-                    onChange={setPickupDate}
-                    minimumDate={startOfToday()}
-                    error={showIssue('pickupDate', false)}
-                  />
-                </View>
-                <View className="flex-1">
-                  <DateField
-                    label="Delivery date"
-                    required
-                    value={deliveryDate}
-                    onChange={setDeliveryDate}
-                    minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
-                    error={showIssue('deliveryDate', false)}
-                  />
-                </View>
-              </View>
+              <DateField
+                label="Pickup date"
+                required
+                value={pickupDate}
+                onChange={setPickupDate}
+                minimumDate={startOfToday()}
+                error={showIssue('pickupDate', false)}
+              />
+              <DateField
+                label="Delivery date"
+                required
+                value={deliveryDate}
+                onChange={setDeliveryDate}
+                minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
+                error={showIssue('deliveryDate', false)}
+              />
               <DateField
                 label="Valid until"
                 value={validUntil}

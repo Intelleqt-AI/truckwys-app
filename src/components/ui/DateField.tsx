@@ -74,7 +74,7 @@ export function DateField({
           style={borderStyle}
         >
           <Icon name="calendar" size={17} color={value ? colors.accent : colors.faint} />
-          <Txt className={`flex-1 text-body ${value ? 'text-fg' : 'text-faint'}`}>
+          <Txt numberOfLines={1} className={`flex-1 text-body ${value ? 'text-fg' : 'text-faint'}`}>
             {value ? formatDate(value) : placeholder}
           </Txt>
           {value ? (

@@ -102,6 +102,15 @@ export interface CostBreakdown {
   /** fuelBasisVt's own configured L/100km, before the weight adjustment below
       is applied — the "Its rated burn" row in FuelBreakdownModal. */
   fuelBasisConsumption: number;
+  /** capacityTons(fuelBasisVt?.capacity) — 0 when the basis type (selected or
+      inferred) has no usable rated capacity, which is the ONLY thing that
+      licenses showing a weight-adjusted fuel figure (mirrors web's
+      fuelRefCapacityTons). Distinct from fuelBasisName: a type can be picked
+      or inferred yet still have nothing to scale from, in which case the
+      modal must show its "no rated capacity" copy rather than a weight-effect
+      row for an adjustment that never actually ran (consumption falls back to
+      the flat consumptionRef below in that case). */
+  fuelBasisCapacityTons: number;
   /** fuelBasisVt's fuel_consumption_sensitivity_pct as a fraction (e.g. 0.02
       for 2%), or the same 2% default `consumption` itself falls back to —
       the "Weight effect" row in FuelBreakdownModal. */
@@ -231,6 +240,7 @@ export function computeCosts({
     fuelBasisName: fuelBasisVt?.name ?? null,
     fuelBasisInferred: !selectedVt && !!inferredVt,
     fuelBasisConsumption: consumptionRef,
+    fuelBasisCapacityTons: refCapacityTons,
     fuelSensitivity: sensitivity,
   };
 }

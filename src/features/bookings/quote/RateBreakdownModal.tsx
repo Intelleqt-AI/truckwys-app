@@ -44,6 +44,9 @@ function RateBreakdownModalImpl({
           onPress={(e) => e.stopPropagation()}
         >
           <Label className="mb-3 text-muted">Base rate per km</Label>
+          <Txt className="mb-2 text-sub text-muted">
+            What this quote charges per kilometre, before fuel, tolls and allowances.
+          </Txt>
           <Txt className="mb-3 text-sub text-muted">
             {vehicleType
               ? `${vehicleType}'s own rate is used when it has one set, otherwise your company's default.`

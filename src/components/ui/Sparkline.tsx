@@ -23,10 +23,9 @@ const ease = Easing.bezier(...EASE_OUT);
 const DRAW_LENGTH = 2000;
 
 // ── Sparkline: revenue-vs-fuel area+line, mirrors the web Overview chart ───
-// Modelled on ProfitCurve.tsx's layout/gradient/path pattern. Revenue draws
-// on once via an animated stroke-dashoffset; the area fill and the dashed
-// fuel line fade in alongside it. Not scrubbable — this is a glance chart,
-// not an inspector.
+// Revenue draws on once via an animated stroke-dashoffset; the area fill and
+// the dashed fuel line fade in alongside it. Not scrubbable — this is a
+// glance chart, not an inspector.
 function SparklineImpl({
   points,
   height = 72,

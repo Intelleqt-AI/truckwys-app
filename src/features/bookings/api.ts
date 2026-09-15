@@ -169,6 +169,84 @@ export function useVehicleTypes() {
   });
 }
 
+// Two-tier win-model training status, as returned inside quotes/model-stats/'s
+// win_model.{user,global}. Each tier is independent: a company can have a
+// ready global model while its own user tier is still short on outcomes.
+export type WinBlocker =
+  | 'ml_unavailable'
+  | 'insufficient_data'
+  | 'needs_lost_quotes'
+  | 'needs_won_quotes'
+  | 'awaiting_retrain';
+
+export interface WinModelTier {
+  outcomes_collected: number;
+  outcomes_needed: number;
+  progress_pct: number;
+  qualifies: boolean;
+  /** Nullable (not defaulted to 0) so a tier payload missing this key — an
+      old/pre-two-tier backend shape — can still be told apart from a real
+      zero. Mirrors web's own `tier.accepted ?? tier.outcomes_collected`
+      fallback (QuoteBuilder.tsx), which only makes sense if this stays null
+      rather than being coerced here. */
+  accepted: number | null;
+  rejected: number | null;
+  /** A trained artifact actually exists on disk — distinct from `qualifies`,
+      which is the outcome-count gate only. A tier can qualify without being
+      ready (e.g. awaiting_retrain, or the class-balance gate). */
+  ready: boolean;
+  blocker: WinBlocker | null;
+  /** Only populated for blocker === 'awaiting_retrain' — carries the last
+      training run's rejection reason. */
+  blocker_detail: string | null;
+}
+
+// quotes/analyze/'s ai_prediction is polymorphic on `available` — always
+// branch on that before reading any other field. This is the only field that
+// licenses labelling a price "AI"; price_optimization is always populated and
+// may be pure heuristic underneath.
+export type AiPrediction =
+  | { available: false; reason: 'insufficient_training_data' | 'optimizer_error' | 'model_curve_unusable' }
+  | {
+      available: true;
+      model_scope: 'user' | 'global';
+      training_samples: number;
+      win_probability: number;
+      recommended_price: number;
+      expected_profit: number;
+      margin_pct: number;
+      market_rate: number | null;
+      price_vs_market_pct: number | null;
+    };
+
+const WIN_BLOCKERS: WinBlocker[] = [
+  'ml_unavailable',
+  'insufficient_data',
+  'needs_lost_quotes',
+  'needs_won_quotes',
+  'awaiting_retrain',
+];
+
+/** Reads one win_model.{user,global} tier out of quotes/model-stats/'s raw
+    payload. Defensive against a missing/null tier (model_progress can raise
+    server-side and return a null win_model entirely) so callers always get a
+    consistent shape rather than having to null-check every field. */
+export function normalizeWinModelTier(r: unknown): WinModelTier {
+  const o = (r ?? {}) as Record<string, unknown>;
+  const rawBlocker = str(pick(o, ['blocker']));
+  return {
+    outcomes_collected: num(pick(o, ['outcomes_collected'])),
+    outcomes_needed: num(pick(o, ['outcomes_needed'])),
+    progress_pct: num(pick(o, ['progress_pct'])),
+    qualifies: pick(o, ['qualifies']) === true,
+    accepted: pick(o, ['accepted']) != null ? num(pick(o, ['accepted'])) : null,
+    rejected: pick(o, ['rejected']) != null ? num(pick(o, ['rejected'])) : null,
+    ready: pick(o, ['ready']) === true,
+    blocker: (WIN_BLOCKERS as string[]).includes(rawBlocker) ? (rawBlocker as WinBlocker) : null,
+    blocker_detail: pick(o, ['blocker_detail']) != null ? str(pick(o, ['blocker_detail'])) : null,
+  };
+}
+
 export function useCompanyProfileData() {
   return useQuery<Record<string, unknown>>({
     queryKey: ['company-profile'],

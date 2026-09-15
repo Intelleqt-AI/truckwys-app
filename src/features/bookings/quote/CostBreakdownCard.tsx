@@ -16,6 +16,7 @@ function CostBreakdownCardImpl({
   baseRateNum,
   serviceCharge,
   tripType,
+  countries,
   onFuelPress,
   onTollPress,
   onRemoveUplift,
@@ -25,6 +26,11 @@ function CostBreakdownCardImpl({
   baseRateNum: number;
   serviceCharge: number;
   tripType: 'ONE_WAY' | 'ROUND_TRIP';
+  /** routeData.countries — the route's border crossings in travel order, so
+      "crosses X→Y" can be named next to the cross-border cost rather than
+      just its rand value (mirrors web's QuoteBuilder.tsx). Empty/undefined
+      when the route data hasn't included it. */
+  countries?: string[];
   /** Opens the full working — which truck the figure is based on, this
       load's weight effect, distance/litres/price. */
   onFuelPress: () => void;
@@ -33,6 +39,8 @@ function CostBreakdownCardImpl({
   onRemoveUplift: () => void;
 }) {
   const hasVehicleType = !!vehicleType;
+  const crossBorderNote =
+    costs.crossBorderCost > 0 && countries?.length ? ` · crosses ${countries.join('→')}` : '';
   return (
     <Group label={`Cost breakdown · ${vehicleType || 'no truck picked'}`}>
       {/* The rate maths goes on the hint line rather than inside the label.
@@ -92,7 +100,7 @@ function CostBreakdownCardImpl({
       </Pressable>
       {costs.crossBorderCost > 0 && (
         <DetailRow
-          label="Cross-border / weighbridge"
+          label={`Cross-border / weighbridge${crossBorderNote}`}
           value={formatCurrency(costs.crossBorderCost)}
           boldValue
         />
@@ -141,6 +149,7 @@ function CostBreakdownCardImpl({
           {formatNumber(Math.round(costs.chargeDistance))} km{' '}
           {tripType === 'ROUND_TRIP' ? 'round trip' : 'total'} · live diesel ·{' '}
           {hasVehicleType ? `your ${vehicleType} settings` : 'your company defaults'}
+          {crossBorderNote}
         </Mono>
       </View>
     </Group>

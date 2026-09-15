@@ -1302,6 +1302,13 @@ function CompanySection() {
       const n = parseNum(v);
       if (n != null && n < 0) return toast.error(`${label} can't be negative`);
     }
+    // Mirrors web's CompanySettings.tsx bound on Default SLA (Hours) — a
+    // value present must be a sane whole number of hours; blank is still
+    // allowed (falls back to the model default on save).
+    const slaHoursNum = parseNum(slaHours);
+    if (slaHoursNum != null && (slaHoursNum < 1 || slaHoursNum > 720)) {
+      return toast.error('Default SLA must be between 1 and 720 hours');
+    }
 
     // Only send a numeric field when it has a value — an empty box must leave
     // the stored default alone rather than zeroing it.
@@ -1565,21 +1572,26 @@ function CompanySection() {
       <TextField
         label="Base rate / km"
         prefix="R"
-        placeholder="e.g. 25"
+        placeholder="e.g. 33.00"
         keyboardType="decimal-pad"
         value={baseRate}
         onChangeText={setBaseRate}
       />
+      <Txt className="-mt-1 text-caption text-faint">
+        Used when the vehicle type on a quote has no rate of its own (Settings → Vehicle Types).
+        A type&apos;s own rate always wins.
+      </Txt>
       <TextField
         label="Toll rate / km"
         prefix="R"
-        placeholder="e.g. 0,95"
+        placeholder="e.g. 0.50"
         keyboardType="decimal-pad"
         value={tollRate}
         onChangeText={setTollRate}
       />
       <Txt className="-mt-1 text-caption text-faint">
-        Fallback only — used when the routing service can&apos;t itemise toll plazas.
+        Fallback only — used when the routing service can&apos;t itemise the toll plazas on a
+        route.
       </Txt>
       <TextField
         label="Default SLA (hours)"
@@ -1589,6 +1601,9 @@ function CompanySection() {
         value={slaHours}
         onChangeText={setSlaHours}
       />
+      <Txt className="-mt-1 text-caption text-faint">
+        Delivery time promised on a new quote. Can be overridden per quote.
+      </Txt>
 
       {/* ── Fuel price defaults ───────────────────────────────────────────── */}
       <View className="mt-1 flex-row items-center justify-between">

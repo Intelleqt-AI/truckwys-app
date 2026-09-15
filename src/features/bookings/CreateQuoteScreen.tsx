@@ -42,7 +42,6 @@ import {
   Icon,
   Txt,
   Label,
-  type CurvePoint,
 } from '@/components/ui';
 import {
   useVehicleTypes,
@@ -58,6 +57,7 @@ import {
   createQuote,
   patchQuote,
   sendQuote,
+  normalizeWinModelTier,
   type AiChatTurn,
 } from './api';
 import { useCustomers } from '@/features/customers/api';
@@ -89,7 +89,6 @@ import {
   plusDays,
   startOfToday,
   capacityTons,
-  MAX_PLAUSIBLE_MARKUP_PCT,
 } from './quote/types';
 import { computeCosts } from './quote/costs';
 import { buildQuotePayload } from './quote/payload';
@@ -114,6 +113,8 @@ import {
   collectIssues,
   formatGapList,
   missingPriceInputs,
+  awaitingAiCopy,
+  selectWinBlocker,
   type QuoteIssue,
 } from './quote/validation';
 import { QuoteFooterActions, type FooterStrip } from './quote/QuoteFooterActions';
@@ -797,10 +798,22 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           fuel_price_used: costs.fuelPrice,
           market_rate: num(pick(benchmark ?? {}, ['market_avg_rate'])),
           client_tier: 'standard',
+          // Lets the server derive the real client tier and historical
+          // acceptance rate instead of reusing whatever the last customer's
+          // analysis resolved — see the customerId dep below.
+          customer_id: customerId ? parseInt(customerId, 10) : null,
           skip_narrative: true,
         }).catch(() => null),
         guardQuote({
-          total_cost: costs.directCost,
+          // Deliberately NOT costs.directCost: directCost === total -
+          // serviceCharge by construction, so total - directCost is
+          // identically serviceCharge (0 on a fresh quote, unchanged by the
+          // base rate), and the guard's margin_pct could never move. This is
+          // the true operating cost the guard is meant to measure against —
+          // fuel, tolls, cross-border and driver, deliberately excluding base
+          // rate and the AI markup. directCost itself stays untouched
+          // everywhere else it's used (see costs.ts).
+          total_cost: costs.fuelCost + costs.tollCost + costs.crossBorderCost + costs.driver,
           quote_price: costs.total,
           distance_km: costs.chargeDistance,
           fuel_cost: costs.fuelCost,
@@ -847,6 +860,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     costs.chargeDistance,
     costs.fuelCost,
     costs.tollCost,
+    costs.crossBorderCost,
     costs.driver,
     costs.fuelUsage,
     costs.fuelPrice,
@@ -855,50 +869,94 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     vehicleType,
     weightKg,
     selectedRouteIndex,
+    // Switching client alone should re-run analysis — the server derives a
+    // real client tier / historical acceptance rate from customer_id.
+    customerId,
   ]);
 
   const opt = useMemo(
     () => (pick(analysis ?? {}, ['price_optimization']) ?? {}) as Record<string, unknown>,
     [analysis],
   );
-  const { aiLearning, outcomesLogged, outcomesNeeded, learnPct } = useMemo(() => {
-    const winModel = (pick(modelStats ?? {}, ['win_model']) ?? {}) as Record<string, unknown>;
-    const logged = num(pick(winModel, ['outcomes_collected']));
-    const needed = num(pick(winModel, ['outcomes_needed']));
+
+  // ai_prediction.available is the ONLY thing that licenses labelling a
+  // price "AI" — price_optimization (opt, above) is always populated and can
+  // be pure heuristic underneath (e.g. reason: model_curve_unusable, where a
+  // trained model's own curve was too flat to price against and the
+  // optimizer silently substituted the heuristic). win_model split from a
+  // flat shape to {user, global} in the same backend change — each tier
+  // tracked and gated independently, since a company can pass the platform
+  // count floor while its own outcomes are still short (or vice versa).
+  const aiPredictionRaw = pick(analysis ?? {}, ['ai_prediction']) as Record<string, unknown> | undefined;
+  const aiAvailable = pick(aiPredictionRaw ?? {}, ['available']) === true;
+  const aiReason = aiAvailable ? null : str(pick(aiPredictionRaw ?? {}, ['reason'])) || null;
+  const modelScope = aiAvailable
+    ? (str(pick(aiPredictionRaw ?? {}, ['model_scope'])) as 'user' | 'global' | '') || null
+    : null;
+  const trainingSamples =
+    aiAvailable && pick(aiPredictionRaw ?? {}, ['training_samples']) != null
+      ? num(pick(aiPredictionRaw ?? {}, ['training_samples']))
+      : null;
+
+  const { hasWinModel, winUserTier, winGlobalTier } = useMemo(() => {
+    const winModel = pick(modelStats ?? {}, ['win_model']) as Record<string, unknown> | undefined;
     return {
-      aiLearning: str(pick(winModel, ['mode'])) === 'heuristic',
-      outcomesLogged: logged,
-      outcomesNeeded: needed,
-      // Guarded — a zero threshold would otherwise render a NaN-wide bar.
-      learnPct: needed > 0 ? Math.min(100, Math.round((logged / needed) * 100)) : 0,
+      // normalizeWinModelTier always returns a real object (never null), so
+      // the tier rows below need their own signal for "nothing to report
+      // yet" — mirrors web's `{winModel && ...}` guard (QuoteBuilder.tsx).
+      // Without it, the banner asserts "0 won · 0 lost" before model-stats
+      // has resolved, or when model_progress errors and returns a null
+      // win_model — a claim web never makes.
+      hasWinModel: winModel != null,
+      winUserTier: normalizeWinModelTier(winModel ? pick(winModel, ['user']) : null),
+      winGlobalTier: normalizeWinModelTier(winModel ? pick(winModel, ['global']) : null),
     };
   }, [modelStats]);
+  // Prefer the user tier's blocker once it's past the count gate (or has none
+  // at all); a user tier still stuck under its own floor is just
+  // insufficient_data again, and the global tier may name something more
+  // specific (e.g. the whole platform is awaiting_retrain).
+  const winBlocker = selectWinBlocker(winUserTier, winGlobalTier);
+  const awaitingCopy = useMemo(
+    () => awaitingAiCopy(aiReason, winBlocker),
+    [aiReason, winBlocker],
+  );
 
   const optPrice = pick(opt, ['optimal_price']) != null ? num(pick(opt, ['optimal_price'])) : null;
   const backendSuggested =
     pick(analysis ?? {}, ['suggested_price']) != null
       ? num(pick(analysis ?? {}, ['suggested_price']))
       : null;
-  // The optimiser's margin is a markup on COST, not a margin on revenue, and the
-  // backend returns it unclamped (margin_optimizer.py:269). When the lane
-  // benchmark is junk it comes back in the thousands of percent, which is how a
-  // R64k job was recommended at R1.5M. Treat anything past this as "the
-  // benchmark behind this is not trustworthy" and fall back to cost-based
-  // pricing rather than showing the number.
+  // The optimiser's margin is a markup on COST, not a margin on revenue, and
+  // the backend returns it unclamped (margin_optimizer.py:269).
   const optMarkupPct =
     pick(opt, ['optimal_margin_pct']) != null ? num(pick(opt, ['optimal_margin_pct'])) : null;
-  const markupImplausible = optMarkupPct != null && optMarkupPct > MAX_PLAUSIBLE_MARKUP_PCT;
   // Cost-based fallback price, and the trained optimiser's price. One value
   // feeds both the number on screen and what Apply actually applies — they used
   // to be two separate expressions, so applying never matched what was shown
   // and each apply compounded on the last.
   const costPlusPrice = Math.round(costs.directCost * 1.25);
-  const priceUntrusted = aiLearning || markupImplausible;
+  // Only true once an analyze response has actually come back — otherwise
+  // this (and everything gated on it below) would flash/apply on every screen
+  // open before the first request resolves, or stay stuck showing a
+  // cost-based price+button after a failed request with no analysis to trust
+  // OR distrust yet. Mirrors web's aiAwaitingData exactly
+  // (`analysis != null && !aiAvailable`, QuoteBuilder.tsx).
+  const awaitingVisible = analysis != null && !aiAvailable;
+  // ai_prediction.available is the trust gate, gated on an analysis actually
+  // existing (see awaitingVisible above) — mirrors web's QuoteBuilder.tsx
+  // exactly (aiAvailable / aiAwaitingData). There is deliberately no
+  // markup-plausibility guard on top of it: the backend's own win-model
+  // activation gate (a0e7306, "Refuse to activate a win model that cannot
+  // price") already refuses to serve a model that would recommend a wildly
+  // inflated price, so a client-side sanity check on top would only ever
+  // contradict a `available: true` the backend has already vouched for.
+  const priceUntrusted = awaitingVisible;
   const suggestedPrice = priceUntrusted ? costPlusPrice : optPrice || backendSuggested || null;
   const alreadyApplied = suggestedPrice != null && Math.abs(costs.total - suggestedPrice) < 1;
-  // Margin, win probability and the curve are all outputs of the win model, so
-  // they mean nothing until it is trained — and nothing if its benchmark is off.
-  const statsTrusted = !priceUntrusted;
+  // Margin and win probability are outputs of the win model, so they mean
+  // nothing until a real trained prediction exists.
+  const statsTrusted = aiAvailable;
 
   const winProb = num(pick(opt, ['win_probability_at_optimal']));
   const expProfit =
@@ -906,18 +964,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       ? num(pick(opt, ['expected_profit']))
       : (suggestedPrice ?? costs.total) - costs.directCost;
   const riskLevel = str(pick(guard ?? {}, ['risk_level']), 'SAFE');
-  const curveData = useMemo<CurvePoint[]>(
-    () =>
-      asArray(pick(opt, ['curve'])).map((c) => {
-        const o = c as Record<string, unknown>;
-        const m =
-          pick(o, ['margin_pct']) != null
-            ? num(pick(o, ['margin_pct']))
-            : num(pick(o, ['margin'])) * 100;
-        return { margin: Math.round(m), profit: Math.round(num(pick(o, ['expected_profit']))) };
-      }),
-    [opt],
-  );
   const estimateLoading = (routeBusy || aiBusy) && !analysis;
   const guardExplain = asArray<string>(pick(guard ?? {}, ['explanations']))[0] as unknown as string;
   const guardWarn = asArray<string>(pick(guard ?? {}, ['warnings']))[0] as unknown as string;
@@ -1081,24 +1127,31 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // the same precedence order a selection would apply it: the type's own
   // rate first (even if it happens to equal the company default), then the
   // company default, else the field's been typed over both.
-  const rateSource: string | null = !baseRatePerKm
+  //
+  // Compared numerically against baseRateNum, NOT the raw baseRatePerKm
+  // string — matching web's `Number(selectedVT?.base_rate) === Number(v)`.
+  // A string compare mislabelled a hydrated "33.00" or an en-ZA comma decimal
+  // ("0,95", which parseNum accepts and this screen's own settings
+  // placeholder invites) as "Custom rate" even though it's exactly the type's
+  // or company's own rate. The empty guard is `!(baseRateNum > 0)`, not
+  // `!baseRatePerKm`, so a typed "0" shows no caption at all, same as web.
+  const rateSource: string | null = !(baseRateNum > 0)
     ? null
-    : selectedVtRate > 0 && baseRatePerKm === String(selectedVtRate)
+    : selectedVtRate > 0 && baseRateNum === selectedVtRate
       ? `From ${vehicleType}`
-      : companyDefaultRate > 0 && baseRatePerKm === String(companyDefaultRate)
+      : companyDefaultRate > 0 && baseRateNum === companyDefaultRate
         ? 'From company settings'
         : 'Custom rate';
   const overridden =
     tollEdited ||
     driverNum !== 0 ||
-    (effectiveDefaultRate > 0 && baseRatePerKm !== String(effectiveDefaultRate)) ||
+    (effectiveDefaultRate > 0 && baseRateNum !== effectiveDefaultRate) ||
     serviceCharge !== 0;
 
   const resetTollToCalculated = () => {
     setTollEdited(false);
     setTollOverride('');
   };
-  const resetRateToDefault = () => setBaseRatePerKm(String(effectiveDefaultRate));
   const resetAllOverrides = () => {
     resetTollToCalculated();
     setDriverAllowance('0');
@@ -1889,18 +1942,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     marginPct={costs.marginPct}
                     expProfit={expProfit}
                     winProb={winProb}
-                    curveData={curveData}
                     alreadyApplied={alreadyApplied}
                     onApplyRecommended={applyRecommended}
                     onUseActualPrice={resetPriceToActual}
                     riskLevel={riskLevel}
                     guardMsg={guardMsg}
                     guardHint={guardHint}
-                    aiLearning={aiLearning}
+                    modelScope={modelScope}
+                    trainingSamples={trainingSamples}
+                    awaitingVisible={awaitingVisible}
+                    awaitingCopy={awaitingCopy}
+                    hasVehicleType={!!vehicleType}
                     vehicleType={vehicleType}
-                    outcomesLogged={outcomesLogged}
-                    outcomesNeeded={outcomesNeeded}
-                    learnPct={learnPct}
+                    hasWinModel={hasWinModel}
+                    winUserTier={winUserTier}
+                    winGlobalTier={winGlobalTier}
                   />
                   <CostBreakdownCard
                     costs={costs}
@@ -1908,6 +1964,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     baseRateNum={baseRateNum}
                     serviceCharge={serviceCharge}
                     tripType={tripType}
+                    countries={asArray<string>(pick(routeData ?? {}, ['countries']))}
                     onFuelPress={() => setFuelModal(true)}
                     onTollPress={() => setTollModal(true)}
                     onRemoveUplift={resetPriceToActual}

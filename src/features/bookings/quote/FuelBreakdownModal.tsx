@@ -29,12 +29,22 @@ function FuelBreakdownModalImpl({
   // 2%) — Math.round(...*10000)/100 rather than a plain *100 to avoid
   // floating-point artifacts like 1.9999999999999998.
   const sensitivityPct = Math.round(costs.fuelSensitivity * 10000) / 100;
+  // Whether a weight adjustment actually ran — mirrors web's
+  // fuelRefCapacityTons > 0, NOT costs.fuelBasisName. A vehicle type can be
+  // selected (or inferred) and still have no usable rated capacity, in which
+  // case computeCosts falls back to the flat consumptionRef with no weight
+  // scaling at all — showing the five-row table (with a "Weight effect" row)
+  // in that case would describe an adjustment that never happened.
+  const hasCapacity = costs.fuelBasisCapacityTons > 0;
   // Last row bold — the payoff of the four above it, same as the modal's own
   // "Fuel cost" total below (mirrors web's Popover).
-  const rows: [string, string, boolean?][] = costs.fuelBasisName
+  const rows: [string, string, boolean?][] = hasCapacity
     ? [
-        ['Truck used', costs.fuelBasisName],
-        ['Its rated burn', `${costs.fuelBasisConsumption.toFixed(1)} L/100km`],
+        ['Truck used', `${costs.fuelBasisName} (${costs.fuelBasisCapacityTons}t)`],
+        [
+          'Its rated burn',
+          `${costs.fuelBasisConsumption.toFixed(1)} L/100km at ${costs.fuelBasisCapacityTons}t`,
+        ],
         ['This load', `${weightTons ?? 0}t`],
         ['Weight effect', `${sensitivityPct}% per tonne`],
         ['Burn for this load', `${costs.consumption.toFixed(1)} L/100km`, true],
@@ -50,7 +60,7 @@ function FuelBreakdownModalImpl({
         >
           <Label className="mb-3 text-muted">How this fuel figure is worked out</Label>
 
-          {costs.fuelBasisName ? (
+          {hasCapacity ? (
             <>
               <Txt className="mb-3 text-sub text-muted">
                 {hasVehicleType
@@ -105,7 +115,7 @@ function FuelBreakdownModalImpl({
             </View>
           </View>
 
-          {!hasVehicleType && costs.fuelBasisName && (
+          {!hasVehicleType && hasCapacity && (
             <Txt className="mt-3 text-micro text-faint">
               Pick a vehicle type to price on that truck exactly.
             </Txt>

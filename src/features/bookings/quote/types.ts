@@ -41,6 +41,25 @@ export const FUEL_FALLBACK: Record<string, number> = {
   'Danger Load': 34,
 };
 
+// VehicleType.capacity is *documented* as tonnes but real rows are a mix —
+// only the seeded defaults were unit-fixed (see the backend's migration
+// history), so hand-added or imported rows can still be kilograms. Same
+// >999 => kg heuristic the backend uses (core/services/vehicle_types.py
+// capacity_tonnes), so a 20000 kg row doesn't get read as a 20,000-tonne
+// truck by the overload guard, the fuel formula's reference tonnage, or the
+// vehicle-type dropdown's "(20t)" label. Returns null when the value can't be
+// believed as either unit — callers must then treat capacity as unknown
+// rather than guess (mirrors web's QuoteBuilder.tsx capacityTons).
+const KG_SCALE_THRESHOLD = 999;
+const MIN_PLAUSIBLE_T = 0.3;
+const MAX_PLAUSIBLE_T = 80;
+export function capacityTons(raw: unknown): number | null {
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  const t = v > KG_SCALE_THRESHOLD ? v / 1000 : v;
+  return t >= MIN_PLAUSIBLE_T && t <= MAX_PLAUSIBLE_T ? t : null;
+}
+
 // Sanity bound on the optimiser's markup-over-cost. Freight does not price at
 // four times cost; a figure past this means the lane benchmark it was derived
 // from is junk (resolve_market_rate averages raw quote totals with no per-km

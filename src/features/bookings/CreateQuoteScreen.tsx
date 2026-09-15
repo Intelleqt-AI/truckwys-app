@@ -88,6 +88,7 @@ import {
   isForeignCc,
   plusDays,
   startOfToday,
+  capacityTons,
   MAX_PLAUSIBLE_MARKUP_PCT,
 } from './quote/types';
 import { computeCosts } from './quote/costs';
@@ -106,6 +107,8 @@ import { AiRecommendationCard } from './quote/AiRecommendationCard';
 import { CostBreakdownCard } from './quote/CostBreakdownCard';
 import { CostOverrides } from './quote/CostOverrides';
 import { TollBreakdownModal } from './quote/TollBreakdownModal';
+import { FuelBreakdownModal } from './quote/FuelBreakdownModal';
+import { RateBreakdownModal } from './quote/RateBreakdownModal';
 import { QuoteSentOverlay } from './quote/QuoteSentOverlay';
 import {
   collectIssues,
@@ -251,6 +254,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [routeBusy, setRouteBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [tollModal, setTollModal] = useState(false);
+  const [fuelModal, setFuelModal] = useState(false);
+  const [rateModal, setRateModal] = useState(false);
   const [busy, setBusy] = useState<'draft' | 'send' | null>(null);
   // Validation surfacing (Phase 3): never on first paint, Weight shows its
   // error once the user leaves it, everything else waits for a Send attempt
@@ -610,24 +615,35 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     return (vtypes ?? [])
       .filter((v) => (v.available_vehicle_count ?? 1) > 0)
       .filter((v) => (seen.has(v.name) ? false : (seen.add(v.name), true)))
-      .map((v) => ({
-        label: v.capacity ? `${v.name} (${v.capacity}t)` : v.name,
-        value: v.name,
-      }));
+      .map((v) => {
+        const cap = capacityTons(v.capacity);
+        return { label: cap ? `${v.name} (${cap}t)` : v.name, value: v.name };
+      });
   }, [vtypes]);
 
   // Same four prerequisites as before, but as a list rather than a boolean, so
   // the footer and the Price section can name the one that's actually missing
   // instead of both saying "a route" whatever the user has left blank.
   const priceGaps = useMemo(
-    () => missingPriceInputs({ customerId, vehicleType, pickup, delivery, weightKg }),
-    [customerId, vehicleType, pickup, delivery, weightKg],
+    () => missingPriceInputs({ customerId, pickup, delivery, weightKg }),
+    [customerId, pickup, delivery, weightKg],
   );
   const ready = priceGaps.length === 0;
 
   // Overload guard (mirrors web's QuoteBuilder.tsx) — a plain function of the
   // selected type's capacity and the entered weight, both already in tonnes,
-  // so this needs no debounce/effect like the route calc below.
+  // so this needs no debounce/effect like the route calc below. Runs ONLY
+  // when a vehicle type is selected: with no type there is no rated capacity
+  // to measure against, so vehicleCapacityTons is 0 and the check below
+  // no-ops — the owner assigns a truck that fits the load later.
+  //
+  // Deliberately raw Number(...), NOT capacityTons() — web ported the kg/
+  // tonnes normalisation into the fuel calc but never applied it here, so a
+  // kg-valued row (e.g. capacity: 20000) reads as a 20,000-tonne truck on web
+  // and the guard never fires. Bit-for-bit parity with web is the point: web
+  // is the pricing source of truth, and this app must show the exact same
+  // number/behaviour a company would see on the dashboard, quirk included. If
+  // this gets normalised, it must happen on web first.
   const vehicleCapacityTons =
     Number((vtypes ?? []).find((v) => v.name === vehicleType)?.capacity) || 0;
   const weightBlockedMessage = useMemo(() => {
@@ -655,9 +671,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           dest_lat: delivery.lat,
           dest_lon: delivery.lon,
           dest_country: delivery.cc,
+          // Vehicle type is optional on the quote itself, but /route/calculate/
+          // still needs one to estimate fuel — 'Flatbed' is a reasonable
+          // stand-in for a route that isn't priced on it anyway (costs.ts
+          // infers its own reference truck from the load for the real fuel
+          // figure).
           vehicle_type: vehicleType || 'Flatbed',
           // No fallback needed: this effect only runs once `ready`, and
-          // weight is now one of the priceGaps, so weightKg is guaranteed
+          // weight is one of the priceGaps, so weightKg is guaranteed
           // positive here.
           weight_kg: weightKg,
           // Unresolved rows (no coords yet) are omitted rather than blocking
@@ -791,16 +812,26 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         setGuard(g);
         setAiBusy(false);
       }
-      // Same lane (origin/destination/vehicle) as the last fetch → the
-      // benchmark can't have changed, so skip it. Without this, every Apply
-      // recommended and every keystroke in Tolls/Driver/Rate — none of which
-      // touch origin/destination/vehicleType — re-fired this network call.
-      const lane = `${extractCode(pickup.label)}|${extractCode(delivery.label)}|${vehicleType}`;
-      if (benchKey.current !== lane) {
-        benchKey.current = lane;
-        benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType)
-          .then((b) => id === aiReq.current && setBenchmark(b))
-          .catch(() => null);
+      // The endpoint requires a vehicle type (QuoteBenchmarkView 400s without
+      // one) — with none picked there is no lane benchmark to fetch, so skip
+      // the call instead of sending one guaranteed to fail. Resetting
+      // benchKey lets a type picked later refetch immediately rather than
+      // matching a stale lane key from before it was cleared.
+      if (!vehicleType) {
+        benchKey.current = '';
+        setBenchmark(null);
+      } else {
+        // Same lane (origin/destination/vehicle) as the last fetch → the
+        // benchmark can't have changed, so skip it. Without this, every Apply
+        // recommended and every keystroke in Tolls/Driver/Rate — none of which
+        // touch origin/destination/vehicleType — re-fired this network call.
+        const lane = `${extractCode(pickup.label)}|${extractCode(delivery.label)}|${vehicleType}`;
+        if (benchKey.current !== lane) {
+          benchKey.current = lane;
+          benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType)
+            .then((b) => id === aiReq.current && setBenchmark(b))
+            .catch(() => null);
+        }
       }
     }, 700);
     return () => clearTimeout(t);
@@ -1043,11 +1074,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // The selected vehicle type's own rate wins over the company-wide default —
   // same precedence as handleVehicleTypeSelect above — so reverting a quote
   // that has a vehicle type with its own rate doesn't throw that away.
-  const effectiveDefaultRate = (() => {
-    const vt = (vtypes ?? []).find((v) => v.name === vehicleType);
-    const vtRate = Number(vt?.base_rate) || 0;
-    return vtRate > 0 ? vtRate : companyDefaultRate;
-  })();
+  const selectedVtRate = Number((vtypes ?? []).find((v) => v.name === vehicleType)?.base_rate) || 0;
+  const effectiveDefaultRate = selectedVtRate > 0 ? selectedVtRate : companyDefaultRate;
+  // Where the figure in the Rate/km field actually came from — the caption
+  // CostOverrides shows under it (mirrors web's baseRateSource). Checked in
+  // the same precedence order a selection would apply it: the type's own
+  // rate first (even if it happens to equal the company default), then the
+  // company default, else the field's been typed over both.
+  const rateSource: string | null = !baseRatePerKm
+    ? null
+    : selectedVtRate > 0 && baseRatePerKm === String(selectedVtRate)
+      ? `From ${vehicleType}`
+      : companyDefaultRate > 0 && baseRatePerKm === String(companyDefaultRate)
+        ? 'From company settings'
+        : 'Custom rate';
   const overridden =
     tollEdited ||
     driverNum !== 0 ||
@@ -1111,7 +1151,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         subscriptionNotice: subscription.notice,
         customerId,
         routeBlockedMessage,
-        vehicleType,
         pickup,
         delivery,
         weightInvalid,
@@ -1124,7 +1163,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       subscription.notice,
       customerId,
       routeBlockedMessage,
-      vehicleType,
       pickup,
       delivery,
       weightInvalid,
@@ -1145,8 +1183,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const issue = issueFor(field);
     if (!issue) return undefined;
     // A Draft attempt only surfaces 'both'-blocking issues — 'send'-only ones
-    // (vehicle type, weight, dates) aren't required for a draft, so flagging
-    // them here would be misleading.
+    // (weight, dates) aren't required for a draft, so flagging them here
+    // would be misleading.
     if (submitAttempted === 'send') return issue.message;
     if (submitAttempted === 'draft' && issue.blocks === 'both') return issue.message;
     return undefined;
@@ -1169,7 +1207,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             .map((i) => i.section),
         );
     const base: { id: SectionId; label: string; complete: boolean }[] = [
-      { id: 'client', label: 'Client', complete: !!(customerId && vehicleType) },
+      { id: 'client', label: 'Client', complete: !!customerId },
       { id: 'route', label: 'Route', complete: !!(pickup?.lat && delivery?.lat) },
       { id: 'load', label: 'Load', complete: weightKg > 0 && !weightInvalid },
       { id: 'schedule', label: 'Schedule', complete: !!(pickupDate && deliveryDate) },
@@ -1178,7 +1216,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     return base.map((s) => ({ ...s, hasIssue: issueSections?.has(s.id) }));
   }, [
     customerId,
-    vehicleType,
     pickup?.lat,
     delivery?.lat,
     weightKg,
@@ -1237,7 +1274,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // already-created quote (savedId.current set) doesn't hit this again.
     if (demo.quotaExceeded && !savedId.current) return toast.error(DEMO_QUOTA_MESSAGE);
     if (send) {
-      if (!ready) return toast.error('Add a vehicle type, pickup and drop-off');
+      if (!ready) return toast.error('Add a pickup and drop-off');
       const missing: string[] = [];
       if (weightInvalid) return toast.error('Weight is not a number');
       if (!(weightKg > 0)) missing.push('weight');
@@ -1385,12 +1422,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   }, [jumpTo]);
 
   // The footer's left half while the quote can't be priced yet. Deliberately
-  // generic rather than naming each gap: with up to four possible gaps
-  // (client, vehicle type, route, weight) the full list got long and
-  // truncated on the strip's single 26px line, and implied one field was the
-  // last thing needed right after it was filled. The Price section below
-  // still names every gap since it has room to wrap. Kept as two primitives +
-  // a callback so QuoteFooterActions stays memo-safe.
+  // generic rather than naming each gap: with up to three possible gaps
+  // (client, route, weight) the full list got long and truncated on the
+  // strip's single 26px line, and implied one field was the last thing needed
+  // right after it was filled. The Price section below still names every gap
+  // since it has room to wrap. Kept as two primitives + a callback so
+  // QuoteFooterActions stays memo-safe.
   const priceHint = priceGaps.length ? 'Complete the form to see the price' : '';
   const priceHintSection = priceGaps[0]?.section ?? null;
   const onPriceHintPress = useCallback(() => {
@@ -1646,15 +1683,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onSelect={setCustomerId}
                 error={showIssue('client', false)}
               />
-              <SelectField
-                label="Vehicle type"
-                icon="truck"
-                placeholder="Select vehicle type"
-                options={vtypeOptions}
-                value={vehicleType}
-                onSelect={handleVehicleTypeSelect}
-                error={showIssue('vehicleType', false)}
-              />
             </QuoteSection>
 
             <QuoteSection id="route" label="Route" onLayout={registerSectionY}>
@@ -1779,6 +1807,18 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onBlur={() => setWeightTouched(true)}
                 bottomSheet
               />
+              {/* Not required — a fleet quoting a load a month out often
+              doesn't know yet which truck will be free. Without one the
+              quote prices on company defaults and a truck inferred from the
+              load itself (see quote/costs.ts inferFuelBasis). */}
+              <SelectField
+                label="Vehicle type"
+                icon="truck"
+                placeholder="Not decided yet"
+                options={vtypeOptions}
+                value={vehicleType}
+                onSelect={handleVehicleTypeSelect}
+              />
               <TextField
                 label="Cargo"
                 placeholder="e.g. Steel coils"
@@ -1874,6 +1914,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     baseRateNum={baseRateNum}
                     serviceCharge={serviceCharge}
                     tripType={tripType}
+                    onFuelPress={() => setFuelModal(true)}
                     onTollPress={() => setTollModal(true)}
                     onRemoveUplift={resetPriceToActual}
                   />
@@ -1891,6 +1932,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     onDriverChangeText={setDriverAllowance}
                     baseRatePerKm={baseRatePerKm}
                     onRateChangeText={setBaseRatePerKm}
+                    rateSource={rateSource}
+                    onRatePress={() => setRateModal(true)}
                     overridden={overridden}
                     onResetAll={resetAllOverrides}
                   />
@@ -1905,6 +1948,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={tollModal}
             onClose={() => setTollModal(false)}
             costs={costs}
+          />
+          <FuelBreakdownModal
+            visible={fuelModal}
+            onClose={() => setFuelModal(false)}
+            costs={costs}
+            vehicleType={vehicleType}
+            weightTons={weightTons}
+          />
+          <RateBreakdownModal
+            visible={rateModal}
+            onClose={() => setRateModal(false)}
+            vehicleType={vehicleType}
+            vehicleTypeRate={selectedVtRate}
+            companyDefaultRate={companyDefaultRate}
           />
           {/* Stays open through the AI step, so the user sees "Building your
           quote" rather than being dropped back on a form that's mid-change. */}

@@ -19,6 +19,7 @@ import { createVehicleType, updateVehicleType, deleteVehicleType } from './api';
 import {
   vehicleTypeSchema,
   VEHICLE_TYPE_FIELD_ORDER,
+  vehicleTypeDeleteCopy,
   type VehicleTypeFormValues,
 } from './validation';
 import { num, str, pick } from '@/lib/api/list';
@@ -144,6 +145,16 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
   const editId = route.params?.id;
   const editing = editId != null;
   const preview = (route.params?.preview ?? {}) as Record<string, unknown>;
+  // Shared platform default (company: null — editable, backend copy-on-writes
+  // the PATCH into a new company-owned row; never deletable, the backend 403s
+  // it), this company's own override of one (overrides_shared_default: true —
+  // editable in place, "Reset" instead of "Delete"), or a fully custom type.
+  // Read straight off preview, not through pick() — pick() treats null the
+  // same as a missing key, which would erase the "shared" signal entirely
+  // (see normalizeVehicleType's comment in bookings/api.ts). Undefined
+  // (pre-shared-catalogue backend) reads as not-shared, same reasoning.
+  const isShared = preview.company === null;
+  const isOverride = !isShared && preview.overrides_shared_default === true;
   const qc = useQueryClient();
   const demo = useDemo();
 
@@ -225,23 +236,27 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
     if (first) anchors.scrollToField(first);
   };
 
+  // Not offered at all for a shared default — see the button below, which
+  // never renders this while isShared, so `editing && isShared` can't reach
+  // here. Kept as a guard anyway rather than trusting the caller.
   const confirmDelete = () => {
-    if (!editing) return;
+    if (!editing || isShared) return;
     if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
-    Alert.alert('Delete vehicle type', `Delete "${getValues('name').trim() || 'this type'}"?`, [
+    const copy = vehicleTypeDeleteCopy(getValues('name').trim() || 'this type', isOverride);
+    Alert.alert(copy.title, copy.message, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete',
+        text: copy.confirmLabel,
         style: 'destructive',
         onPress: async () => {
           setDeleting(true);
           try {
             await deleteVehicleType(editId);
             invalidateFor(qc, 'vehicle-type');
-            toast.success('Vehicle type deleted');
+            toast.success();
             navigation.goBack();
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : 'Could not delete');
+            toast.error(e instanceof Error ? e.message : copy.errorMessage);
           } finally {
             setDeleting(false);
           }
@@ -268,6 +283,12 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
         }
       >
         <Animated.View className="gap-5" style={shakeStyle}>
+          {isShared && (
+            <Txt className="text-caption text-faint">
+              TruckWys platform default — saving creates your own copy, used only by your
+              company.
+            </Txt>
+          )}
           <View className="gap-3">
             <VTText
               control={control}
@@ -294,7 +315,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                   control={control}
                   name="capacity"
                   anchors={anchors}
-                  label="Capacity (tons)"
+                  label="Payload (tonnes)"
                   placeholder="e.g. 30"
                   icon="box"
                   keyboardType="numeric"
@@ -365,14 +386,20 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                 anchors={anchors}
                 options={ACTIVE_OPTIONS}
               />
-              <Button
-                label="Delete vehicle type"
-                variant="danger"
-                icon="trash"
-                loading={deleting}
-                onPress={confirmDelete}
-                fullWidth
-              />
+              {/* Nothing to delete/reset yet on a shared default — the
+              backend's own perform_destroy 403s a tenant trying, so the
+              button is hidden rather than left to fail on tap (mirrors
+              SettingsScreen's SwipeRow, which disables the same gesture). */}
+              {!isShared && (
+                <Button
+                  label={isOverride ? 'Reset vehicle type' : 'Delete vehicle type'}
+                  variant="danger"
+                  icon="trash"
+                  loading={deleting}
+                  onPress={confirmDelete}
+                  fullWidth
+                />
+              )}
             </View>
           )}
         </Animated.View>

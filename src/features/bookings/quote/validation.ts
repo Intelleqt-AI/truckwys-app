@@ -10,7 +10,6 @@ import type { Loc, SectionId } from './types';
 export type IssueField =
   | 'subscription'
   | 'client'
-  | 'vehicleType'
   | 'route'
   | 'pickup'
   | 'dropoff'
@@ -36,7 +35,6 @@ export interface CollectIssuesInput {
   subscriptionNotice: string | null | undefined;
   customerId: string;
   routeBlockedMessage: string;
-  vehicleType: string;
   pickup: Loc | null;
   delivery: Loc | null;
   weightInvalid: boolean;
@@ -45,13 +43,18 @@ export interface CollectIssuesInput {
   deliveryDate: string;
 }
 
-// The five inputs `ready` gates pricing on, as a list rather than a boolean, so
+// The four inputs `ready` gates pricing on, as a list rather than a boolean, so
 // the footer strip and the Price section can say *which* of them is missing
 // instead of both guessing "a route". Separate from collectIssues because these
-// are pricing prerequisites, not save/send blockers — vehicleType, for one,
-// only blocks Send but is needed before a price can be worked out at all.
+// are pricing prerequisites, not save/send blockers.
+//
+// Vehicle type is deliberately NOT one of these gaps (mirrors web's
+// QuoteBuilder.tsx) — a fleet quoting a load a month out often doesn't know
+// yet which truck will be free. Without one the quote prices on company
+// defaults and an inferred reference truck (quote/costs.ts inferFuelBasis);
+// it's no longer required to save or send a quote at all.
 export interface PriceGap {
-  field: 'client' | 'vehicleType' | 'route' | 'weight';
+  field: 'client' | 'route' | 'weight';
   /** Where the footer hint jumps to when tapped. */
   section: SectionId;
   /** List item, joined by formatGapList: "Add a client and a route to see pricing." */
@@ -60,7 +63,6 @@ export interface PriceGap {
 
 export interface MissingPriceInputsArg {
   customerId: string;
-  vehicleType: string;
   pickup: Loc | null;
   delivery: Loc | null;
   weightKg: number;
@@ -69,12 +71,11 @@ export interface MissingPriceInputsArg {
 /**
  * Ordered to match the form's own top-down sections, so the footer hint advances
  * as the user fills the sheet rather than jumping around. Wording is deliberately
- * the same as collectIssues' ('Pick a client', 'Pick a vehicle type') so the strip
- * and the inline field errors read as one voice.
+ * the same as collectIssues' ('Pick a client') so the strip and the inline field
+ * errors read as one voice.
  */
 export function missingPriceInputs({
   customerId,
-  vehicleType,
   pickup,
   delivery,
   weightKg,
@@ -83,9 +84,6 @@ export function missingPriceInputs({
 
   if (!customerId) {
     gaps.push({ field: 'client', section: 'client', noun: 'a client' });
-  }
-  if (!vehicleType) {
-    gaps.push({ field: 'vehicleType', section: 'client', noun: 'a vehicle type' });
   }
   // Collection and drop-off collapse into one gap: the strip is a single line,
   // and the inline LocationField errors already tell the two apart.
@@ -117,7 +115,6 @@ export function collectIssues({
   subscriptionNotice,
   customerId,
   routeBlockedMessage,
-  vehicleType,
   pickup,
   delivery,
   weightInvalid,
@@ -180,15 +177,6 @@ export function collectIssues({
   }
 
   // The rest only block Send — a draft can be saved with these missing.
-  if (!vehicleType) {
-    issues.push({
-      field: 'vehicleType',
-      section: 'client',
-      message: 'Pick a vehicle type',
-      blocks: 'send',
-      fixable: true,
-    });
-  }
   if (weightInvalid) {
     issues.push({
       field: 'weight',

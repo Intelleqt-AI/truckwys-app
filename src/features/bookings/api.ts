@@ -113,6 +113,19 @@ export interface VehicleType {
   /** Extra fuel burned per tonne over `capacity`, as a percent (e.g. 2 = +2%/tonne). */
   fuel_consumption_sensitivity_pct?: number;
   active?: boolean;
+  /** null = the shared platform default every company sees (backend's
+      company=None catalogue row); a number = a row this company owns
+      (custom, or a copy-on-write override of a shared default). undefined
+      means the backend hasn't shipped this field yet — treated the same as
+      company-owned, so a build reaching users before that backend deploy
+      degrades to today's behaviour rather than disabling anything. */
+  company?: number | null;
+  /** True only for a company-owned row that shadows a shared default of the
+      same name — the result of editing a shared type (backend's
+      VehicleTypeViewSet.update copy-on-write). Settings offers "Reset"
+      instead of "Delete" for these. Absent/undefined on a pre-shared-catalogue
+      backend, same reasoning as `company` above. */
+  overrides_shared_default?: boolean;
 }
 
 // The backend serializes every decimal field as a JSON string ("38.00", not
@@ -139,6 +152,13 @@ export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
     // Absent (older records / no key at all) defaults to active, same as the
     // backend's own `active = models.BooleanField(default=True)`.
     active: pick(r, ['active']) !== false,
+    // pick() treats null the same as absent (its `!= null` filter), which is
+    // wrong here — company: null is the meaningful "shared platform default"
+    // value, distinct from the key being missing entirely on a backend that
+    // predates the shared catalogue. Read the raw property so that
+    // distinction survives.
+    company: 'company' in r ? (r.company as number | null) : undefined,
+    overrides_shared_default: r.overrides_shared_default === true,
   };
 }
 

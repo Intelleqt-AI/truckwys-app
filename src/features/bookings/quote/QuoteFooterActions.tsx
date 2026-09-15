@@ -76,6 +76,19 @@ function QuoteFooterActionsImpl({
   // hint's chevron has to read it off the theme to match its own text colour.
   const { colors } = useTheme();
 
+  // The total used to be suppressed by *any* strip, which hid the price at the
+  // one moment the user is watching for it — right after a Send attempt, while
+  // they fill in the last few fields. It now survives the warning strip (the
+  // "N things left" countdown) and still yields to the danger strips, where a
+  // number would contradict the Price section: a suspended subscription, a
+  // route company policy refuses, and an overloaded load all replace the cost
+  // card with a notice, so quoting a figure next to them would be misleading.
+  // total > 0 keeps "R 0" off the row during the sub-second window where
+  // `ready` is true but the route call hasn't returned; without a strip that
+  // transient state is unchanged (it shows R 0 next to the spinner, as it
+  // ships today).
+  const showTotal = ready && (!strip || (strip.tone === 'warning' && total > 0));
+
   return (
     <View>
       <Animated.View
@@ -90,11 +103,13 @@ function QuoteFooterActionsImpl({
             While !ready this half holds prose, not a number, so it goes back to
             flex-1 and yields: a shrink-0 parent is content-sized, which would
             collapse the flex-1 hint inside it to zero width.
-            While a strip is up, this half renders nothing at all (see below) —
-            content-sized still applies, so it collapses to ~0 and the row's
-            justify-between hands the strip the room it just gave up. */}
+            A warning strip (showTotal true) keeps the total here and shares the
+            row with it — see below. A danger strip, or a warning strip before
+            the price has landed, renders nothing here at all — content-sized
+            still applies, so it collapses to ~0 and the row's justify-between
+            hands the strip the room it just gave up. */}
         <View className={`flex-row items-center gap-2 ${!strip && !ready ? 'flex-1' : 'shrink-0'}`}>
-          {strip ? null : ready ? (
+          {showTotal ? (
             <>
               <Mono
                 className="text-callout font-semibold text-accent"
@@ -103,8 +118,9 @@ function QuoteFooterActionsImpl({
               >
                 {formatCurrency(total)}
               </Mono>
-              {/* strip is already excluded by the branch above; the check here
-                  used to be `!strip` on its own but that's now redundant. */}
+              {/* total > 0 here is belt-and-braces — showTotal above already
+                  requires it whenever a strip is up, and it's always true once
+                  statsTrusted is (a route has actually returned). */}
               {statsTrusted && total > 0 && (
                 <Mono className="shrink-0 text-micro text-muted" maxFontSizeMultiplier={1.2}>
                   · {formatPercent(marginPct, 0)} margin
@@ -112,7 +128,7 @@ function QuoteFooterActionsImpl({
               )}
               {calculating && <ActivityIndicator size="small" />}
             </>
-          ) : (
+          ) : strip ? null : (
             // Tappable for the same reason the strip on the right is: the
             // hint itself is generic, but tapping still jumps to the first
             // outstanding gap. Chevron only when there's somewhere to go.

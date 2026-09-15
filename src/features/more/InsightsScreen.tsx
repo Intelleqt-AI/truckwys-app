@@ -3,7 +3,18 @@ import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Screen, SwipeTabs, Label, Card, Badge, Group, DetailRow, StatCard, Txt, EmptyState } from '@/components/ui';
+import {
+  Screen,
+  SwipeTabs,
+  Label,
+  Card,
+  Badge,
+  Group,
+  DetailRow,
+  StatCard,
+  Txt,
+  EmptyState,
+} from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { fetchData } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
@@ -38,10 +49,7 @@ export function InsightsScreen({ navigation, route }: Props) {
   }, [navigation, colors.bgDeep]);
 
   return (
-    <Screen scroll={false} padded={false} topInset={false} contentClassName="pt-3">
-      <View className="px-screen">
-        <Label className="mb-3">AI</Label>
-      </View>
+    <Screen scroll={false} padded={false} topInset={false} contentClassName="pt-2">
       <SwipeTabs
         tabs={[
           { label: 'Briefing', value: 'briefing' },
@@ -62,13 +70,28 @@ export function InsightsScreen({ navigation, route }: Props) {
 function Briefing() {
   const { data, isLoading, isError, refetch } = useInsights();
   const insets = useSafeAreaInsets();
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton />
+      </View>
+    );
   if (isError) return <ErrorState onRetry={refetch} message="Couldn't load insights." />;
   if (!data || data.length === 0)
-    return <EmptyState icon="sparkle" title="No insights yet" body="AI signals about your operations appear here." />;
+    return (
+      <EmptyState
+        icon="sparkle"
+        title="No insights yet"
+        body="AI signals about your operations appear here."
+      />
+    );
   return (
     <ScrollView
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: insets.bottom + 24,
+      }}
       showsVerticalScrollIndicator={false}
     >
       <View className="gap-2.5">
@@ -93,25 +116,46 @@ function Cashflow() {
     retry: false,
   });
   const insets = useSafeAreaInsets();
-  if (isLoading) return <View className="p-screen"><ListSkeleton rows={3} /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton rows={3} />
+      </View>
+    );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load cash flow." />;
   return (
     <ScrollView
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: insets.bottom + 24,
+      }}
       showsVerticalScrollIndicator={false}
     >
       <View className="flex-row flex-wrap gap-3">
         <View className="flex-row" style={{ width: '47.5%' }}>
-          <StatCard label="Inflow" value={formatCurrencyCompact(num(pick(data, ['inflow', 'total_inflow'])))} />
+          <StatCard
+            label="Inflow"
+            value={formatCurrencyCompact(num(pick(data, ['inflow', 'total_inflow'])))}
+          />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
-          <StatCard label="Outflow" value={formatCurrencyCompact(num(pick(data, ['outflow', 'total_outflow'])))} />
+          <StatCard
+            label="Outflow"
+            value={formatCurrencyCompact(num(pick(data, ['outflow', 'total_outflow'])))}
+          />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
-          <StatCard label="Net position" value={formatCurrencyCompact(num(pick(data, ['net', 'net_position'])))} />
+          <StatCard
+            label="Net position"
+            value={formatCurrencyCompact(num(pick(data, ['net', 'net_position'])))}
+          />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
-          <StatCard label="Projected" value={formatCurrencyCompact(num(pick(data, ['projected', 'forecast'])))} />
+          <StatCard
+            label="Projected"
+            value={formatCurrencyCompact(num(pick(data, ['projected', 'forecast'])))}
+          />
         </View>
       </View>
     </ScrollView>
@@ -132,18 +176,39 @@ function Lanes() {
     retry: false,
   });
   const insets = useSafeAreaInsets();
-  if (isLoading) return <View className="p-screen"><ListSkeleton rows={4} /></View>;
+  if (isLoading)
+    return (
+      <View className="p-screen">
+        <ListSkeleton rows={4} />
+      </View>
+    );
   if (isError) return <ErrorState onRetry={refetch} message="Couldn't load lanes." />;
   if (!data || data.length === 0)
-    return <EmptyState icon="route" title="No lane data" body="Lane margins appear as you complete trips." />;
+    return (
+      <EmptyState
+        icon="route"
+        title="No lane data"
+        body="Lane margins appear as you complete trips."
+      />
+    );
   return (
     <ScrollView
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: insets.bottom + 24,
+      }}
       showsVerticalScrollIndicator={false}
     >
       <Group label="Margin by lane">
         {data.slice(0, 12).map((l, i) => (
-          <DetailRow key={l.lane + i} label={l.lane} value={formatPercent(l.margin)} mono={false} last={i === data.length - 1} />
+          <DetailRow
+            key={l.lane + i}
+            label={l.lane}
+            value={formatPercent(l.margin)}
+            mono={false}
+            last={i === data.length - 1}
+          />
         ))}
       </Group>
     </ScrollView>

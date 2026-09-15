@@ -41,6 +41,27 @@ export function vehicleTypeSchema() {
 }
 export type VehicleTypeFormValues = z.infer<ReturnType<typeof vehicleTypeSchema>>;
 
+// Delete-vs-reset copy for a vehicle type, shared between SettingsScreen's
+// swipe-delete row and AddVehicleTypeScreen's edit-sheet button so the two
+// can't drift apart. `isOverride` is a company-owned row that shadows a
+// shared (company: null) default of the same name — see normalizeVehicleType
+// in bookings/api.ts for what the two backend fields behind it mean.
+export function vehicleTypeDeleteCopy(name: string, isOverride: boolean) {
+  return isOverride
+    ? {
+        title: 'Reset vehicle type',
+        message: `Reset "${name}" to TruckWys's current shared default? Your changes to it will be lost.`,
+        confirmLabel: 'Reset',
+        errorMessage: 'Could not reset',
+      }
+    : {
+        title: 'Delete vehicle type',
+        message: `Delete "${name}"?`,
+        confirmLabel: 'Delete',
+        errorMessage: 'Could not delete',
+      };
+}
+
 // JSX order, not object-key order — onInvalid scrolls to whichever of these
 // comes first that also has an error.
 export const VEHICLE_TYPE_FIELD_ORDER: (keyof VehicleTypeFormValues)[] = [

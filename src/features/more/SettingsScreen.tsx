@@ -66,6 +66,7 @@ import {
   type NotificationPrefs,
 } from './api';
 import { normalizeVehicleType } from '@/features/bookings/api';
+import { vehicleTypeDeleteCopy } from './validation';
 import { formatCurrency, formatDate, formatRelativeTime, parseNum } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
@@ -439,13 +440,21 @@ function VehicleTypesSection() {
     [list],
   );
 
-  const removeOne = (t: Record<string, unknown>, tid: string) => {
+  // isOverride: this row is a company-owned copy-on-write clone of a shared
+  // (company=null) default (see normalizeVehicleType's comment). Deleting it
+  // is a "Reset" — the backend's own perform_destroy treats it as a plain
+  // delete, and the shared default reappears in the list once the refetch
+  // lands, since visible_vehicle_types_queryset only hides a shared row while
+  // this company has an override of the same name.
+  const removeOne = (t: Record<string, unknown>, tid: string, isOverride = false) => {
     if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
     const rawId = pick(t, ['id']) as string | number;
-    Alert.alert('Delete vehicle type', `Delete "${str(pick(t, ['name']), 'this type')}"?`, [
+    const name = str(pick(t, ['name']), 'this type');
+    const copy = vehicleTypeDeleteCopy(name, isOverride);
+    Alert.alert(copy.title, copy.message, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete',
+        text: copy.confirmLabel,
         style: 'destructive',
         onPress: async () => {
           setDeletingIds((prev) => new Set(prev).add(tid));
@@ -457,7 +466,7 @@ function VehicleTypesSection() {
             // this row from the list entirely once the refetch lands, so
             // there's nothing to revert and no flash back to a normal row.
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : 'Could not delete');
+            toast.error(e instanceof Error ? e.message : copy.errorMessage);
             setDeletingIds((prev) => {
               const next = new Set(prev);
               next.delete(tid);
@@ -480,25 +489,35 @@ function VehicleTypesSection() {
   const batchDelete = () => {
     if (selected.size === 0) return;
     if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
-    Alert.alert('Delete vehicle types', `Delete ${selected.size} selected type(s)?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: `Delete ${selected.size}`,
-        style: 'destructive',
-        onPress: async () => {
-          setBusy(true);
-          try {
-            await Promise.all([...selected].map((sid) => deleteVehicleType(sid).catch(() => {})));
-            invalidateFor(qc, 'vehicle-type');
-            setSelected(new Set());
-            setSelectMode(false);
-            toast.success();
-          } finally {
-            setBusy(false);
-          }
+    // Shared platform defaults are never selectable (see isShared below), but
+    // a selection can still mix plain deletes with resets of a company's own
+    // overrides — "Remove" covers both without claiming the wrong one.
+    const anyOverride = list.some(
+      (t) => selected.has(String(t.id)) && t.company !== null && t.overrides_shared_default,
+    );
+    Alert.alert(
+      'Remove vehicle types',
+      `Remove ${selected.size} selected type(s)?${anyOverride ? ' Any customized type reverts to the shared default instead of being deleted.' : ''}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Remove ${selected.size}`,
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await Promise.all([...selected].map((sid) => deleteVehicleType(sid).catch(() => {})));
+              invalidateFor(qc, 'vehicle-type');
+              setSelected(new Set());
+              setSelectMode(false);
+              toast.success();
+            } finally {
+              setBusy(false);
+            }
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   return (
@@ -564,6 +583,15 @@ function VehicleTypesSection() {
               const isActive = pick(r, ['active']) !== false;
               const isSel = selected.has(tid);
               const isDeleting = deletingIds.has(tid);
+              // Shared platform default (company=null, editable but never
+              // deletable — the backend's own perform_destroy 403s a tenant
+              // trying), this company's own override of one (editable in
+              // place, "Reset" instead of "Delete"), or a fully custom type.
+              // Read straight off `t`, not through pick(r, ...) — pick()
+              // treats null the same as a missing key, which would erase the
+              // "shared" signal entirely (see normalizeVehicleType).
+              const isShared = t.company === null;
+              const isOverride = !isShared && t.overrides_shared_default === true;
               const openEdit = () => {
                 if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
                 nav.navigate('AddVehicleType', {
@@ -572,7 +600,7 @@ function VehicleTypesSection() {
                 });
               };
               const meta = [
-                cap ? `${cap} t` : null,
+                cap ? `${cap}t` : null,
                 rate ? `R ${rate}/km` : null,
                 fuelType || null,
                 consumption ? `${consumption} L/100km` : null,
@@ -584,16 +612,40 @@ function VehicleTypesSection() {
               return (
                 <View key={tid} className="mb-2.5 overflow-hidden rounded-xs border border-line">
                   <SwipeRow
-                    enabled={!selectMode && !isDeleting}
-                    onDelete={() => removeOne(r, tid)}
+                    // A shared default has nothing to delete/reset yet — the
+                    // backend rejects it outright (VehicleTypeViewSet.perform_
+                    // destroy), so the gesture is disabled rather than left to
+                    // fail on tap.
+                    enabled={!selectMode && !isDeleting && !isShared}
+                    deleteLabel={isOverride ? 'Reset' : 'Delete'}
+                    onDelete={() => removeOne(r, tid, isOverride)}
                   >
                     <Pressable
-                      onPress={() => (selectMode ? toggleSel(tid) : openEdit())}
+                      onPress={() => {
+                        if (selectMode) {
+                          if (!isShared) toggleSel(tid);
+                          return;
+                        }
+                        openEdit();
+                      }}
                       disabled={isDeleting}
                       className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3 active:bg-surface-hover"
                     >
                       {selectMode &&
-                        (isSel ? (
+                        (isShared ? (
+                          // Not selectable — batch-delete can't touch a
+                          // platform default, so its dot never fills.
+                          <View
+                            style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: 10,
+                              borderWidth: 1.5,
+                              borderColor: colors.faint,
+                              opacity: 0.35,
+                            }}
+                          />
+                        ) : isSel ? (
                           <Icon name="checkCircle" size={20} color={colors.accent} />
                         ) : (
                           <View
@@ -623,6 +675,8 @@ function VehicleTypesSection() {
                             {str(pick(r, ['name']), 'Type')}
                           </Txt>
                           {!isActive && <Badge label="Inactive" tone="neutral" />}
+                          {isShared && <Badge label="Platform default" tone="info" />}
+                          {isOverride && <Badge label="Customized" tone="accent" />}
                         </View>
                         {!!description && (
                           <Txt className="mt-0.5 text-caption text-muted" numberOfLines={1}>
@@ -1248,6 +1302,13 @@ function CompanySection() {
       const n = parseNum(v);
       if (n != null && n < 0) return toast.error(`${label} can't be negative`);
     }
+    // Mirrors web's CompanySettings.tsx bound on Default SLA (Hours) — a
+    // value present must be a sane whole number of hours; blank is still
+    // allowed (falls back to the model default on save).
+    const slaHoursNum = parseNum(slaHours);
+    if (slaHoursNum != null && (slaHoursNum < 1 || slaHoursNum > 720)) {
+      return toast.error('Default SLA must be between 1 and 720 hours');
+    }
 
     // Only send a numeric field when it has a value — an empty box must leave
     // the stored default alone rather than zeroing it.
@@ -1511,21 +1572,26 @@ function CompanySection() {
       <TextField
         label="Base rate / km"
         prefix="R"
-        placeholder="e.g. 25"
+        placeholder="e.g. 33.00"
         keyboardType="decimal-pad"
         value={baseRate}
         onChangeText={setBaseRate}
       />
+      <Txt className="-mt-1 text-caption text-faint">
+        Used when the vehicle type on a quote has no rate of its own (Settings → Vehicle Types).
+        A type&apos;s own rate always wins.
+      </Txt>
       <TextField
         label="Toll rate / km"
         prefix="R"
-        placeholder="e.g. 0,95"
+        placeholder="e.g. 0.50"
         keyboardType="decimal-pad"
         value={tollRate}
         onChangeText={setTollRate}
       />
       <Txt className="-mt-1 text-caption text-faint">
-        Fallback only — used when the routing service can&apos;t itemise toll plazas.
+        Fallback only — used when the routing service can&apos;t itemise the toll plazas on a
+        route.
       </Txt>
       <TextField
         label="Default SLA (hours)"
@@ -1535,6 +1601,9 @@ function CompanySection() {
         value={slaHours}
         onChangeText={setSlaHours}
       />
+      <Txt className="-mt-1 text-caption text-faint">
+        Delivery time promised on a new quote. Can be overridden per quote.
+      </Txt>
 
       {/* ── Fuel price defaults ───────────────────────────────────────────── */}
       <View className="mt-1 flex-row items-center justify-between">

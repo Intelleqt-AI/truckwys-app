@@ -16,8 +16,8 @@ export interface NaturalLanguageBarHandle {
  * Colocates the "Describe it" text — read in exactly two places before this
  * move (Phase 1 perf pass): VoiceQuoteBar's `value`, and submitNL's
  * `(text ?? nlText)` default in CreateQuoteScreen.tsx. Every keystroke here
- * used to re-render the whole ~1700-line screen (AI card, ProfitCurve, cost
- * breakdown, map props) for no reason; now it only re-renders this bar.
+ * used to re-render the whole ~1700-line screen (AI card, cost breakdown, map
+ * props) for no reason; now it only re-renders this bar.
  *
  * `nlBusy`/`nlReply` stay in the parent (nlBusy also drives WorkingOverlay;
  * nlReply is written by submitNL) and are passed down as plain props.

@@ -1,4 +1,5 @@
 import type { Loc, SectionId } from './types';
+import type { WinModelTier } from '../api';
 
 // Single source of truth for "can this quote be saved / sent, and why not."
 // The rules here are exactly the guard clauses save() already enforces
@@ -10,7 +11,6 @@ import type { Loc, SectionId } from './types';
 export type IssueField =
   | 'subscription'
   | 'client'
-  | 'vehicleType'
   | 'route'
   | 'pickup'
   | 'dropoff'
@@ -36,7 +36,6 @@ export interface CollectIssuesInput {
   subscriptionNotice: string | null | undefined;
   customerId: string;
   routeBlockedMessage: string;
-  vehicleType: string;
   pickup: Loc | null;
   delivery: Loc | null;
   weightInvalid: boolean;
@@ -45,13 +44,18 @@ export interface CollectIssuesInput {
   deliveryDate: string;
 }
 
-// The five inputs `ready` gates pricing on, as a list rather than a boolean, so
+// The four inputs `ready` gates pricing on, as a list rather than a boolean, so
 // the footer strip and the Price section can say *which* of them is missing
 // instead of both guessing "a route". Separate from collectIssues because these
-// are pricing prerequisites, not save/send blockers — vehicleType, for one,
-// only blocks Send but is needed before a price can be worked out at all.
+// are pricing prerequisites, not save/send blockers.
+//
+// Vehicle type is deliberately NOT one of these gaps (mirrors web's
+// QuoteBuilder.tsx) — a fleet quoting a load a month out often doesn't know
+// yet which truck will be free. Without one the quote prices on company
+// defaults and an inferred reference truck (quote/costs.ts inferFuelBasis);
+// it's no longer required to save or send a quote at all.
 export interface PriceGap {
-  field: 'client' | 'vehicleType' | 'route' | 'weight';
+  field: 'client' | 'route' | 'weight';
   /** Where the footer hint jumps to when tapped. */
   section: SectionId;
   /** List item, joined by formatGapList: "Add a client and a route to see pricing." */
@@ -60,7 +64,6 @@ export interface PriceGap {
 
 export interface MissingPriceInputsArg {
   customerId: string;
-  vehicleType: string;
   pickup: Loc | null;
   delivery: Loc | null;
   weightKg: number;
@@ -69,12 +72,11 @@ export interface MissingPriceInputsArg {
 /**
  * Ordered to match the form's own top-down sections, so the footer hint advances
  * as the user fills the sheet rather than jumping around. Wording is deliberately
- * the same as collectIssues' ('Pick a client', 'Pick a vehicle type') so the strip
- * and the inline field errors read as one voice.
+ * the same as collectIssues' ('Pick a client') so the strip and the inline field
+ * errors read as one voice.
  */
 export function missingPriceInputs({
   customerId,
-  vehicleType,
   pickup,
   delivery,
   weightKg,
@@ -83,9 +85,6 @@ export function missingPriceInputs({
 
   if (!customerId) {
     gaps.push({ field: 'client', section: 'client', noun: 'a client' });
-  }
-  if (!vehicleType) {
-    gaps.push({ field: 'vehicleType', section: 'client', noun: 'a vehicle type' });
   }
   // Collection and drop-off collapse into one gap: the strip is a single line,
   // and the inline LocationField errors already tell the two apart.
@@ -117,7 +116,6 @@ export function collectIssues({
   subscriptionNotice,
   customerId,
   routeBlockedMessage,
-  vehicleType,
   pickup,
   delivery,
   weightInvalid,
@@ -180,15 +178,6 @@ export function collectIssues({
   }
 
   // The rest only block Send — a draft can be saved with these missing.
-  if (!vehicleType) {
-    issues.push({
-      field: 'vehicleType',
-      section: 'client',
-      message: 'Pick a vehicle type',
-      blocks: 'send',
-      fixable: true,
-    });
-  }
   if (weightInvalid) {
     issues.push({
       field: 'weight',
@@ -226,4 +215,78 @@ export function collectIssues({
   }
 
   return issues;
+}
+
+// ── AI pricing "not ready" banner copy ──────────────────────────────────────
+// Mirrors web's QuoteBuilder.tsx awaitingCopy (commit 79c1eda). ai_prediction
+// is a real model that couldn't price THIS point — a different situation from
+// no model existing at all — so its `reason` is checked first; `blocker` (the
+// two-tier training-progress gate) is the fallback for "no model yet".
+
+export interface AwaitingAiCopy {
+  title: string;
+  /** '' (matches web exactly, not null) when there's nothing more useful to
+      say than the title. */
+  detail: string;
+}
+
+export function awaitingAiCopy(
+  /** ai_prediction.reason when available === false; null/undefined otherwise
+      (including when a model IS available — see selectWinBlocker below for
+      why that case never reaches here in practice). */
+  reason: string | null | undefined,
+  winBlocker: WinModelTier['blocker'] | null | undefined,
+): AwaitingAiCopy {
+  if (reason === 'optimizer_error') {
+    return { title: 'AI pricing hit a snag.', detail: '' };
+  }
+  if (reason === 'model_curve_unusable') {
+    return {
+      title: 'AI pricing needs a bit more data at this price point.',
+      detail: 'Priced on your company rate for now — try a nearby price and the AI should pick back up.',
+    };
+  }
+  if (winBlocker === 'needs_lost_quotes') {
+    return {
+      title: 'AI pricing needs some lost quotes too.',
+      detail: "A model can't learn what loses a deal until some quotes are marked lost — or left to expire.",
+    };
+  }
+  if (winBlocker === 'needs_won_quotes') {
+    return {
+      title: 'AI pricing needs some won quotes too.',
+      detail: "A model needs deals that landed as well as ones that didn't.",
+    };
+  }
+  if (winBlocker === 'awaiting_retrain') {
+    return {
+      title: 'AI pricing is training tonight.',
+      detail: 'Enough quotes have closed — the model builds on the next nightly run.',
+    };
+  }
+  if (winBlocker === 'ml_unavailable') {
+    return {
+      title: 'AI pricing is unavailable.',
+      detail: "The prediction libraries aren't installed on this server.",
+    };
+  }
+  // Default covers 'insufficient_data' and no blocker at all (stats not yet loaded).
+  return { title: "AI pricing isn't ready yet.", detail: 'Every quote you close sharpens it.' };
+}
+
+/**
+ * Which tier's blocker actually explains the "not ready" state — mirrors
+ * web's QuoteBuilder.tsx winTier selection. The user tier is preferred once it
+ * either has no blocker or has passed the count gate (qualifies); otherwise
+ * the global tier's blocker is the more informative one to show, since a
+ * blocked user tier under its own count floor is just "insufficient_data"
+ * again and the global tier may know something more specific (e.g. the whole
+ * platform is awaiting_retrain).
+ */
+export function selectWinBlocker(
+  user: WinModelTier | null | undefined,
+  global: WinModelTier | null | undefined,
+): WinModelTier['blocker'] | null {
+  const tier = user?.blocker == null || user?.qualifies ? user : global;
+  return tier?.blocker ?? global?.blocker ?? null;
 }

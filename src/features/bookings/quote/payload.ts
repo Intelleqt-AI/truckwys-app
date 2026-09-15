@@ -74,7 +74,7 @@ export function buildQuotePayload(
     // Previously computed for live pricing only, then discarded: never saved,
     // so Quote Detail / a converted Load could never show the real road path.
     route_geometry: routeGeometry.map((p) => ({ lat: roundCoord(p.lat), lon: roundCoord(p.lon) })),
-    cargo_description: cargo || `${weight}t ${vehicleType}`,
+    cargo_description: cargo || `${weight}t ${vehicleType}`.trim(),
     weight: weightKg,
     distance: costs.distance,
     estimated_duration_minutes: costs.duration,

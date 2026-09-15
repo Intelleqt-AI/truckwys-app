@@ -1,15 +1,6 @@
-import { memo } from 'react';
-import { View, ActivityIndicator } from 'react-native';
-import {
-  Group,
-  ProfitCurve,
-  Button,
-  Icon,
-  Txt,
-  Mono,
-  Label,
-  type CurvePoint,
-} from '@/components/ui';
+import { memo, useState } from 'react';
+import { View, ActivityIndicator, Pressable } from 'react-native';
+import { Group, Button, Icon, Txt, Mono, Label, Badge } from '@/components/ui';
 import { Skeleton } from '@/components/feedback';
 import { status as statusHues } from '@/theme/tokens';
 import {
@@ -19,13 +10,48 @@ import {
   formatNumber,
   formatPercent,
 } from '@/lib/formatters';
+import type { WinModelTier } from '../api';
+import type { AwaitingAiCopy } from './validation';
+
+/** One tier's won/lost readout — {label: 'your quotes'|'platform', tier}. */
+function TierRow({ label, tier }: { label: string; tier: WinModelTier | null | undefined }) {
+  // Matches web's exact fallback chain (QuoteBuilder.tsx): accepted falls
+  // back to outcomes_collected (an old/pre-two-tier payload can carry the
+  // count without the won/lost split), rejected falls back to 0.
+  const won = tier?.accepted ?? tier?.outcomes_collected ?? 0;
+  const rejected = tier?.rejected ?? 0;
+  const collected = tier?.outcomes_collected ?? 0;
+  const needed = tier?.outcomes_needed ?? 0;
+  // The N/needed sub-label only makes sense while the count gate is actually
+  // what's blocking this tier — showing it once the count has passed (e.g.
+  // the class-balance or retrain gate is what's left) is what made "45/40"
+  // read next to "AI pricing isn't ready yet" as a self-contradiction.
+  const showCount = tier?.blocker === 'insufficient_data';
+  return (
+    <View className="flex-1">
+      <Mono className="text-micro text-fg" numberOfLines={1}>
+        {formatNumber(won)} won
+        <Txt className="text-micro text-faint"> · </Txt>
+        <Txt className={`text-micro ${rejected === 0 ? 'text-warning' : 'text-faint'}`}>
+          {formatNumber(rejected)} lost
+        </Txt>
+      </Mono>
+      <Txt className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+        {showCount ? `${label} · ${formatNumber(collected)}/${formatNumber(needed)}` : label}
+      </Txt>
+    </View>
+  );
+}
 
 /**
  * The AI recommendation card — moved out of CreateQuoteScreen.tsx's render
- * body (Phase 2) verbatim, wrapped in memo. All-primitive props (plus the
- * already-memoized curveData) so a keystroke in an unrelated field — Notes,
- * Cargo, an override — skips this card entirely instead of re-running the
- * skeleton/hero/curve/banner logic.
+ * body (Phase 2) verbatim, wrapped in memo. All-primitive props so a
+ * keystroke in an unrelated field — Notes, Cargo, an override — skips this
+ * card entirely instead of re-running the skeleton/hero/banner logic.
+ *
+ * `statsTrusted` (== ai_prediction.available, modulo the markup-plausibility
+ * guard) is the only thing that may label a price "AI" — see
+ * quote/validation.ts's awaitingAiCopy for the reasoning behind each state.
  */
 function AiRecommendationCardImpl({
   estimateLoading,
@@ -36,18 +62,21 @@ function AiRecommendationCardImpl({
   marginPct,
   expProfit,
   winProb,
-  curveData,
   alreadyApplied,
   onApplyRecommended,
   onUseActualPrice,
   riskLevel,
   guardMsg,
   guardHint,
-  aiLearning,
+  modelScope,
+  trainingSamples,
+  awaitingVisible,
+  awaitingCopy,
+  hasVehicleType,
   vehicleType,
-  outcomesLogged,
-  outcomesNeeded,
-  learnPct,
+  hasWinModel,
+  winUserTier,
+  winGlobalTier,
 }: {
   estimateLoading: boolean;
   statsTrusted: boolean;
@@ -57,19 +86,29 @@ function AiRecommendationCardImpl({
   marginPct: number;
   expProfit: number;
   winProb: number;
-  curveData: CurvePoint[];
   alreadyApplied: boolean;
   onApplyRecommended: () => void;
   onUseActualPrice: () => void;
   riskLevel: string;
   guardMsg: string;
   guardHint: string | null;
-  aiLearning: boolean;
+  /** null when statsTrusted is false — there's no trained model behind the price shown. */
+  modelScope: 'user' | 'global' | null;
+  trainingSamples: number | null;
+  awaitingVisible: boolean;
+  awaitingCopy: AwaitingAiCopy;
+  hasVehicleType: boolean;
   vehicleType: string;
-  outcomesLogged: number;
-  outcomesNeeded: number;
-  learnPct: number;
+  /** pick(modelStats, ['win_model']) != null — see the tier-row guard below. */
+  hasWinModel: boolean;
+  winUserTier: WinModelTier | null | undefined;
+  winGlobalTier: WinModelTier | null | undefined;
 }) {
+  // Web shows training_samples only in a hover `title` tooltip — secondary
+  // info, not shown until asked for. Touch has no hover, so a tap on the
+  // badge reveals the same line instead, hidden by default; an always-visible
+  // caption would be further from web's actual behaviour than this is.
+  const [showTrainingInfo, setShowTrainingInfo] = useState(false);
   return (
     <Group label="AI recommendation">
       {estimateLoading ? (
@@ -97,9 +136,29 @@ function AiRecommendationCardImpl({
           {/* The price is the hero. Its label and caption say which
               basis it came from, so a cost-based figure is never
               mistaken for a trained recommendation. */}
-          <Label className="text-faint">
-            {statsTrusted ? 'Recommended price' : 'Suggested price'}
-          </Label>
+          <View className="flex-row items-center justify-between">
+            <Label className="text-faint">
+              {statsTrusted ? 'Recommended price' : 'Suggested price'}
+            </Label>
+            {/* A global (platform-wide) model is a fully functional result, not
+                a degraded one — badged distinctly from Personal, not lesser.
+                Tap to reveal the training-sample count below (web's hover
+                tooltip equivalent). */}
+            {statsTrusted && modelScope && (
+              <Pressable onPress={() => setShowTrainingInfo((v) => !v)} hitSlop={8}>
+                <Badge
+                  label={modelScope === 'user' ? 'Personal AI' : 'Platform AI'}
+                  tone={modelScope === 'user' ? 'accent' : 'neutral'}
+                />
+              </Pressable>
+            )}
+          </View>
+          {statsTrusted && showTrainingInfo && trainingSamples != null && (
+            <Txt className="mt-0.5 text-micro text-faint">
+              Trained on {formatNumber(trainingSamples)}{' '}
+              {modelScope === 'user' ? 'of your own' : 'platform-wide'} closed quotes
+            </Txt>
+          )}
           {/* minimumFontScale is the point here: RN defaults it to 0.01, so
               adjustsFontSizeToFit would shrink a seven-figure total toward
               illegibility rather than clip it. Below 0.6 a tail ellipsis is the
@@ -133,9 +192,10 @@ function AiRecommendationCardImpl({
                     style={{ fontSize: 18, fontWeight: '600' }}
                     numberOfLines={1}
                   >
-                    {optMarkupPct != null
-                      ? formatPercent(optMarkupPct, 0)
-                      : formatPercent(marginPct, 0)}
+                    {/* Truthy, not `!= null` — mirrors web's `opt?.optimal_margin_pct
+                        ? … : marginPct` exactly, so an optimal_margin_pct of 0
+                        falls back to marginPct the same way it does on web. */}
+                    {optMarkupPct ? formatPercent(optMarkupPct, 0) : formatPercent(marginPct, 0)}
                   </Mono>
                   <Mono className="text-micro text-success" numberOfLines={1}>
                     {formatCurrencyCompact(expProfit)} profit
@@ -161,24 +221,13 @@ function AiRecommendationCardImpl({
                   </View>
                 </View>
               </View>
-
-              {curveData.length > 1 && (
-                <View className="mt-4">
-                  <Label className="mb-1 text-faint">Profit sweet-spot · tap to inspect</Label>
-                  <ProfitCurve
-                    points={curveData}
-                    optimalMargin={optMarkupPct != null ? Math.round(optMarkupPct) : undefined}
-                    height={56}
-                  />
-                </View>
-              )}
             </>
           ) : (
-            /* One honest line instead of three "unlocks after training"
+            /* One honest line instead of two "unlocks after training"
                placeholders — the client asked for less clutter, and
                empty tiles are clutter. */
             <Txt className="mt-3 text-caption text-faint">
-              Margin, win probability and the profit curve unlock once the model is trained.
+              Margin and win probability unlock once the model is trained.
             </Txt>
           )}
 
@@ -229,21 +278,32 @@ function AiRecommendationCardImpl({
         </View>
       )}
 
-      {aiLearning && (
-        <View className="flex-row items-center gap-2.5 border-t border-line bg-warning-bg p-3">
-          <Icon name="sparkle" size={16} color="#F59E0B" />
-          <Txt className="flex-1 text-sub text-muted">
-            <Txt className="text-sub font-semibold text-fg">Still learning your fleet. </Txt>
-            Priced on true cost + your {vehicleType} base rate for now.
-          </Txt>
-          <View className="items-end">
-            <Mono className="text-micro text-fg">
-              {formatNumber(outcomesLogged)}/{formatNumber(outcomesNeeded)} logged
-            </Mono>
-            <View className="mt-1 h-1 w-16 overflow-hidden rounded-pill bg-surface-hover">
-              <View style={{ width: `${learnPct}%`, height: '100%', backgroundColor: '#F59E0B' }} />
-            </View>
+      {awaitingVisible && (
+        <View className="gap-2.5 border-t border-line bg-warning-bg p-3">
+          <View className="flex-row items-start gap-2.5">
+            <Icon name="sparkle" size={16} color="#F59E0B" />
+            <Txt className="flex-1 text-sub text-muted">
+              <Txt className="text-sub font-semibold text-fg">{awaitingCopy.title} </Txt>
+              Priced on true cost +{' '}
+              {hasVehicleType ? `your ${vehicleType} base rate` : 'your company default base rate'}{' '}
+              for now.
+              {awaitingCopy.detail ? ` ${awaitingCopy.detail}` : ''}
+            </Txt>
           </View>
+          {/* Split by tier — a company can qualify on the platform total while
+              still short on its own outcomes (or vice versa), so a single
+              combined count can't say whose data is missing. Gated on
+              hasWinModel (mirrors web's `{winModel && ...}`) because
+              normalizeWinModelTier always returns a real object — without
+              this guard the row would assert "0 won · 0 lost" before
+              model-stats has resolved, or when model_progress errors and
+              returns a null win_model, a claim web never makes. */}
+          {hasWinModel && (
+            <View className="flex-row gap-6 pl-6">
+              <TierRow label="your quotes" tier={winUserTier} />
+              <TierRow label="platform" tier={winGlobalTier} />
+            </View>
+          )}
         </View>
       )}
     </Group>

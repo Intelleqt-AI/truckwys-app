@@ -32,6 +32,8 @@ function CostOverridesImpl({
   onDriverChangeText,
   baseRatePerKm,
   onRateChangeText,
+  rateSource,
+  onRatePress,
   overridden,
   onResetAll,
 }: {
@@ -45,11 +47,19 @@ function CostOverridesImpl({
   onDriverChangeText: (v: string) => void;
   baseRatePerKm: string;
   onRateChangeText: (v: string) => void;
+  /** Where the current figure came from — 'From {vehicleType}', 'From company
+      settings', or 'Custom rate' once typed over either (mirrors web's
+      baseRateSource). null when the field is empty. */
+  rateSource: string | null;
+  /** Opens the full precedence — company default vs. the selected type's own
+      rate (RateBreakdownModal). */
+  onRatePress: () => void;
   /** Whether anything (tolls, driver, rate, or the AI price uplift) has
       actually been changed away from its calculated/default value. */
   overridden: boolean;
   onResetAll: () => void;
 }) {
+  const { colors } = useTheme();
   const tollDiffersFromCalculated = tollEdited && Math.round(tollOverrideNum) !== tollCalculated;
 
   return (
@@ -108,6 +118,23 @@ function CostOverridesImpl({
           onChangeText={onRateChangeText}
           bottomSheet
         />
+        {/* Names where the figure above came from and opens the full
+            precedence (RateBreakdownModal) — the app's equivalent of web's
+            R/km Popover. Same shape as RevertHint, minus the "tap to use"
+            wording since this doesn't revert anything. */}
+        {rateSource && (
+          <Pressable
+            onPress={onRatePress}
+            accessibilityRole="button"
+            accessibilityLabel={`${rateSource}. Show how this was worked out`}
+            className="-mt-1 flex-row items-center gap-1"
+          >
+            <Mono className="shrink text-micro text-faint" numberOfLines={1}>
+              {rateSource}
+            </Mono>
+            <Icon name="chevronRight" size={13} color={colors.faint} />
+          </Pressable>
+        )}
       </View>
     </Group>
   );

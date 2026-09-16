@@ -20,6 +20,7 @@ import { ErrorState } from '@/components/feedback';
 import { useVehicle, useVehicleLoads, updateVehicle, deleteVehicle, VEHICLE_STATUSES } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { num, str, pick, asArray } from '@/lib/api/list';
+import { capacityTons } from '@/features/bookings/quote/types';
 import {
   formatCurrency,
   formatCurrencyCompact,
@@ -177,8 +178,24 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow label="VIN" value={str(pick(v, ['vin']), '—')} />
             <DetailRow label="Plate" value={str(pick(v, ['plate', 'registration']), '—')} />
             <DetailRow label="Type" value={str(pick(v, ['vehicle_type_name', 'vehicle_type']), '—')} mono={false} />
+            {(() => {
+              // vehicle_type_capacity — the linked VehicleType's own rated
+              // payload (backend's VehicleSerializer), distinct from this
+              // vehicle's own `capacity` below, which is set independently
+              // per-vehicle and can drift from its type. Rendered only when
+              // present so a pre-deploy backend shows nothing rather than 0t.
+              const ratedCap = capacityTons(pick(v, ['vehicle_type_capacity']));
+              return ratedCap != null ? (
+                <DetailRow
+                  label="Rated capacity"
+                  hint="Standard for this vehicle type"
+                  value={`${formatNumber(ratedCap, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
+                />
+              ) : null;
+            })()}
             <DetailRow
               label="Capacity"
+              hint="Set on this vehicle"
               value={`${formatNumber(num(pick(v, ['capacity', 'capacity_kg'])) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
             />
             <DetailRow label="Fuel type" value={str(pick(v, ['fuel_type']), '—')} mono={false} />

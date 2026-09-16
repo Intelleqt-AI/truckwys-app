@@ -102,6 +102,8 @@ import {
   type QuoteJumpBarSection,
 } from './quote/QuoteJumpBar';
 import { RouteOptionChips } from './quote/RouteOptionChips';
+import { TruckSuggestionChips } from './quote/TruckSuggestionChips';
+import { suggestTrucks } from './quote/suggestions';
 import { AiRecommendationCard } from './quote/AiRecommendationCard';
 import { CostBreakdownCard } from './quote/CostBreakdownCard';
 import { CostOverrides } from './quote/CostOverrides';
@@ -480,17 +482,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // web's applyVehicleType. Only fires on an actual dropdown selection, never
   // as a passive effect keyed on vehicleType, so it can't re-fire and clobber
   // the saved rate when an existing quote is loaded for editing.
-  const handleVehicleTypeSelect = (name: string) => {
-    setVehicleType(name);
-    const vt = (vtypes ?? []).find((v) => v.name === name);
-    const vtRate = Number(vt?.base_rate) || 0;
-    if (vtRate > 0) {
-      setBaseRatePerKm(String(vtRate));
-      return;
-    }
-    const def = num(pick(company ?? {}, ['default_base_rate_per_km']));
-    if (def > 0) setBaseRatePerKm(String(def));
-  };
+  const handleVehicleTypeSelect = useCallback(
+    (name: string) => {
+      setVehicleType(name);
+      const vt = (vtypes ?? []).find((v) => v.name === name);
+      const vtRate = Number(vt?.base_rate) || 0;
+      if (vtRate > 0) {
+        setBaseRatePerKm(String(vtRate));
+        return;
+      }
+      const def = num(pick(company ?? {}, ['default_base_rate_per_km']));
+      if (def > 0) setBaseRatePerKm(String(def));
+    },
+    [vtypes, company],
+  );
 
   // The AI returns a free-form spoken vehicle type ("flat bed") rather than
   // one of our configured names ("Flatbed"). costs.ts matches fuel figures by
@@ -611,16 +616,42 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     () => (customers ?? []).map((c) => ({ label: c.name, value: String(c.id) })),
     [customers],
   );
+  // With no vehicle type picked and a weight entered, offer up to three
+  // trucks the fleet owns that can carry the load — see quote/suggestions.ts.
+  // Declared before vtypeOptions, which unions in any suggested type the
+  // availability filter would otherwise drop.
+  const suggestions = useMemo(
+    () => suggestTrucks({ types: vtypes, tonnes: weightTons, cargo, vehicleType }),
+    [vtypes, weightTons, cargo, vehicleType],
+  );
+
   const vtypeOptions = useMemo(() => {
     const seen = new Set<string>();
-    return (vtypes ?? [])
+    const base = (vtypes ?? [])
       .filter((v) => (v.available_vehicle_count ?? 1) > 0)
       .filter((v) => (seen.has(v.name) ? false : (seen.add(v.name), true)))
       .map((v) => {
         const cap = capacityTons(v.capacity);
         return { label: cap ? `${v.name} (${cap}t)` : v.name, value: v.name };
       });
-  }, [vtypes]);
+    // The list above only covers types with a vehicle free today. A
+    // suggested or already-saved type outside that set still has to be
+    // selectable, or SelectField (which resolves its display label by
+    // looking the value up in `options`) renders the "Not decided yet"
+    // placeholder even though a type IS set — the tap/save would look like
+    // it did nothing. Mirrors web's extra-<option> union.
+    const extraNames = [vehicleType, ...suggestions.map((s) => s.name)].filter(
+      (n): n is string => !!n && !seen.has(n),
+    );
+    for (const n of extraNames) {
+      if (seen.has(n)) continue;
+      seen.add(n);
+      const v = (vtypes ?? []).find((x) => x.name === n);
+      const cap = v ? capacityTons(v.capacity) : null;
+      base.push({ label: cap ? `${n} (${cap}t)` : n, value: n });
+    }
+    return base;
+  }, [vtypes, vehicleType, suggestions]);
 
   // Same four prerequisites as before, but as a list rather than a boolean, so
   // the footer and the Price section can name the one that's actually missing
@@ -1872,6 +1903,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 value={vehicleType}
                 onSelect={handleVehicleTypeSelect}
               />
+              <TruckSuggestionChips
+                suggestions={suggestions}
+                tonnes={weightTons ?? 0}
+                cargo={cargo}
+                onSelect={handleVehicleTypeSelect}
+              />
               <TextField
                 label="Cargo"
                 placeholder="e.g. Steel coils"
@@ -2006,6 +2043,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             costs={costs}
             vehicleType={vehicleType}
             weightTons={weightTons}
+            suggestedTypeName={suggestions[0]?.name ?? null}
           />
           <RateBreakdownModal
             visible={rateModal}

@@ -16,6 +16,7 @@ function FuelBreakdownModalImpl({
   costs,
   vehicleType,
   weightTons,
+  suggestedTypeName,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -23,6 +24,10 @@ function FuelBreakdownModalImpl({
   vehicleType: string;
   /** null when the weight field is empty or unparseable. */
   weightTons: number | null;
+  /** Name of the top truck suggestion, when one is offered (quote/suggestions.ts)
+      — lets the no-type footnote point at an actual truck instead of an
+      abstract instruction. Null when none is offered. */
+  suggestedTypeName?: string | null;
 }) {
   const hasVehicleType = !!vehicleType;
   // Percentage-per-tonne, not the raw fraction (`fuelSensitivity` is 0.02 for
@@ -117,7 +122,10 @@ function FuelBreakdownModalImpl({
 
           {!hasVehicleType && hasCapacity && (
             <Txt className="mt-3 text-micro text-faint">
-              Pick a vehicle type to price on that truck exactly.
+              {"This is a fleet-wide estimate, picked so the figure doesn't jump around as you change the weight."}
+              {suggestedTypeName
+                ? ` Choose ${suggestedTypeName} above to price on the truck you'd actually send.`
+                : ' Pick a vehicle type to price on that truck exactly.'}
             </Txt>
           )}
 

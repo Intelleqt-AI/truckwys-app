@@ -110,8 +110,14 @@ export function vehicleWarnings(v: {
   registration_expiry?: string;
   mileage?: string;
   last_service_mileage?: string;
-}): Partial<Record<'registration_expiry' | 'last_service_mileage', string>> {
-  const warnings: Partial<Record<'registration_expiry' | 'last_service_mileage', string>> = {};
+  capacity?: string;
+  /** The selected vehicle type's rated capacity, already normalized to tons
+      via capacityTons() — null/undefined means no type picked or its
+      capacity couldn't be believed as either unit. */
+  ratedCapacityTons?: number | null;
+}): Partial<Record<'registration_expiry' | 'last_service_mileage' | 'capacity', string>> {
+  const warnings: Partial<Record<'registration_expiry' | 'last_service_mileage' | 'capacity', string>> =
+    {};
   if (v.registration_expiry && v.registration_expiry < todayISO()) {
     warnings.registration_expiry = 'Registration expired';
   }
@@ -119,6 +125,15 @@ export function vehicleWarnings(v: {
   const lastService = parseNum(v.last_service_mileage);
   if (mileage != null && lastService != null && lastService > mileage) {
     warnings.last_service_mileage = 'Higher than current mileage';
+  }
+  // A vehicle's own capacity legitimately varies from its type's rating —
+  // this never blocks a save, it just flags a >10% drift (so 32 vs 32.0
+  // stays quiet, but 12 against a 32t type gets called out).
+  const capacity = parseNum(v.capacity);
+  const rated = v.ratedCapacityTons;
+  if (capacity != null && rated != null && rated > 0 && Math.abs(capacity - rated) / rated > 0.1) {
+    const ratedLabel = Number.isInteger(rated) ? String(rated) : rated.toFixed(1);
+    warnings.capacity = `Type is rated ${ratedLabel} t`;
   }
   return warnings;
 }

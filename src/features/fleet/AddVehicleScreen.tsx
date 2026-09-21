@@ -23,6 +23,7 @@ import {
   type VehicleFormValues,
 } from './validation';
 import { str, num, pick } from '@/lib/api/list';
+import { capacityTons } from '@/features/bookings/quote/types';
 import { parseNum } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -196,9 +197,16 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // `sub` renders as a second line in SelectField's list modal — used here so
+  // the collapsed field (half-width, numberOfLines=1) stays a plain name
+  // while the picker still shows each type's rated tonnage before you choose.
   const typeOptions = useMemo(() => {
-    const names = (types ?? []).map((t) => t.name);
-    return (names.length ? names : FALLBACK_TYPES).map((n) => ({ label: n, value: n }));
+    const list = types ?? [];
+    if (!list.length) return FALLBACK_TYPES.map((n) => ({ label: n, value: n }));
+    return list.map((t) => {
+      const cap = capacityTons(t.capacity);
+      return { label: t.name, value: t.name, sub: cap != null ? `Rated ${cap} t` : undefined };
+    });
   }, [types]);
   const driverOptions = useMemo(
     () => [
@@ -252,7 +260,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
    * Both are in tons here; the payload converts to kg on the way out.
    */
   const chooseType = (name: string) => {
-    const cap = (types ?? []).find((t) => t.name === name)?.capacity;
+    const cap = capacityTons((types ?? []).find((t) => t.name === name)?.capacity);
     if (cap != null) setValue('capacity', String(cap), { shouldValidate: true, shouldDirty: true });
   };
 
@@ -265,7 +273,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
     if (seededCapacity.current || !types?.length) return;
     seededCapacity.current = true;
     if (getValues('capacity').trim()) return;
-    const cap = types.find((t) => t.name === getValues('type'))?.capacity;
+    const cap = capacityTons(types.find((t) => t.name === getValues('type'))?.capacity);
     if (cap != null) setValue('capacity', String(cap));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [types]);
@@ -274,14 +282,22 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   const regExpiryW = watch('registration_expiry');
   const mileageW = watch('mileage');
   const lastServiceW = watch('last_service_mileage');
+  const capacityW = watch('capacity');
+  const typeW = watch('type');
+  const ratedCapacityTons = useMemo(
+    () => capacityTons((types ?? []).find((t) => t.name === typeW)?.capacity),
+    [types, typeW],
+  );
   const warnings = useMemo(
     () =>
       vehicleWarnings({
         registration_expiry: regExpiryW,
         mileage: mileageW,
         last_service_mileage: lastServiceW,
+        capacity: capacityW,
+        ratedCapacityTons,
       }),
-    [regExpiryW, mileageW, lastServiceW],
+    [regExpiryW, mileageW, lastServiceW, capacityW, ratedCapacityTons],
   );
 
   useUnsavedChangesGuard({
@@ -444,6 +460,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
             required
             placeholder="e.g. 30"
             keyboardType="decimal-pad"
+            warning={warnings.capacity}
           />
 
           <Label className="mt-1 text-muted">Optional</Label>

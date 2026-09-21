@@ -108,6 +108,12 @@ export interface VehicleType {
   fuel_type?: string;
   base_rate?: number;
   available_vehicle_count?: number;
+  /** Vehicles of this type the company owns, ANY status — the pool a truck
+      suggestion can draw on (quote/suggestions.ts), as opposed to
+      available_vehicle_count above (AVAILABLE only), which is what the
+      picker filters by. undefined means the backend predates this field;
+      see ownedCount in quote/suggestions.ts for how that degrades. */
+  owned_vehicle_count?: number;
   /** Reference tonnage for both the overload guard and the fuel formula's t_ref. */
   capacity?: number;
   /** Extra fuel burned per tonne over `capacity`, as a percent (e.g. 2 = +2%/tonne). */
@@ -147,6 +153,8 @@ export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
       pick(r, ['available_vehicle_count']) != null
         ? num(pick(r, ['available_vehicle_count']))
         : undefined,
+    owned_vehicle_count:
+      pick(r, ['owned_vehicle_count']) != null ? num(pick(r, ['owned_vehicle_count'])) : undefined,
     capacity: num(pick(r, ['capacity'])),
     fuel_consumption_sensitivity_pct: num(pick(r, ['fuel_consumption_sensitivity_pct'])),
     // Absent (older records / no key at all) defaults to active, same as the

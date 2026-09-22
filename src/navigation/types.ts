@@ -57,6 +57,7 @@ export type AppStackParamList = {
   More: undefined;
   Activity: undefined;
   Copilot: undefined;
+  Insurance: undefined;
   Insights: { tab?: InsightsTab } | undefined;
   Capital: undefined;
   Notifications: undefined;

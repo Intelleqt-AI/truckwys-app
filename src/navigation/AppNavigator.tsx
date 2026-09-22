@@ -29,6 +29,7 @@ import { CapitalScreen } from '@/features/more/CapitalScreen';
 import { ActivityScreen } from '@/features/more/ActivityScreen';
 import { NotificationsScreen } from '@/features/more/NotificationsScreen';
 import { CopilotScreen } from '@/features/copilot/CopilotScreen';
+import { InsuranceScreen } from '@/features/more/InsuranceScreen';
 import { SettingsScreen } from '@/features/more/SettingsScreen';
 import { BillingHistoryScreen } from '@/features/more/BillingHistoryScreen';
 import { SupportScreen } from '@/features/more/SupportScreen';
@@ -107,6 +108,7 @@ export function AppNavigator() {
         <Stack.Screen name="Activity" component={ActivityScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
         <Stack.Screen name="Copilot" component={CopilotScreen} />
+        <Stack.Screen name="Insurance" component={InsuranceScreen} />
         <Stack.Screen name="AdvanceDetail" component={AdvanceDetailScreen} />
         <Stack.Screen name="RiskScores" component={RiskScoresScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />

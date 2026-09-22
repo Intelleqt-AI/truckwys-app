@@ -104,7 +104,10 @@ function FuelBreakdownModalImpl({
                   `${formatNumber(Math.round(costs.chargeDistance))} km${costs.legs > 1 ? ' (round trip)' : ''}`,
                 ],
                 ['Diesel used', `${formatNumber(costs.fuelUsage)} L`],
-                ['Diesel price', `${formatCurrency(costs.fuelPrice)}/L`],
+                [
+                  'Diesel price',
+                  `${formatCurrency(costs.fuelPrice)}/L${costs.fuelZoneNote.replace(' · ', ' ')}`,
+                ],
               ] as [string, string][]
             ).map(([k, v]) => (
               <View key={k} className="flex-row items-center justify-between py-1">

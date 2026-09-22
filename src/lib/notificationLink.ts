@@ -47,6 +47,7 @@ const STATIC_ROUTES: Record<string, Target> = {
   '/capital': { screen: 'Capital' },
   '/insights': { screen: 'Insights' },
   '/copilot': { screen: 'Copilot' },
+  '/insurance': { screen: 'Insurance' },
   '/customers': { screen: 'Customers' },
   '/notifications': { screen: 'Notifications' },
   '/quotes': { screen: 'Tabs', params: { screen: 'Bookings', params: { tab: 'quotes' } } },

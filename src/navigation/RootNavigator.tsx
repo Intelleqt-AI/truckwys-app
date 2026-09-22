@@ -56,6 +56,7 @@ const linking: LinkingOptions<AppStackParamList> = {
       Capital: 'capital',
       Insights: 'insights',
       Copilot: 'copilot',
+      Insurance: 'insurance',
     },
   },
 };

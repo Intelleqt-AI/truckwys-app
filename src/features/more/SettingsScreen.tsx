@@ -1223,6 +1223,10 @@ function CompanySection() {
   // Quote defaults — all consumed by the quote calculator.
   const [validityDays, setValidityDays] = useState('');
   const [allowCrossBorder, setAllowCrossBorder] = useState('yes');
+  // How many border crossings this fleet makes a year, each leg counted
+  // separately — drives how the annual SA C-BRTA permit is amortised across
+  // a cross-border quote's crossing.
+  const [crossingsPerYear, setCrossingsPerYear] = useState('');
   const [baseRate, setBaseRate] = useState('');
   const [tollRate, setTollRate] = useState('');
   const [slaHours, setSlaHours] = useState('');
@@ -1233,6 +1237,10 @@ function CompanySection() {
   const [fuelPetrol, setFuelPetrol] = useState('');
   const [fuelElectric, setFuelElectric] = useState('');
   const [fuelHybrid, setFuelHybrid] = useState('');
+  // Which gazetted diesel price this fleet buys at — coastal (Cape Town,
+  // Durban, Gqeberha, East London) or inland (Gauteng and the interior),
+  // roughly R0.87/L apart. Only diesel is split this way.
+  const [fuelZone, setFuelZone] = useState<'INLAND' | 'COASTAL'>('INLAND');
   const [livePrice, setLivePrice] = useState<Record<string, unknown> | null>(null);
   const [fetchingLive, setFetchingLive] = useState(false);
 
@@ -1267,6 +1275,8 @@ function CompanySection() {
     seedNum(['fuel_price_electric'], setFuelElectric);
     seedNum(['fuel_price_hybrid'], setFuelHybrid);
     seedNum(['default_sla_hours'], setSlaHours);
+    seedNum(['cross_border_crossings_per_year'], setCrossingsPerYear);
+    setFuelZone(str(pick(data, ['fuel_zone'])) === 'COASTAL' ? 'COASTAL' : 'INLAND');
     setAllowCrossBorder(pick(data, ['allow_cross_border']) === false ? 'no' : 'yes');
     const logo = str(pick(data, ['logo_url']));
     if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
@@ -1288,6 +1298,7 @@ function CompanySection() {
       ['Electric price', fuelElectric],
       ['Hybrid price', fuelHybrid],
       ['SLA hours', slaHours],
+      ['Border crossings per year', crossingsPerYear],
     ];
     for (const [label, v] of numericFields) {
       if (v.trim() && parseNum(v) == null) return toast.error(`${label} is not a number`);
@@ -1308,6 +1319,11 @@ function CompanySection() {
     const slaHoursNum = parseNum(slaHours);
     if (slaHoursNum != null && (slaHoursNum < 1 || slaHoursNum > 720)) {
       return toast.error('Default SLA must be between 1 and 720 hours');
+    }
+    // Mirrors web's CompanySettings.tsx bound on Border Crossings Per Year.
+    const crossingsNum = parseNum(crossingsPerYear);
+    if (crossingsNum != null && (crossingsNum < 1 || crossingsNum > 5000)) {
+      return toast.error('Border crossings per year must be between 1 and 5000');
     }
 
     // Only send a numeric field when it has a value — an empty box must leave
@@ -1337,9 +1353,14 @@ function CompanySection() {
         },
         contact: { phone: phone.trim(), email: email.trim(), support_email: supportEmail.trim() },
         allow_cross_border: allowCrossBorder === 'yes',
+        // PositiveIntegerField, NOT NULL with a factory default of 24 — a
+        // blank box falls back to that rather than clearing, same shape as
+        // diesel below.
+        cross_border_crossings_per_year: optionalNum(crossingsPerYear) ?? 24,
         default_quote_validity_days: optionalNum(validityDays),
         default_base_rate_per_km: optionalNum(baseRate),
         default_toll_rate_per_km: optionalNum(tollRate),
+        fuel_zone: fuelZone,
         // Diesel is NOT NULL with a 23.50 factory default, so a blank box falls
         // back to that rather than clearing — matching the web page.
         fuel_price_per_litre: optionalNum(fuelPrice) ?? DIESEL_DEFAULT_PRICE,
@@ -1367,8 +1388,16 @@ function CompanySection() {
    *
    * There is no live feed for electric or hybrid anywhere in the system, so those
    * two stay manual.
+   *
+   * `zoneOverride` is passed by the zone selector so the fetch prices at the
+   * zone just chosen rather than whatever `fuelZone` still holds — reading it
+   * back from state would let a fast response land before the setFuelZone
+   * commit and write the wrong zone's price. `dieselOnly` keeps a zone switch
+   * off the petrol field — petrol has no coastal/inland split, so a zone
+   * change has no business rewriting it.
    */
-  const loadLivePrice = async (manual: boolean) => {
+  const loadLivePrice = async (manual: boolean, zoneOverride?: string, dieselOnly = false) => {
+    const zone = zoneOverride ?? fuelZone;
     if (manual) setFetchingLive(true);
     try {
       const d = (await fetchFuelPrices(manual)) as Record<string, unknown>;
@@ -1377,7 +1406,10 @@ function CompanySection() {
         if (manual) toast.error(str(pick(d, ['error']), 'Could not fetch live fuel prices'));
         return;
       }
-      const diesel = pick(d, ['inland_price']);
+      // Diesel is gazetted per zone — reading inland_price unconditionally
+      // over-charged every coastal fleet by the coastal/inland gap. Falls
+      // back to inland_price when coastal_price is absent (an older backend).
+      const diesel = zone === 'COASTAL' ? (pick(d, ['coastal_price']) ?? pick(d, ['inland_price'])) : pick(d, ['inland_price']);
       if (diesel != null) {
         // On the silent load, only fill what still looks untouched — blank, or
         // still sitting on the factory default. A manual fetch is an explicit
@@ -1392,8 +1424,13 @@ function CompanySection() {
       // petrol_95 comes back as 0 (not null) when there's no data — writing that
       // would store a zero price.
       const petrol = num(pick(d, ['petrol_95']));
-      if (petrol > 0) setFuelPetrol((prev) => (manual || !prev.trim() ? String(petrol) : prev));
-      if (manual) toast.success('Fuel prices refreshed');
+      if (petrol > 0 && !dieselOnly) {
+        setFuelPetrol((prev) => (manual || !prev.trim() ? String(petrol) : prev));
+      }
+      if (manual) {
+        if (dieselOnly) toast.success(`Diesel updated to the ${zone === 'COASTAL' ? 'coastal' : 'inland'} price`);
+        else toast.success('Fuel prices refreshed');
+      }
     } catch (e) {
       // The endpoint 500s rather than degrading to a 200, so this path is real.
       if (manual) toast.error(e instanceof Error ? e.message : 'Could not fetch live fuel prices');
@@ -1412,12 +1449,18 @@ function CompanySection() {
 
   // Read-out under the fields: what the live feed last said, and whether it's old.
   const liveStale = pick(livePrice ?? {}, ['is_stale']) === true;
-  const liveDiesel = num(pick(livePrice ?? {}, ['inland_price']));
+  const liveDiesel = num(
+    pick(
+      livePrice ?? {},
+      fuelZone === 'COASTAL' ? ['coastal_price', 'inland_price'] : ['inland_price'],
+    ),
+  );
   const liveNote = (() => {
     if (!livePrice || pick(livePrice, ['success']) === false || liveDiesel <= 0) return '';
     const updated = str(pick(livePrice, ['last_updated']));
     const warning = str(pick(livePrice, ['stale_warning']));
-    const parts = [`Live national diesel ${formatCurrency(liveDiesel)}/L`];
+    const zoneLabel = fuelZone === 'COASTAL' ? 'coastal' : 'inland';
+    const parts = [`Live national diesel ${formatCurrency(liveDiesel)}/L (${zoneLabel})`];
     if (updated) parts.push(`updated ${formatDate(updated)}`);
     if (warning) parts.push(warning);
     return parts.join(' · ');
@@ -1563,6 +1606,18 @@ function CompanySection() {
         priced.
       </Txt>
       <TextField
+        label="Border crossings per year"
+        placeholder="e.g. 24"
+        keyboardType="number-pad"
+        value={crossingsPerYear}
+        onChangeText={setCrossingsPerYear}
+      />
+      <Txt className="-mt-1 text-caption text-faint">
+        Count each leg separately &mdash; a return trip is two. A C-BRTA permit is bought for a
+        year, so a quote charges its share of one crossing: the more you cross, the less each load
+        carries.
+      </Txt>
+      <TextField
         label="Quote validity (days)"
         placeholder="e.g. 7"
         keyboardType="number-pad"
@@ -1622,6 +1677,27 @@ function CompanySection() {
       <Txt className="-mt-2 text-caption text-faint">
         Used when a vehicle type of that fuel runs a quote. Diesel and petrol can be pulled from the
         live national price; electric and hybrid have no feed, so set those yourself.
+      </Txt>
+      <SelectField
+        label="Fuel pricing zone"
+        options={[
+          { label: 'Inland', value: 'INLAND', sub: 'Gauteng and the interior' },
+          { label: 'Coastal', value: 'COASTAL', sub: 'Cape Town, Durban, Gqeberha, East London' },
+        ]}
+        value={fuelZone}
+        onSelect={(v) => {
+          const zone = v === 'COASTAL' ? 'COASTAL' : 'INLAND';
+          setFuelZone(zone);
+          // The zone goes in as an argument, not read back off state — a fast
+          // response could otherwise land before setFuelZone commits and
+          // write the price for the zone just left.
+          void loadLivePrice(true, zone, true);
+        }}
+      />
+      <Txt className="-mt-1 text-caption text-faint">
+        Diesel is gazetted at two prices: it arrives at the coastal ports and costs more inland
+        once the transport differential is added &mdash; about R0.87/L at the moment. Changing
+        this fetches the current price for the zone and updates Diesel below.
       </Txt>
       <View className="flex-row gap-3">
         <View className="flex-1">

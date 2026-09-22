@@ -84,6 +84,17 @@ export interface CostBreakdown {
       yet (in which case there's nothing to report either way). */
   tollFree: boolean;
   crossBorderCost: number;
+  /** The three server bucket totals, one way — used as the breakdown modal's
+      fallback rows on a route response cached before cross_border_breakdown
+      shipped. */
+  borderFees: number;
+  weighbridgeFees: number;
+  nonSaTolls: number;
+  /** cross_border_breakdown, one way, as the server sent it — each border
+      crossing, the amortised SA permit, each country's weighbridge and tolls.
+      Empty (not missing) when the route has no cross-border cost or predates
+      the field; the modal falls back to the three buckets above in that case. */
+  crossBorderBreakdown: Record<string, unknown>[];
   baseCost: number;
   driver: number;
   total: number;
@@ -115,6 +126,10 @@ export interface CostBreakdown {
       for 2%), or the same 2% default `consumption` itself falls back to —
       the "Weight effect" row in FuelBreakdownModal. */
   fuelSensitivity: number;
+  /** ` · coastal` / ` · inland` when the price being charged is diesel (the
+      only fuel gazetted per zone), else ''. Computed once here rather than in
+      each display site so the fuel row and the modal can't disagree. */
+  fuelZoneNote: string;
 }
 
 export function computeCosts({
@@ -178,6 +193,16 @@ export function computeCosts({
     num(pick(company ?? {}, ['fuel_price_per_litre'])) ||
     21.7;
   const fuelCost = Math.round((chargeDistance * consumption * fuelPrice) / 100);
+  // Diesel is gazetted at two prices, coastal and inland, ~R0.87/L apart —
+  // say which one this figure is so it can be checked against a real
+  // fuel-card statement. Only diesel has that split, so the note is omitted
+  // for every other fuel type.
+  const fuelZoneNote =
+    fuelField === 'fuel_price_per_litre'
+      ? str(pick(company ?? {}, ['fuel_zone'])) === 'COASTAL'
+        ? ' · coastal'
+        : ' · inland'
+      : '';
 
   // A route that matched no plazas reports toll_cost_zar: 0 and means it —
   // the backend has deliberately no "found 0 → estimate" fallback (e.g.
@@ -201,12 +226,20 @@ export function computeCosts({
   ) as Record<string, unknown>[];
 
   const add = (pick(routeData ?? {}, ['additional_costs']) ?? {}) as Record<string, unknown>;
-  const crossBorderCost = Math.round(
-    (num(pick(add, ['border_fees'])) +
-      num(pick(add, ['weighbridge_fees'])) +
-      num(pick(add, ['non_sa_tolls']))) *
-      legs,
-  );
+  const borderFees = num(pick(add, ['border_fees']));
+  const weighbridgeFees = num(pick(add, ['weighbridge_fees']));
+  const nonSaTolls = num(pick(add, ['non_sa_tolls']));
+  // The server's own sum stays the source of truth for the total — it's the
+  // same three buckets the breakdown itemises, not derived from the item
+  // list, so a bucket the server doesn't itemise yet can never desync the
+  // price shown from the price charged.
+  const crossBorderCost = Math.round((borderFees + weighbridgeFees + nonSaTolls) * legs);
+  // cross_border_breakdown is a sibling of additional_costs, not a key inside
+  // it — that dict is summed server-side, so a list in there breaks the whole
+  // route calculation. Absent on route responses cached before this shipped.
+  const crossBorderBreakdown = asArray(
+    pick(routeData ?? {}, ['cross_border_breakdown']),
+  ) as Record<string, unknown>[];
 
   const baseCost = Math.round(chargeDistance * baseRateNum);
   const driver = driverNum;
@@ -229,6 +262,10 @@ export function computeCosts({
     tollBreakdown,
     tollFree,
     crossBorderCost,
+    borderFees,
+    weighbridgeFees,
+    nonSaTolls,
+    crossBorderBreakdown,
     baseCost,
     driver,
     total,
@@ -242,5 +279,6 @@ export function computeCosts({
     fuelBasisConsumption: consumptionRef,
     fuelBasisCapacityTons: refCapacityTons,
     fuelSensitivity: sensitivity,
+    fuelZoneNote,
   };
 }

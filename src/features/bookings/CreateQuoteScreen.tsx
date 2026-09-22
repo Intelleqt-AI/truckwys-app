@@ -110,6 +110,7 @@ import { CostOverrides } from './quote/CostOverrides';
 import { TollBreakdownModal } from './quote/TollBreakdownModal';
 import { FuelBreakdownModal } from './quote/FuelBreakdownModal';
 import { RateBreakdownModal } from './quote/RateBreakdownModal';
+import { BorderBreakdownModal } from './quote/BorderBreakdownModal';
 import { QuoteSentOverlay } from './quote/QuoteSentOverlay';
 import {
   collectIssues,
@@ -259,6 +260,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [tollModal, setTollModal] = useState(false);
   const [fuelModal, setFuelModal] = useState(false);
   const [rateModal, setRateModal] = useState(false);
+  const [borderModal, setBorderModal] = useState(false);
   const [busy, setBusy] = useState<'draft' | 'send' | null>(null);
   // Validation surfacing (Phase 3): never on first paint, Weight shows its
   // error once the user leaves it, everything else waits for a Send attempt
@@ -2004,6 +2006,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     countries={asArray<string>(pick(routeData ?? {}, ['countries']))}
                     onFuelPress={() => setFuelModal(true)}
                     onTollPress={() => setTollModal(true)}
+                    onCrossBorderPress={() => setBorderModal(true)}
                     onRemoveUplift={resetPriceToActual}
                   />
                   <CostOverrides
@@ -2035,6 +2038,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           <TollBreakdownModal
             visible={tollModal}
             onClose={() => setTollModal(false)}
+            costs={costs}
+          />
+          <BorderBreakdownModal
+            visible={borderModal}
+            onClose={() => setBorderModal(false)}
             costs={costs}
           />
           <FuelBreakdownModal

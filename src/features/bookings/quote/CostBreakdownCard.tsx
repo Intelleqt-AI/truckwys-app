@@ -19,6 +19,7 @@ function CostBreakdownCardImpl({
   countries,
   onFuelPress,
   onTollPress,
+  onCrossBorderPress,
   onRemoveUplift,
 }: {
   costs: CostBreakdown;
@@ -35,6 +36,9 @@ function CostBreakdownCardImpl({
       load's weight effect, distance/litres/price. */
   onFuelPress: () => void;
   onTollPress: () => void;
+  /** Opens the named cross-border charges (each border crossing, the
+      amortised SA permit, each country's weighbridge and tolls). */
+  onCrossBorderPress: () => void;
   /** Same as the AI card's "Use actual price" — drops serviceCharge to 0. */
   onRemoveUplift: () => void;
 }) {
@@ -59,6 +63,7 @@ function CostBreakdownCardImpl({
           </Txt>
           <Txt className="text-micro text-faint" numberOfLines={1}>
             {costs.consumption.toFixed(1)} L/100km @ {formatCurrency(costs.fuelPrice)}
+            {costs.fuelZoneNote}
             {costs.fuelBasisInferred ? ' · est. from your fleet' : ''}
           </Txt>
         </View>
@@ -99,11 +104,24 @@ function CostBreakdownCardImpl({
         </View>
       </Pressable>
       {costs.crossBorderCost > 0 && (
-        <DetailRow
-          label={`Cross-border / weighbridge${crossBorderNote}`}
-          value={formatCurrency(costs.crossBorderCost)}
-          boldValue
-        />
+        <Pressable
+          onPress={onCrossBorderPress}
+          accessibilityRole="button"
+          accessibilityLabel={`Cross-border / weighbridge, ${formatCurrency(costs.crossBorderCost)}. Show cross-border breakdown`}
+          className="flex-row items-center justify-between border-b border-line-row px-3.5 py-3"
+        >
+          <View className="flex-1 shrink">
+            <Txt className="shrink text-callout text-muted" numberOfLines={1}>
+              {`Cross-border / weighbridge${crossBorderNote}`}
+            </Txt>
+          </View>
+          <View className="shrink-0 flex-row items-center gap-1">
+            <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
+              {formatCurrency(costs.crossBorderCost)}
+            </Mono>
+            <Icon name="chevronRight" size={14} color="#888888" />
+          </View>
+        </Pressable>
       )}
       <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} boldValue />
       <DetailRow

@@ -25,6 +25,7 @@ const SECTIONS: MenuItem[][] = [
   ],
   [
     { icon: 'clock', label: 'Activity', route: 'Activity' },
+    { icon: 'shield', label: 'Insurance', route: 'Insurance', allow: canSeeInsights },
     { icon: 'sparkle', label: 'AI Copilot', route: 'Copilot', allow: canSeeInsights },
   ],
   [

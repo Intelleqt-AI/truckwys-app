@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // Must match the EAS project's own slug exactly — the CLI hard-errors on a
   // mismatch (see extra.eas.projectId below, @intelleqt/truckwys).
   slug: 'truckwys',
-  version: '1.0.3',
+  version: '1.0.4',
   updates: {
     url: 'https://u.expo.dev/0ef68ce5-03e0-46d7-b4c4-6fc1a9c5f170',
   },
@@ -129,7 +129,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           'Truckwys needs access to your photos so you can attach a proof of delivery, a profile picture, or your company logo.',
       },
     ],
-    '@react-native-firebase/app',
+    [
+      // RNFB >= 26 resolves the Firebase iOS SDK via SPM by default, which is
+      // incompatible with the static frameworks below (duplicate-symbol link
+      // errors) — force CocoaPods instead.
+      '@react-native-firebase/app',
+      { ios: { disableSPM: true } },
+    ],
     '@react-native-firebase/messaging',
     [
       // The Firebase iOS SDK ships as static frameworks; the Android side needs

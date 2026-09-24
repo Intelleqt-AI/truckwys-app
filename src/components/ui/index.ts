@@ -48,6 +48,7 @@ export {
   RoutePreview,
 } from './data';
 export { SheetScreen } from './Sheet';
+export { SelectionActions, SelectionDot } from './SelectionBar';
 export { SwipeRow } from './SwipeRow';
 export { SaveSuccessOverlay } from './SaveSuccessOverlay';
 export { SigningInOverlay } from './SigningInOverlay';

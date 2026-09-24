@@ -3,7 +3,8 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 // Truckwys mobile — Expo app config.
 // Dark-first "operations terminal" UI. Runtime permissions requested: microphone
 // (voice quotes), photo library (POD / avatar / logo uploads), notifications
-// (operational push). Each has a usage string below.
+// (operational push), location (declared only — the map SDKs link CoreLocation,
+// the app itself never requests it). Each has a usage string below.
 const DEEP = '#030303';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
@@ -58,6 +59,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         'Truckwys uses the microphone only when you record a voice quote.',
       NSPhotoLibraryUsageDescription:
         'Truckwys needs access to your photos so you can attach a proof of delivery, a profile picture, or your company logo.',
+      // Not requested by Truckwys itself — the map SDKs (react-native-maps /
+      // MapLibre) link CoreLocation, so App Store Connect requires the string
+      // (ITMS-90683).
+      NSLocationWhenInUseUsageDescription:
+        'Truckwys uses your location only to show where you are on route maps.',
       // Wakes the app for silent/data pushes so the notification list and badge
       // stay current without opening it.
       UIBackgroundModes: ['remote-notification'],
@@ -105,6 +111,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-secure-store',
     'expo-font',
     'expo-audio',
+    // expo-audio's peer dependency — expo-doctor/expo install flags it as a
+    // required native peer for SDK 57; its config plugin needs registering
+    // the same as any other native module here.
+    'expo-asset',
     'expo-web-browser',
     // Android's interactive map — MapLibre GL Native styled with MapTiler
     // tiles, so no Google Maps key/billing account is needed. iOS keeps

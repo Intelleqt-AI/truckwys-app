@@ -25,6 +25,7 @@ export function useAppNavigation() {
       nav.navigate('AssignDriverVehicle', params),
     openCustomer: (id: string | number, preview?: Record<string, unknown>) =>
       nav.navigate('CustomerDetail', { id, preview }),
+    openImport: (entity: 'customers' | 'vehicles') => nav.navigate('Import', { entity }),
     createQuote: (ai?: boolean) => nav.navigate('CreateQuote', { ai }),
     openMore: () => nav.navigate('More'),
     openNotifications: () => nav.navigate('Notifications'),

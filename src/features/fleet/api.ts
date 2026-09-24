@@ -6,6 +6,7 @@ import {
   normalizeDriver,
   type VehicleLite,
   type DriverLite,
+  type BulkDeleteResult,
 } from '@/types/domain';
 import { normalizeVehicleType } from '@/features/bookings/api';
 
@@ -98,6 +99,11 @@ export const updateVehicle = (id: string | number, data: Record<string, unknown>
   patchData({ url: `vehicles/${id}/`, data });
 
 export const deleteVehicle = (id: string | number) => deleteData({ url: `vehicles/${id}/` });
+
+// Partial success on purpose: vehicles are PROTECTed by their trips, so some
+// of a selection will often be undeletable — see core/views_bulk_delete.py.
+export const bulkDeleteVehicles = (ids: (number | string)[]) =>
+  postData<BulkDeleteResult>({ url: 'vehicles/bulk-delete/', data: { ids } });
 
 export const createUser = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'users/', data });

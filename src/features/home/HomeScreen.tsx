@@ -48,6 +48,7 @@ import { useGracePeriod, useSubscription } from '@/hooks/useSubscription';
 import { SubscriptionDetailModal } from '@/features/more/SubscriptionDetailModal';
 import { useAuthStore } from '@/stores/authStore';
 import { mediaUrl } from '@/lib/api/client';
+import { useOnboardingGate } from '@/features/onboarding/useOnboardingGate';
 
 // Mirrors the phrasing already used on the Billing settings screen
 // (SettingsScreen.tsx's BillingSection), so grace-period copy reads
@@ -77,6 +78,12 @@ function subscriptionBannerMessage(
 }
 
 export function HomeScreen() {
+  // Opens the first-run onboarding wizard, at most once, for an admin whose
+  // company hasn't finished it — Home is always the first tab mounted after
+  // login, so this is the earliest point with a navigation context to open it
+  // from. See useOnboardingGate for the actual gating.
+  useOnboardingGate();
+
   // Three independent queries (see home/api.ts) instead of one fused query —
   // each section below renders as soon as its own data lands rather than
   // waiting on all six original endpoints behind a single skeleton.

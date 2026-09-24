@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
-import { normalizeCustomer, type CustomerLite } from '@/types/domain';
+import { normalizeCustomer, type CustomerLite, type BulkDeleteResult } from '@/types/domain';
 
 export function useCustomers() {
   return useQuery<CustomerLite[]>({
@@ -42,3 +42,9 @@ export const updateCustomer = (id: string | number, data: Record<string, unknown
   patchData({ url: `customers/${id}/`, data });
 
 export const deleteCustomer = (id: string | number) => deleteData({ url: `customers/${id}/` });
+
+// Partial success on purpose: customers are PROTECTed by their quotes,
+// invoices and loads, so in any real fleet some of a selection will be
+// undeletable — see core/views_bulk_delete.py on the backend.
+export const bulkDeleteCustomers = (ids: (number | string)[]) =>
+  postData<BulkDeleteResult>({ url: 'customers/bulk-delete/', data: { ids } });

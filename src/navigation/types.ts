@@ -45,6 +45,11 @@ export type AppStackParamList = {
   CustomerDetail: { id: Id; preview?: Record<string, unknown> };
   CustomerRisk: { id: Id };
   AddCustomer: { id?: Id; preview?: Record<string, unknown> } | undefined;
+  Import: { entity: 'customers' | 'vehicles' };
+  // First-run wizard for admins whose company hasn't finished onboarding —
+  // gated by useOnboardingGate, opened from HomeScreen. Mirrors the web's
+  // /onboarding (Onboarding.tsx).
+  Onboarding: undefined;
   Settings: { section?: string } | undefined;
   BillingHistory: undefined;
   CreateInvoice: { id?: Id; preview?: Record<string, unknown> } | undefined;

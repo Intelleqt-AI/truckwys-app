@@ -43,11 +43,16 @@ const numericOptionalField = (label: string) =>
  */
 export function vehicleSchema({ originalVin }: { originalVin?: string } = {}) {
   return z.object({
+    // Optional server-side too now (backend migration 0123): operators track
+    // trucks by registration, not VIN, and a pasted bulk-import fleet list
+    // rarely carries one. Still validated to 17 chars when someone DOES type
+    // one — only its presence stopped being required.
     vin: z
       .string()
       .trim()
-      .min(1, 'VIN is required')
+      .optional()
       .superRefine((v, ctx) => {
+        if (!v) return;
         if (originalVin && v === originalVin) return;
         if (!VIN_RE.test(v)) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Must be 17 characters (no I, O or Q)' });
@@ -55,15 +60,19 @@ export function vehicleSchema({ originalVin }: { originalVin?: string } = {}) {
       }),
     make: z.string().trim().min(1, 'Make is required'),
     model: z.string().trim().min(1, 'Model is required'),
+    // Optional too (backend migration 0123) — same reasoning as VIN. The range
+    // check only applies once a year is actually entered.
     year: z
       .string()
       .trim()
-      .min(1, 'Year is required')
+      .optional()
       .refine((v) => {
+        if (!v) return true;
         const n = parseNum(v);
         return n != null && Number.isInteger(n);
       }, 'Enter a whole number')
       .refine((v) => {
+        if (!v) return true;
         const n = parseNum(v) ?? 0;
         return n >= 1900 && n <= CURRENT_YEAR + 1;
       }, `Enter a year between 1900 and ${CURRENT_YEAR + 1}`),

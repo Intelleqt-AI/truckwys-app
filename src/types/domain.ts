@@ -217,7 +217,9 @@ export interface CustomerLite {
 export const normalizeCustomer = (c: Raw): CustomerLite => ({
   id: (pick(c, ['id', 'pk']) as string | number) ?? '',
   name: str(pick(c, ['name', 'company_name', 'customer_name']), 'Customer'),
-  contact: str(pick(c, ['contact_name', 'email', 'phone', 'contact']), ''),
+  // contact_person (backend migration 0124) is the human to phone there —
+  // preferred over the older contact_name/email/phone fallbacks once present.
+  contact: str(pick(c, ['contact_person', 'contact_name', 'email', 'phone', 'contact']), ''),
   creditScore: pick(c, ['credit_score']) != null ? num(pick(c, ['credit_score'])) : undefined,
   raw: c,
 });
@@ -232,6 +234,15 @@ export interface ExpenseLite {
   vendor: string;
   expenseNumber: string;
   raw: Raw;
+}
+
+// Shared by customers/api.ts and fleet/api.ts's bulk-delete calls (see
+// core/views_bulk_delete.py) — one definition instead of two identical copies.
+export interface BulkDeleteResult {
+  deleted: number;
+  deleted_names: string[];
+  blocked: { id: number | string; name: string; reason: string }[];
+  not_found: number;
 }
 
 export const normalizeExpense = (e: Raw): ExpenseLite => ({

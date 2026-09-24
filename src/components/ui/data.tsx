@@ -75,6 +75,7 @@ export function ListRow({
   leading,
   trailing,
   onPress,
+  onLongPress,
   last,
 }: {
   title: string;
@@ -83,12 +84,16 @@ export function ListRow({
   leading?: ReactNode;
   trailing?: ReactNode;
   onPress?: () => void;
+  /** Starts multi-select on Customers/Fleet — the standard mobile gesture for
+   *  it, paired with a haptic in the caller's selection hook. */
+  onLongPress?: () => void;
   last?: boolean;
 }) {
   const { colors } = useTheme();
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       disabled={!onPress}
       accessibilityRole={onPress ? 'button' : undefined}
       className={`min-h-[56px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${

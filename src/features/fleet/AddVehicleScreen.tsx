@@ -55,11 +55,18 @@ function fromRecord(r: Record<string, unknown>): VehicleFormValues {
     vin: str(pick(r, ['vin'])),
     make: str(pick(r, ['make'])),
     model: str(pick(r, ['model'])),
-    year:
-      pick(r, ['year']) != null ? String(num(pick(r, ['year']))) : String(new Date().getFullYear()),
+    // Blank rather than defaulting to the current year: VIN/year are both
+    // optional now (backend migration 0123 — a bulk-imported vehicle has
+    // neither), and inventing a year for a record that doesn't have one would
+    // save it back over silence.
+    year: pick(r, ['year']) != null ? String(num(pick(r, ['year']))) : '',
     plate: str(pick(r, ['plate', 'registration'])),
     type: str(pick(r, ['vehicle_type_name', 'vehicle_type'])) || 'Rigid Truck',
-    capacity: pick(r, ['capacity']) != null ? String(num(pick(r, ['capacity'])) / 1000) : '',
+    // capacityTons() reads either unit: the app/API store kg, a bulk import
+    // stores tons directly (core.services.vehicle_types.capacity_tonnes on the
+    // backend does the same double-duty). A straight /1000 showed an imported
+    // 34t truck as 0.034t.
+    capacity: pick(r, ['capacity']) != null ? String(capacityTons(pick(r, ['capacity'])) ?? '') : '',
     mileage: pick(r, ['mileage']) != null ? String(num(pick(r, ['mileage']))) : '',
     status: str(pick(r, ['status'])).toUpperCase() || 'AVAILABLE',
     driver: pick(r, ['driver']) != null ? String(pick(r, ['driver'])) : '',
@@ -323,7 +330,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
     const typeId = (types ?? []).find((t) => t.name === v.type)?.id;
     const capacityTons = parseNum(v.capacity);
     const payload = {
-      vin: v.vin.trim(),
+      vin: v.vin?.trim() || undefined,
       make: v.make.trim(),
       model: v.model.trim(),
       plate: v.plate.trim(),
@@ -387,8 +394,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
             name="vin"
             anchors={anchors}
             label="VIN"
-            required
-            placeholder="17-character VIN"
+            placeholder="17-character VIN — optional"
             autoCapitalize="characters"
           />
           <View className="flex-row gap-3">
@@ -424,8 +430,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
                 name="year"
                 anchors={anchors}
                 label="Year"
-                required
-                placeholder="e.g. 2022"
+                placeholder="e.g. 2022 — optional"
                 keyboardType="number-pad"
               />
             </View>

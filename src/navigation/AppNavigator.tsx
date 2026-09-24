@@ -24,6 +24,8 @@ import { CustomersScreen } from '@/features/customers/CustomersScreen';
 import { CustomerDetailScreen } from '@/features/customers/CustomerDetailScreen';
 import { CustomerRiskScreen } from '@/features/customers/CustomerRiskScreen';
 import { AddCustomerScreen } from '@/features/customers/AddCustomerScreen';
+import { ImportScreen } from '@/features/import/ImportScreen';
+import { OnboardingScreen } from '@/features/onboarding/OnboardingScreen';
 import { InsightsScreen } from '@/features/more/InsightsScreen';
 import { CapitalScreen } from '@/features/more/CapitalScreen';
 import { ActivityScreen } from '@/features/more/ActivityScreen';
@@ -92,6 +94,15 @@ export function AppNavigator() {
     >
       <Stack.Screen name="Tabs" component={AppTabs} />
 
+      {/* Full-screen, no header, no swipe-back — opened once by
+          useOnboardingGate (HomeScreen), left by its own Skip/Go-to-dashboard
+          actions rather than a system back gesture. */}
+      <Stack.Screen
+        name="Onboarding"
+        component={OnboardingScreen}
+        options={{ gestureEnabled: false, animation: 'fade' }}
+      />
+
       {/* Detail overlays — native push with native large-title header + back */}
       <Stack.Group screenOptions={detailHeader}>
         <Stack.Screen name="More" component={MoreScreen} />
@@ -136,6 +147,7 @@ export function AppNavigator() {
           options={{ presentation: 'card', headerShown: false, animation: 'slide_from_right' }}
         />
         <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
+        <Stack.Screen name="Import" component={ImportScreen} />
         <Stack.Screen name="CreateInvoice" component={CreateInvoiceScreen} />
         <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
         <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />

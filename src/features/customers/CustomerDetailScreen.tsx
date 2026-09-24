@@ -27,7 +27,10 @@ import type { AppStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<AppStackParamList, 'CustomerDetail'>;
 
 const PAYMENT_TERMS: Record<string, string> = {
+  NET7: 'Net 7 days',
+  NET14: 'Net 14 days',
   NET30: 'Net 30 days',
+  NET45: 'Net 45 days',
   NET60: 'Net 60 days',
   NET90: 'Net 90 days',
 };
@@ -154,6 +157,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
       </View>
 
       <Group label="Contact">
+        <DetailRow label="Contact person" value={str(pick(c, ['contact_person']), '—')} mono={false} />
         <DetailRow label="Email" value={str(pick(c, ['email']), '—')} mono={false} />
         <DetailRow label="Phone" value={str(pick(c, ['phone']), '—')} mono={false} />
         <DetailRow label="City" value={str(pick(c, ['city']), '—')} mono={false} />

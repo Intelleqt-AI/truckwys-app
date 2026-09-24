@@ -40,6 +40,12 @@ export function getMessagingLib(): MessagingModule | null {
  * Notifee's default export alongside the enums we use, or null in Expo Go.
  * Flattened so callers never touch `.default` themselves.
  */
+// React Native Directory flags @notifee/react-native as unmaintained
+// (expo-doctor's reactNativeDirectoryCheck), which is why it's excluded in
+// package.json's expo.doctor.reactNativeDirectoryCheck.exclude — silenced
+// deliberately, not overlooked. No maintained drop-in exists yet;
+// expo-notifications could take over channel/foreground-display duties here
+// if this ever needs replacing, but that's its own migration.
 export function getNotifeeLib() {
   if (IS_EXPO_GO) return null;
   if (!notifeeCache) {

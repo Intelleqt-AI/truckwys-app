@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { View, Alert, Pressable, ActivityIndicator } from 'react-native';
+import { View, Alert, Pressable, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import { Screen, Group, Avatar, Txt, Mono, Label, Icon, type IconName } from '@/components/ui';
@@ -122,6 +122,26 @@ export function MoreScreen() {
           ))}
         </Group>
       ))}
+
+      {/* Dev-only shortcut to preview the first-run onboarding wizard without
+          needing a fresh admin/company that hasn't finished it yet — stripped
+          from release builds since __DEV__ is a compile-time constant. */}
+      {__DEV__ && (
+        <Group>
+          <TouchableOpacity
+            onPress={() => nav.navigate('Onboarding' as never)}
+            disabled={signingOut}
+            className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+              signingOut ? 'opacity-50' : ''
+            }`}
+          >
+            <Icon name="sparkle" size={19} color={colors.muted} />
+            <Txt className="flex-1 text-body text-fg">Preview onboarding</Txt>
+            <Mono className="text-micro uppercase tracking-wide text-faint">DEV</Mono>
+            <Icon name="chevronRight" size={16} color={colors.faint} />
+          </TouchableOpacity>
+        </Group>
+      )}
 
       <Group>
         <Pressable

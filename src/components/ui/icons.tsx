@@ -54,6 +54,8 @@ import {
   IdCard,
   IdCardLanyard,
   Trash2,
+  Upload,
+  Import,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -108,6 +110,8 @@ export const icons = {
   logout: LogOut,
   edit: Pencil,
   download: Download,
+  upload: Upload,
+  import: Import,
   sparkle: Sparkles,
   trend: TrendingUp,
   mail: Mail,

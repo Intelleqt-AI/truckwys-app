@@ -24,6 +24,7 @@ import {
   StatCard,
   Badge,
   SwipeRow,
+  SelectionDot,
   type IconName,
 } from '@/components/ui';
 import { ListSkeleton } from '@/components/feedback';
@@ -31,7 +32,8 @@ import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { status as statusHues } from '@/theme/tokens';
 import { useAuthStore } from '@/stores/authStore';
-import { useRole, canAccessSettingsSection } from '@/lib/access';
+import { useRole, canAccessSettingsSection, canSeeInsights, visibleTabs } from '@/lib/access';
+import { INDUSTRY_OPTIONS } from '@/lib/companyOptions';
 import { WEB_APP_URL } from '@/lib/legal';
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore';
 import {
@@ -94,6 +96,7 @@ const SECTIONS: { key: string; label: string; icon: IconName }[] = [
 
 export function SettingsScreen({ route, navigation }: Props) {
   const role = useRole();
+  const { goTab } = useAppNavigation();
   const requested = route.params?.section;
   // Fall back to the menu when this role can't reach the requested section —
   // web redirects to /settings/profile for the same case.
@@ -108,10 +111,21 @@ export function SettingsScreen({ route, navigation }: Props) {
       onBack={() => navigation.goBack()}
     >
       {!section && (
-        <SettingsMenu
-          sections={visibleSections}
-          onOpen={(k) => navigation.push('Settings', { section: k })}
-        />
+        <>
+          <SettingsMenu
+            sections={visibleSections}
+            onOpen={(k) => navigation.push('Settings', { section: k })}
+          />
+          {/* Same Customers/Fleet screens the Customers tab and More menu
+              already open — each already has Import and Select (bulk
+              delete), so this is a second door in, not a second list. */}
+          <DirectorySection
+            canOpenCustomers={canSeeInsights(role)}
+            canOpenVehicles={visibleTabs(role).includes('Fleet')}
+            onOpenCustomers={() => navigation.navigate('Customers')}
+            onOpenVehicles={() => goTab('Fleet', { tab: 'vehicles' })}
+          />
+        </>
       )}
       {section === 'profile' && <ProfileSection />}
       {section === 'appearance' && <AppearanceSection />}
@@ -152,6 +166,41 @@ function SettingsMenu({
         >
           <Icon name={s.icon} size={19} color={colors.muted} />
           <Txt className="flex-1 text-body text-fg">{s.label}</Txt>
+          <Icon name="chevronRight" size={16} color={colors.faint} />
+        </Pressable>
+      ))}
+    </Group>
+  );
+}
+
+function DirectorySection({
+  canOpenCustomers,
+  canOpenVehicles,
+  onOpenCustomers,
+  onOpenVehicles,
+}: {
+  canOpenCustomers: boolean;
+  canOpenVehicles: boolean;
+  onOpenCustomers: () => void;
+  onOpenVehicles: () => void;
+}) {
+  const { colors } = useTheme();
+  const rows: { key: string; icon: IconName; label: string; onPress: () => void }[] = [];
+  if (canOpenCustomers) rows.push({ key: 'customers', icon: 'users', label: 'Customers', onPress: onOpenCustomers });
+  if (canOpenVehicles) rows.push({ key: 'vehicles', icon: 'truck', label: 'Vehicles', onPress: onOpenVehicles });
+  if (!rows.length) return null;
+  return (
+    <Group label="Directory">
+      {rows.map((r, i) => (
+        <Pressable
+          key={r.key}
+          onPress={r.onPress}
+          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+            i === rows.length - 1 ? '' : 'border-b border-line-row'
+          }`}
+        >
+          <Icon name={r.icon} size={19} color={colors.muted} />
+          <Txt className="flex-1 text-body text-fg">{r.label}</Txt>
           <Icon name="chevronRight" size={16} color={colors.faint} />
         </Pressable>
       ))}
@@ -631,33 +680,10 @@ function VehicleTypesSection() {
                       disabled={isDeleting}
                       className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3 active:bg-surface-hover"
                     >
-                      {selectMode &&
-                        (isShared ? (
-                          // Not selectable — batch-delete can't touch a
-                          // platform default, so its dot never fills.
-                          <View
-                            style={{
-                              width: 20,
-                              height: 20,
-                              borderRadius: 10,
-                              borderWidth: 1.5,
-                              borderColor: colors.faint,
-                              opacity: 0.35,
-                            }}
-                          />
-                        ) : isSel ? (
-                          <Icon name="checkCircle" size={20} color={colors.accent} />
-                        ) : (
-                          <View
-                            style={{
-                              width: 20,
-                              height: 20,
-                              borderRadius: 10,
-                              borderWidth: 1.5,
-                              borderColor: colors.faint,
-                            }}
-                          />
-                        ))}
+                      {/* Not selectable when shared — batch-delete can't
+                          touch a platform default, so its dot never fills
+                          (SelectionDot's `disabled`). */}
+                      {selectMode && <SelectionDot selected={isSel} disabled={isShared} />}
                       <View
                         className={`h-[38px] w-[38px] items-center justify-center rounded-xs border ${
                           isActive ? 'border-line-active' : 'border-line'
@@ -1181,14 +1207,6 @@ const ACTIVITY_TONE: Record<string, string> = {
   revoked_all: statusHues.danger,
 };
 
-const INDUSTRY_OPTIONS = [
-  { label: 'General freight', value: 'general_freight' },
-  { label: 'Refrigerated', value: 'refrigerated' },
-  { label: 'Hazmat', value: 'hazmat' },
-  { label: 'Construction', value: 'construction' },
-  { label: 'Agriculture', value: 'agriculture' },
-  { label: 'Other', value: 'other' },
-];
 const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC'].map((p) => ({
   label: p,
   value: p,

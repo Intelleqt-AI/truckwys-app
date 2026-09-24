@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useForm, Controller, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,19 +16,24 @@ import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddCustomer'>;
 
-const PAYMENT_TERMS = [
-  { label: 'Net 30 Days', value: 'NET30' },
-  { label: 'Net 60 Days', value: 'NET60' },
-  { label: 'Net 90 Days', value: 'NET90' },
-];
+// NET7/14/45 joined 30/60/90 on the backend (migration 0125) — customers on
+// those terms already existed in seeders and real lists before they were
+// offered as choices, and were invoiced at 30 days regardless (chased a
+// fortnight early on NET45, or 16 days late on NET14).
+const PAYMENT_TERMS_DAYS = [7, 14, 30, 45, 60, 90];
+const PAYMENT_TERMS = PAYMENT_TERMS_DAYS.map((d) => ({ label: `Net ${d} Days`, value: `NET${d}` }));
 const STATUS = [
   { label: 'Active', value: 'ACTIVE' },
   { label: 'Inactive', value: 'INACTIVE' },
 ];
 
 const schema = z.object({
-  name: z.string().trim().min(1, 'Full name is required'),
+  name: z.string().trim().min(1, 'Customer name is required'),
   company_name: z.string().trim().optional(),
+  // The human you actually phone there — distinct from `name`, the business
+  // itself (backend migration 0124). Optional: plenty of customers are just a
+  // company switchboard.
+  contact_person: z.string().trim().optional(),
   email: z.string().trim().email('Enter a valid email'),
   phone: z.string().trim().optional(),
   city: z.string().trim().optional(),
@@ -48,8 +53,9 @@ type Values = z.infer<typeof schema>;
 
 // Text fields in web order.
 const FIELDS: { name: keyof Values; label: string; placeholder?: string; icon?: IconName; keyboardType?: 'email-address' | 'phone-pad' | 'numeric'; autoCapitalize?: 'none' | 'words' }[] = [
-  { name: 'name', label: 'Full name', placeholder: 'Contact person', icon: 'user', autoCapitalize: 'words' },
+  { name: 'name', label: 'Customer name', placeholder: 'Business or customer name', icon: 'user', autoCapitalize: 'words' },
   { name: 'company_name', label: 'Company name', placeholder: 'Acme Logistics', icon: 'building', autoCapitalize: 'words' },
+  { name: 'contact_person', label: 'Contact person', placeholder: 'Who to phone there', icon: 'user', autoCapitalize: 'words' },
   { name: 'email', label: 'Email', placeholder: 'billing@company.co.za', icon: 'send', keyboardType: 'email-address', autoCapitalize: 'none' },
   { name: 'phone', label: 'Phone', placeholder: '+27 82 123 4567', icon: 'phone', keyboardType: 'phone-pad' },
   { name: 'city', label: 'City', placeholder: 'Cape Town' },
@@ -68,12 +74,23 @@ export function AddCustomerScreen({ route, navigation }: Props) {
   const [busy, setBusy] = useState(false);
   const [paymentTerms, setPaymentTerms] = useState(str(pick(preview, ['payment_terms_default']), 'NET30'));
   const [status, setStatus] = useState(str(pick(preview, ['status'])).toUpperCase() || 'ACTIVE');
+  // A record can carry any NET<n> (invoicing reads the number, not a fixed
+  // table — see invoice_generator.py's _calculate_due_date), so a value
+  // outside the offered list is added as its own option rather than silently
+  // falling back to something the customer isn't actually on.
+  const paymentTermsOptions = useMemo(() => {
+    if (PAYMENT_TERMS.some((o) => o.value === paymentTerms)) return PAYMENT_TERMS;
+    const days = parseInt(paymentTerms.replace(/\D/g, ''), 10);
+    return [...PAYMENT_TERMS, { label: Number.isFinite(days) ? `Net ${days} Days` : paymentTerms, value: paymentTerms }]
+      .sort((a, b) => parseInt(a.value.slice(3), 10) - parseInt(b.value.slice(3), 10));
+  }, [paymentTerms]);
 
   const { control, handleSubmit } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: {
       name: str(pick(preview, ['name', 'company_name', 'customer_name'])),
       company_name: str(pick(preview, ['company_name'])),
+      contact_person: str(pick(preview, ['contact_person'])),
       email: str(pick(preview, ['email'])),
       phone: str(pick(preview, ['phone'])),
       city: str(pick(preview, ['city'])),
@@ -94,6 +111,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
     const payload: Record<string, unknown> = {
       name: v.name.trim(),
       company_name: v.company_name?.trim() || undefined,
+      contact_person: v.contact_person?.trim() || undefined,
       email: v.email.trim(),
       phone: v.phone?.trim() || undefined,
       city: v.city?.trim() || undefined,
@@ -137,7 +155,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
         {FIELDS.map((f) => (
           <Field key={f.name} control={control} field={f} />
         ))}
-        <SelectField label="Payment terms" icon="card" options={PAYMENT_TERMS} value={paymentTerms} onSelect={setPaymentTerms} />
+        <SelectField label="Payment terms" icon="card" options={paymentTermsOptions} value={paymentTerms} onSelect={setPaymentTerms} />
         <Controller
           control={control}
           name="credit_limit"

@@ -196,7 +196,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow
               label="Capacity"
               hint="Set on this vehicle"
-              value={`${formatNumber(num(pick(v, ['capacity', 'capacity_kg'])) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
+              value={`${formatNumber(capacityTons(pick(v, ['capacity', 'capacity_kg'])) ?? 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
             />
             <DetailRow label="Fuel type" value={str(pick(v, ['fuel_type']), '—')} mono={false} />
             <DetailRow label="Year" value={str(pick(v, ['year']), '—')} />
@@ -264,7 +264,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             />
             <DetailRow
               label="Capacity"
-              value={`${formatNumber(num(pick(v, ['capacity', 'capacity_kg'])) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
+              value={`${formatNumber(capacityTons(pick(v, ['capacity', 'capacity_kg'])) ?? 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t`}
             />
             <DetailRow label="Fuel type" value={str(pick(v, ['fuel_type']), '—')} mono={false} />
             <DetailRow label="Mileage" value={`${formatNumber(mileage)} km`} last />

@@ -44,7 +44,7 @@ export function HeroRevenue({
       <LinearGradient
         pointerEvents="none"
         colors={[colors.glow, 'transparent']}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
       />
       <View className="flex-row items-start justify-between">
         <Label className="text-faint">Total revenue</Label>

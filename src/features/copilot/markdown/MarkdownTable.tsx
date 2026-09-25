@@ -104,7 +104,7 @@ export const MarkdownTable = memo(function MarkdownTable({
 
   return (
     <View
-      className="my-2 overflow-hidden rounded-xs border border-line"
+      className="my-2 overflow-hidden rounded-card border border-line"
       // width:100% so the horizontal ScrollView gets a bounded width from its
       // parent — without it the scroll view takes its content's intrinsic width
       // and stretches the whole message row.

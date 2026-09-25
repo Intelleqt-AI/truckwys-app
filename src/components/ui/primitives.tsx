@@ -19,12 +19,20 @@ import Animated, {
 import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
+import { status as statusHues, radius } from '@/theme/tokens';
 import { formatConfidence } from '@/lib/formatters';
 
-// ── Card: surface fill, hairline border, 2px radius, no shadow (dark) ──────
+// ── Card: surface fill, hairline border, 10px radius, no shadow (dark) ─────
+// `overflow-hidden` clips anything painted flush to the edges (pressed-row
+// highlights, a coloured footer) to the now-rounded corner instead of
+// poking a square corner out past it.
 export function Card({ className = '', ...props }: ViewProps & { className?: string }) {
-  return <View className={`rounded-xs border border-line bg-surface ${className}`} {...props} />;
+  return (
+    <View
+      className={`overflow-hidden rounded-card border border-line bg-surface ${className}`}
+      {...props}
+    />
+  );
 }
 
 // ── Button: primary / secondary / ghost / danger, uppercase mono label ─────
@@ -60,8 +68,8 @@ export function Button({
   const { colors } = useTheme();
   const base =
     size === 'sm'
-      ? 'flex-row items-center justify-center gap-1.5 rounded-xs px-2.5 min-h-[32px]'
-      : 'flex-row items-center justify-center gap-2 rounded-xs px-4 min-h-[48px]';
+      ? 'flex-row items-center justify-center gap-1.5 rounded-control px-2.5 min-h-[32px]'
+      : 'flex-row items-center justify-center gap-2 rounded-control px-4 min-h-[48px]';
   const variants: Record<ButtonVariant, string> = {
     primary: 'bg-accent',
     secondary: 'bg-surface border border-line-active',
@@ -135,7 +143,7 @@ export function IconButton({
       accessibilityLabel={accessibilityLabel}
       hitSlop={8}
       onPress={onPress}
-      className={`h-11 w-11 items-center justify-center rounded-xs active:opacity-70 ${className}`}
+      className={`h-11 w-11 items-center justify-center rounded-pill active:opacity-70 ${className}`}
     >
       <Icon name={name} size={size} color={color ?? colors.muted} />
     </Pressable>
@@ -180,7 +188,7 @@ export function Badge({
         borderWidth: 1,
         borderColor: outline || square ? t.fg : 'transparent',
         backgroundColor: outline ? 'transparent' : t.bg,
-        borderRadius: square ? 2 : 100,
+        borderRadius: square ? radius.chip : radius.pill,
       }}
     >
       {dot && <View style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: t.fg }} />}

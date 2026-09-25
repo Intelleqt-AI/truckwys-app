@@ -46,7 +46,7 @@ export function LiveTurn({
       )}
 
       {turn.status === 'error' && (
-        <View className="mt-1 rounded-xs border border-line bg-surface px-3.5 py-3">
+        <View className="mt-1 rounded-card border border-line bg-surface px-3.5 py-3">
           <View className="flex-row items-start gap-2">
             <Icon name="alert" size={14} color={colors.muted} />
             <Txt className="flex-1 text-callout text-muted">
@@ -58,7 +58,7 @@ export function LiveTurn({
           <Pressable
             onPress={() => onRetry(turn.userText)}
             accessibilityRole="button"
-            className="mt-2.5 self-start rounded-xs border border-accent px-2.5 py-1.5 active:opacity-60"
+            className="mt-2.5 self-start rounded-chip border border-accent px-2.5 py-1.5 active:opacity-60"
           >
             <Mono className="text-micro tracking-wide uppercase text-accent">Retry</Mono>
           </Pressable>

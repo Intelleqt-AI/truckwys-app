@@ -184,7 +184,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
     <View className={className}>
       <FieldLabel label={label} required={required} />
       <Animated.View
-        className="min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3"
+        className="min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3"
         style={borderStyle}
       >
         {icon && <Icon name={icon} size={17} color={colors.faint} />}
@@ -231,7 +231,7 @@ export function SearchField({
 }) {
   const { colors } = useTheme();
   return (
-    <View className="min-h-[44px] flex-row items-center gap-2 rounded-xs border border-line bg-surface px-3">
+    <View className="min-h-[44px] flex-row items-center gap-2 rounded-control border border-line bg-surface px-3">
       <Icon name="search" size={17} color={colors.faint} />
       <TextInput
         className="flex-1 text-fg"
@@ -258,7 +258,7 @@ export function SegmentedControl<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <View className="flex-row rounded-xs border border-line bg-surface p-0.5">
+    <View className="flex-row rounded-control border border-line bg-surface p-0.5">
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -267,7 +267,7 @@ export function SegmentedControl<T extends string>({
             onPress={() => onChange(o.value)}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
-            className={`min-h-[36px] flex-1 items-center justify-center rounded-xs ${
+            className={`min-h-[36px] flex-1 items-center justify-center rounded-chip ${
               active ? 'bg-accent' : ''
             }`}
           >
@@ -347,7 +347,7 @@ export function RadioRows({
       {options.length === 0 ? (
         <Mono className="text-micro text-warning">{emptyText ?? 'Nothing available'}</Mono>
       ) : (
-        <View className="overflow-hidden rounded-xs border border-line bg-surface">
+        <View className="overflow-hidden rounded-card border border-line bg-surface">
           {options.map((o, i) => {
             const active = o.value === value;
             return (

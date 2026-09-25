@@ -87,7 +87,7 @@ export function MoreScreen() {
   return (
     <Screen topInset={false} contentClassName="pt-3">
       {/* Profile header */}
-      <View className="mb-5 flex-row items-center gap-3 rounded-xs border border-line bg-surface p-4">
+      <View className="mb-5 flex-row items-center gap-3 rounded-card border border-line bg-surface p-4">
         <Avatar
           name={user?.name ?? user?.email}
           uri={mediaUrl(user?.avatar as string | undefined)}

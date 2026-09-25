@@ -272,7 +272,7 @@ export function ImportPanel({
             return (
               <View
                 key={r.row}
-                className={`mb-2 overflow-hidden rounded-xs border ${
+                className={`mb-2 overflow-hidden rounded-card border ${
                   r.ready ? 'border-line bg-surface' : 'border-warning bg-warning-bg'
                 }`}
               >

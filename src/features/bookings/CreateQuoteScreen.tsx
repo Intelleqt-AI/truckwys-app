@@ -70,6 +70,7 @@ import { WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { formatDuration, formatPlain, parseNum } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
+import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -1715,7 +1716,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustPan"
-        backgroundStyle={{ backgroundColor: colors.surface, borderRadius: 2 }}
+        backgroundStyle={{ backgroundColor: colors.surface, borderRadius: radius.panel }}
         handleIndicatorStyle={{ backgroundColor: colors.faint, width: 42 }}
       >
         <QuoteJumpBar ref={jumpBarRef} sections={jumpSections} onPress={jumpTo} />
@@ -1737,7 +1738,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         >
           <View className="gap-6">
             {subscription.notice && (
-              <View className="flex-row items-start gap-2.5 rounded-xs border border-danger bg-danger-bg p-3">
+              <View className="flex-row items-start gap-2.5 rounded-control border border-danger bg-danger-bg p-3">
                 <Icon name="alert" size={17} color="#FF4949" />
                 <Txt className="flex-1 text-sub text-muted">{subscription.notice}</Txt>
               </View>
@@ -1819,7 +1820,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               rest of the form is filled in. The real enforcement happens once
               /route/calculate/ runs — see routeBlockedMessage below. */}
               {!allowCrossBorder && (isForeignCc(pickup?.cc) || isForeignCc(delivery?.cc)) && (
-                <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+                <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
                   <Icon name="alert" size={17} color="#F59E0B" />
                   <Txt className="flex-1 text-sub text-muted">
                     This location is outside South Africa, but your company isn&apos;t set up for
@@ -1845,7 +1846,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               {/* Route refused by company policy — replaces the route preview,
               same as web. */}
               {ready && routeBlockedMessage && (
-                <View className="mt-5 rounded-xs border border-danger bg-danger-bg p-4">
+                <View className="mt-5 rounded-control border border-danger bg-danger-bg p-4">
                   <Txt className="text-callout font-semibold text-danger">Route not allowed</Txt>
                   <Txt className="mt-1.5 text-sub text-muted">{routeBlockedMessage}</Txt>
                 </View>
@@ -1964,7 +1965,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               ) : /* A load past the selected vehicle's capacity replaces the whole
               cost breakdown — same as web, there's no legitimate price to show. */
               ready && !routeBlockedMessage && weightBlockedMessage ? (
-                <View className="rounded-xs border border-danger bg-danger-bg p-4">
+                <View className="rounded-control border border-danger bg-danger-bg p-4">
                   <Txt className="text-callout font-semibold text-danger">
                     Overloaded for this vehicle
                   </Txt>

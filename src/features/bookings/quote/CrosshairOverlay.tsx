@@ -78,7 +78,7 @@ function CrosshairOverlayImpl({
 
       {/* Readout + confirm, above whatever the sheet is occupying. */}
       <View className="absolute left-0 right-0 px-4" style={{ bottom: bottomInset + 12 }}>
-        <View className="gap-2.5 rounded-xs border border-line bg-elevated p-3.5">
+        <View className="gap-2.5 rounded-card border border-line bg-elevated p-3.5">
           <Label className="text-muted">
             {isPickup ? 'Collection point' : isStop ? 'Stop point' : 'Drop-off point'}
           </Label>

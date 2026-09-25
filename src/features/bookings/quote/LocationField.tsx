@@ -202,7 +202,7 @@ function LocationFieldImpl({
           17px icon. It used to be h-12 with a 16px pin, which read a notch low
           against the Client and Vehicle-type rows directly above it. */}
       <View
-        className={`min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3 ${
+        className={`min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3 ${
           error ? 'border-danger' : focused ? 'border-accent' : 'border-line'
         }`}
       >
@@ -258,7 +258,7 @@ function LocationFieldImpl({
       </View>
 
       {coordMode && (
-        <View className="mt-2 gap-2 rounded-xs border border-line bg-surface p-3">
+        <View className="mt-2 gap-2 rounded-card border border-line bg-surface p-3">
           <TextField
             label="Latitude, longitude"
             placeholder="-33.9249, 18.4241"
@@ -296,7 +296,7 @@ function LocationFieldImpl({
         </View>
       )}
       {focused && results.length > 0 && (
-        <View className="mt-2 overflow-hidden rounded-xs border border-line bg-surface">
+        <View className="mt-2 overflow-hidden rounded-card border border-line bg-surface">
           {results.map((r, i) => (
             <Pressable
               key={`${r.label}-${i}`}

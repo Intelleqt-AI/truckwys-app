@@ -75,6 +75,12 @@ module.exports = {
         md: '8px',
         lg: '12px',
         pill: '100px',
+        // Role-based radius scale for the "subtle" rounded pass — see
+        // src/theme/tokens.ts `radius` for the JS-style equivalents.
+        chip: '6px',
+        control: '8px',
+        card: '10px',
+        panel: '14px',
       },
       spacing: {
         screen: '16px',

@@ -104,7 +104,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
 
     case 'code':
       return (
-        <View className="my-2 overflow-hidden rounded-xs border border-line bg-surface">
+        <View className="my-2 overflow-hidden rounded-card border border-line bg-surface">
           <ScrollView horizontal showsHorizontalScrollIndicator={false} directionalLockEnabled>
             <Text
               selectable

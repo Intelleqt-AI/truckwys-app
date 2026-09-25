@@ -64,7 +64,20 @@ export type Palette = (typeof palette)[Scheme];
 // The product ships native system fonts. Monospace carries every number/label/ID.
 export const MONO_FONT = Platform.select({ ios: 'Menlo', default: 'monospace' }) as string;
 
-export const radius = { xs: 2, sm: 4, md: 8, lg: 12, pill: 100 } as const;
+export const radius = {
+  xs: 2,
+  sm: 4,
+  md: 8,
+  lg: 12,
+  pill: 100,
+  // Role-based scale for the "subtle" rounded pass — mirrors the
+  // `borderRadius` entries in tailwind.config.js for JS-style call sites
+  // (Badge, Skeleton, gorhom bottom-sheet backgroundStyle).
+  chip: 6,
+  control: 8,
+  card: 10,
+  panel: 14,
+} as const;
 export const space = { s1: 4, s2: 8, s3: 12, s4: 16, s5: 20, s6: 24, s8: 32 } as const;
 export const TAP_MIN = 44;
 

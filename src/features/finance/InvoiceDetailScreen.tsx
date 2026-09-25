@@ -261,13 +261,13 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       {/* The backend writes these reasons (no POD, invoice too old, no facility,
           …) — show them verbatim rather than a generic "not eligible". */}
       {ineligibleEntry?.reason && (
-        <View className="mb-5 rounded-xs border border-line bg-surface p-3">
+        <View className="mb-5 rounded-card border border-line bg-surface p-3">
           <Mono className="mb-1 text-micro tracking-wide uppercase text-faint">Fast Pay</Mono>
           <Txt className="text-caption text-muted">{ineligibleEntry.reason}</Txt>
         </View>
       )}
       {riskBlocked && (
-        <View className="mb-5 rounded-xs border border-warning bg-warning-bg p-3">
+        <View className="mb-5 rounded-control border border-warning bg-warning-bg p-3">
           <Txt className="text-caption text-fg">
             {`Customer risk ${eligibleEntry?.customer_risk_pct ?? '—'}% is above the 70% Fast Pay limit.`}
           </Txt>
@@ -327,7 +327,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+              className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Send invoice</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">

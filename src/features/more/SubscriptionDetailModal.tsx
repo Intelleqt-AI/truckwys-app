@@ -31,7 +31,7 @@ export function SubscriptionDetailModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={onClose}>
         <Pressable
-          className="gap-3 rounded-md border border-line bg-elevated p-4"
+          className="gap-3 rounded-panel border border-line bg-elevated p-4"
           onPress={(e) => e.stopPropagation()}
         >
           <Badge label={subscription.label} tone={subscription.tone} shape="pill" dot />

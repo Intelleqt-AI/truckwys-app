@@ -245,7 +245,7 @@ export function EmptyState({
   const { colors } = useTheme();
   return (
     <View className="items-center px-8 py-16">
-      <View className="mb-4 h-14 w-14 items-center justify-center rounded-sm border border-line bg-surface">
+      <View className="mb-4 h-14 w-14 items-center justify-center rounded-control border border-line bg-surface">
         <Icon name={icon} size={24} color={colors.faint} />
       </View>
       <Txt className="text-heading font-semibold text-fg">{title}</Txt>

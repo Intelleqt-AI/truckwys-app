@@ -78,14 +78,14 @@ export function CustomerRiskScreen({ route, navigation }: Props) {
           {summary ? (
             <>
               <SectionLabel>AI summary</SectionLabel>
-              <View className="mb-5 rounded-xs border border-line bg-surface p-4">
+              <View className="mb-5 rounded-card border border-line bg-surface p-4">
                 <Txt className="text-sub text-muted">{summary}</Txt>
               </View>
             </>
           ) : null}
 
           {insufficient ? (
-            <View className="rounded-xs border border-line bg-surface p-4">
+            <View className="rounded-card border border-line bg-surface p-4">
               <Txt className="text-sub text-muted">
                 Not enough payment history yet — the risk profile sharpens as invoices are paid.
               </Txt>
@@ -154,7 +154,7 @@ function RiskBadge({ band, riskPct }: { band: string; riskPct: number }) {
   const color = BAND_COLOR[band] ?? colors.muted;
   const tone = BAND_TONE[band] ?? 'neutral';
   return (
-    <View className="mb-5 items-center rounded-xs border border-line bg-surface py-6">
+    <View className="mb-5 items-center rounded-card border border-line bg-surface py-6">
       <Mono style={{ fontSize: 44, fontWeight: '700', color }}>{formatPercent(riskPct, 0)}</Mono>
       <View className="mt-2">
         <Badge label={`${band} risk`} tone={tone} />

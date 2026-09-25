@@ -30,12 +30,12 @@ export function ProposalCard({
 
   return (
     <View
-      className="mt-3 rounded-xs border bg-surface"
+      className="mt-3 rounded-card border bg-surface"
       style={{ borderColor: pending ? colors.accent : colors.line }}
     >
       <View className="flex-row items-center gap-2 px-3.5 pt-3">
         <View
-          className="rounded-xs px-1.5 py-0.5"
+          className="rounded-chip px-1.5 py-0.5"
           style={{ backgroundColor: toneColor + '22', borderWidth: 1, borderColor: toneColor }}
         >
           <Mono className="text-micro tracking-wide uppercase" style={{ color: toneColor }}>
@@ -46,7 +46,7 @@ export function ProposalCard({
       </View>
 
       {!!proposal.warning && (
-        <View className="mx-3.5 mt-3 flex-row gap-2 rounded-xs bg-surface-hover p-2.5">
+        <View className="mx-3.5 mt-3 flex-row gap-2 rounded-chip bg-surface-hover p-2.5">
           <Icon name="alert" size={14} color={statusHues.warning} />
           <Txt className="flex-1 text-caption" style={{ color: statusHues.warning }}>
             {proposal.warning}
@@ -55,7 +55,7 @@ export function ProposalCard({
       )}
 
       {!!proposal.analysisSummary && (
-        <View className="mx-3.5 mt-3 rounded-xs border border-line p-2.5">
+        <View className="mx-3.5 mt-3 rounded-chip border border-line p-2.5">
           <Label className="mb-1 text-faint">AI analysis</Label>
           <Txt className="text-caption text-muted">{proposal.analysisSummary}</Txt>
         </View>
@@ -95,7 +95,7 @@ export function ProposalCard({
               onPress={onConfirm}
               accessibilityRole="button"
               accessibilityState={{ disabled: !!busy }}
-              className="flex-1 flex-row items-center justify-center gap-1.5 rounded-xs bg-accent py-2.5 active:opacity-70"
+              className="flex-1 flex-row items-center justify-center gap-1.5 rounded-control bg-accent py-2.5 active:opacity-70"
             >
               {busy ? (
                 <ActivityIndicator size="small" color={colors.onAccent} />
@@ -111,7 +111,7 @@ export function ProposalCard({
               onPress={onDismiss}
               accessibilityRole="button"
               accessibilityState={{ disabled: !!busy }}
-              className="flex-1 items-center justify-center rounded-xs border border-line py-2.5 active:opacity-70"
+              className="flex-1 items-center justify-center rounded-control border border-line py-2.5 active:opacity-70"
             >
               <Mono className="text-micro tracking-wide uppercase text-muted">Dismiss</Mono>
             </Pressable>

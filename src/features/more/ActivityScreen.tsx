@@ -22,7 +22,7 @@ export function ActivityScreen({ navigation }: Props) {
       ) : !data || data.length === 0 ? (
         <EmptyState icon="clock" title="No activity yet" body="Recent actions across your account appear here." />
       ) : (
-        <View className="rounded-xs border border-line bg-surface">
+        <View className="rounded-card border border-line bg-surface">
           {data.map((a, i) => (
             <View
               key={a.id}

@@ -101,7 +101,7 @@ export function SelectionActions({
           onPress={onSelectAll}
           activeOpacity={0.85}
           accessibilityRole="button"
-          className="min-h-[32px] flex-row items-center justify-center gap-1 rounded-xs border border-line-active bg-surface px-2.5"
+          className="min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-line-active bg-surface px-2.5"
         >
           <Icon name="check" size={14} color={colors.fg} strokeWidth={2.2} />
           <Mono className="text-nano uppercase tracking-wide text-fg">
@@ -116,7 +116,7 @@ export function SelectionActions({
         accessibilityRole="button"
         accessibilityLabel={`Delete ${count} ${label}`}
         accessibilityState={{ disabled: count === 0 || busy }}
-        className={`min-h-[32px] flex-row items-center justify-center gap-1 rounded-xs border border-danger bg-danger-bg px-2.5 ${
+        className={`min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-danger bg-danger-bg px-2.5 ${
           count === 0 ? 'opacity-40' : ''
         }`}
       >

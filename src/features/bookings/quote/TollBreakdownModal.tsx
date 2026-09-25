@@ -24,7 +24,7 @@ function TollBreakdownModalImpl({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={onClose}>
         <Pressable
-          className="rounded-md border border-line bg-elevated p-4"
+          className="rounded-panel border border-line bg-elevated p-4"
           onPress={(e) => e.stopPropagation()}
         >
           <Label className="mb-3 text-muted">Toll plazas on this route</Label>

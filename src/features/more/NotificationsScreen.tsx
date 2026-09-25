@@ -90,7 +90,7 @@ export function NotificationsScreen({ navigation }: Props) {
       ) : !data || data.length === 0 ? (
         <EmptyState icon="bell" title="All caught up" body="You have no notifications right now." />
       ) : (
-        <View className="overflow-hidden rounded-xs border border-line bg-surface">
+        <View className="overflow-hidden rounded-card border border-line bg-surface">
           {data.map((n, i) => {
             const linked = !!resolveNotificationLink(n.link);
             return (

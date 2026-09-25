@@ -8,12 +8,13 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { Screen, EmptyState, Button, Txt, LogoMark } from '@/components/ui';
+import { radius as radiusTokens } from '@/theme/tokens';
 
 // ── Shimmer block ──────────────────────────────────────────────────────────
 export function Skeleton({
   width = '100%',
   height = 16,
-  radius = 2,
+  radius = radiusTokens.sm,
   className = '',
 }: {
   width?: number | string;
@@ -57,9 +58,9 @@ export function ListSkeleton({ rows = 5 }: { rows?: number }) {
       {Array.from({ length: rows }).map((_, i) => (
         <View
           key={i}
-          className="flex-row items-center gap-3 rounded-xs border border-line bg-surface p-4"
+          className="flex-row items-center gap-3 rounded-card border border-line bg-surface p-4"
         >
-          <Skeleton width={38} height={38} radius={100} />
+          <Skeleton width={38} height={38} radius={radiusTokens.pill} />
           <View className="flex-1 gap-2">
             <Skeleton width="60%" height={14} />
             <Skeleton width="40%" height={11} />
@@ -77,24 +78,24 @@ export function ListSkeleton({ rows = 5 }: { rows?: number }) {
 // its own data lands, so these are exported individually — one per section —
 // rather than as a single fixed block.
 export function CommandBarSkeleton() {
-  return <Skeleton height={72} className="mb-5" />;
+  return <Skeleton height={72} radius={radiusTokens.card} className="mb-5" />;
 }
 
 export function HeroSkeleton() {
-  return <Skeleton height={190} className="mb-5" />;
+  return <Skeleton height={190} radius={radiusTokens.card} className="mb-5" />;
 }
 
 export function BentoSkeleton() {
   return (
     <View className="mb-5 flex-row gap-3">
-      <Skeleton width="48%" height={78} />
-      <Skeleton width="48%" height={78} />
+      <Skeleton width="48%" height={78} radius={radiusTokens.card} />
+      <Skeleton width="48%" height={78} radius={radiusTokens.card} />
     </View>
   );
 }
 
 export function UtilisationSkeleton() {
-  return <Skeleton height={160} className="mb-5" />;
+  return <Skeleton height={160} radius={radiusTokens.card} className="mb-5" />;
 }
 
 // Mirrors the shape above, block-for-block, for anywhere that still wants the
@@ -121,7 +122,7 @@ export function HomeSkeleton() {
 // small enough to sit inside a still-otherwise-working screen.
 export function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <View className="mb-5 items-center gap-2 rounded-xs border border-line bg-surface p-4">
+    <View className="mb-5 items-center gap-2 rounded-card border border-line bg-surface p-4">
       <Txt className="text-center text-caption text-faint">{message}</Txt>
       <Button label="Retry" variant="secondary" icon="route" onPress={onRetry} />
     </View>
@@ -144,7 +145,7 @@ export function WorkingOverlay({ visible, title }: { visible: boolean; title: st
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View className="flex-1 items-center justify-center bg-black/70 px-10">
-        <View className="w-full max-w-[300px] items-center rounded-sm border border-line bg-surface px-6 py-8">
+        <View className="w-full max-w-[300px] items-center rounded-panel border border-line bg-surface px-6 py-8">
           <BreathingLogo />
           <Txt className="mt-5 text-center text-callout font-medium text-fg">{title}</Txt>
           <Txt className="mt-1.5 text-center text-caption text-faint">This takes a few seconds</Txt>

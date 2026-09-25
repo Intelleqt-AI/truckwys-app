@@ -70,7 +70,7 @@ export function DateField({
       <FieldLabel label={label} required={required} />
       <Pressable onPress={() => setOpen(true)}>
         <Animated.View
-          className="min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3"
+          className="min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3"
           style={borderStyle}
         >
           <Icon name="calendar" size={17} color={value ? colors.accent : colors.faint} />
@@ -90,7 +90,7 @@ export function DateField({
         <Modal transparent animationType="fade" onRequestClose={() => setOpen(false)}>
           <Pressable className="flex-1 justify-end bg-black/60" onPress={() => setOpen(false)}>
             <Pressable
-              className="bg-elevated"
+              className="overflow-hidden rounded-t-panel bg-elevated"
               style={{ paddingBottom: insets.bottom + 8 }}
               onPress={(e) => e.stopPropagation()}
             >

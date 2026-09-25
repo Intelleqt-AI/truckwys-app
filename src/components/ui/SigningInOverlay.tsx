@@ -29,7 +29,7 @@ export function SigningInOverlay({ visible }: SigningInOverlayProps) {
       pointerEvents="auto"
       className="absolute inset-0 items-center justify-center bg-black/70 px-8"
     >
-      <View className="w-full max-w-[280px] items-center rounded-sm border border-line bg-surface px-6 py-7">
+      <View className="w-full max-w-[280px] items-center rounded-panel border border-line bg-surface px-6 py-7">
         <ActivityIndicator color={colors.accent} size="large" />
         <Txt className="mt-4 text-center text-heading font-semibold text-fg">Signing you in…</Txt>
       </View>

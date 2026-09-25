@@ -451,7 +451,7 @@ export function CopilotScreen({ navigation }: Props) {
         />
 
         <Animated.View style={dockStyle}>
-          <View className="min-h-[44px] flex-1 justify-center rounded-xs border border-line bg-surface px-3">
+          <View className="min-h-[44px] flex-1 justify-center rounded-control border border-line bg-surface px-3">
             <TextInput
               className="text-fg"
               placeholder="Ask about your operation…"
@@ -475,7 +475,7 @@ export function CopilotScreen({ navigation }: Props) {
             accessibilityRole="button"
             accessibilityLabel="Send"
             accessibilityState={{ disabled: !canSend }}
-            className="h-11 w-11 items-center justify-center rounded-xs active:opacity-60"
+            className="h-11 w-11 items-center justify-center rounded-control active:opacity-60"
             style={{ opacity: canSend ? 1 : 0.35 }}
           >
             <Icon name="send" size={20} color={colors.accent} />

@@ -270,7 +270,7 @@ function VehiclesTab({
         const isSelected = selectMode && selected.has(item.id);
         return (
           <View
-            className={`mb-2.5 overflow-hidden rounded-xs border ${
+            className={`mb-2.5 overflow-hidden rounded-card border ${
               isSelected ? 'border-accent' : 'border-line bg-surface'
             }`}
             style={isSelected ? { backgroundColor: colors.glow } : undefined}
@@ -362,7 +362,7 @@ function DriversTab() {
         <EmptyState icon="users" title="No drivers" body="No drivers match this filter." />
       }
       renderItem={({ item }) => (
-        <View className="mb-2.5 overflow-hidden rounded-xs border border-line bg-surface">
+        <View className="mb-2.5 overflow-hidden rounded-card border border-line bg-surface">
           <ListRow
             leading={<Avatar name={item.name} uri={item.avatar} size={36} />}
             title={item.name}

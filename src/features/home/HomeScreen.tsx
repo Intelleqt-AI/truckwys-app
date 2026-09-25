@@ -276,7 +276,7 @@ export function HomeScreen() {
               <ListSkeleton rows={3} />
             </View>
           ) : (
-            <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
+            <View className="mb-5 overflow-hidden rounded-card border border-line bg-surface">
               {recentQuotes.length === 0 ? (
                 <Txt className="p-4 text-center text-caption text-faint">No quotes yet</Txt>
               ) : (
@@ -318,7 +318,7 @@ export function HomeScreen() {
               <ListSkeleton rows={3} />
             </View>
           ) : (
-            <View className="mb-5 overflow-hidden rounded-xs border border-line bg-surface">
+            <View className="mb-5 overflow-hidden rounded-card border border-line bg-surface">
               {recentLoads.length === 0 ? (
                 <Txt className="p-4 text-center text-caption text-faint">No bookings yet</Txt>
               ) : (

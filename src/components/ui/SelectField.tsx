@@ -68,7 +68,7 @@ function SelectFieldImpl({
       <FieldLabel label={label} required={required} />
       <Pressable onPress={() => setOpen(true)}>
         <Animated.View
-          className="min-h-[48px] flex-row items-center gap-2 rounded-xs border bg-surface px-3"
+          className="min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3"
           style={borderStyle}
         >
           {icon && <Icon name={icon} size={17} color={selected ? colors.accent : colors.faint} />}

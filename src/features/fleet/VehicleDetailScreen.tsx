@@ -48,7 +48,7 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
         <Mono className="text-micro uppercase tracking-wide text-faint">{label}</Mono>
         <Mono className="text-micro text-muted">{Math.round(value)}/100</Mono>
       </View>
-      <View className="h-2 overflow-hidden rounded-xs bg-surface-hover">
+      <View className="h-2 overflow-hidden rounded-pill bg-surface-hover">
         <View style={{ width: `${pct}%`, height: '100%', backgroundColor: colors.accent }} />
       </View>
     </View>
@@ -248,7 +248,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
           </View>
 
           <SectionLabel>Performance scores</SectionLabel>
-          <View className="mb-5 rounded-xs border border-line bg-surface p-4">
+          <View className="mb-5 rounded-card border border-line bg-surface p-4">
             <ScoreBar label="AI health" value={num(pick(v, ['ai_health_score', 'health_score']))} />
             <ScoreBar label="Uptime" value={num(pick(v, ['uptime_score', 'uptime_percentage']))} />
             <ScoreBar label="Fuel efficiency" value={num(pick(v, ['fuel_efficiency_score']))} />

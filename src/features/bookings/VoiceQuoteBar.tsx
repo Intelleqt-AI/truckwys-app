@@ -28,7 +28,7 @@ export function VoiceQuoteBar({
   const { colors } = useTheme();
 
   return (
-    <View className="rounded-xs border border-line bg-surface p-3">
+    <View className="rounded-card border border-line bg-surface p-3">
       <View className="mb-2 flex-row items-center gap-1.5">
         <Icon name="sparkle" size={14} color={colors.accent} />
         <Label className="text-accent">Describe it</Label>
@@ -46,7 +46,7 @@ export function VoiceQuoteBar({
           onPress={onRecord}
           accessibilityRole="button"
           accessibilityLabel="Record voice"
-          className="w-14 items-center justify-center rounded-xs border border-line-active bg-surface active:opacity-70"
+          className="w-14 items-center justify-center rounded-control border border-line-active bg-surface active:opacity-70"
         >
           <Icon name="mic" size={20} color={colors.accent} />
         </Pressable>

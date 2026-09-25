@@ -202,7 +202,7 @@ export function FilterChips<T extends string>({
             accessibilityRole="button"
 
             accessibilityState={{ selected: active }}
-            className={`min-h-[34px] justify-center rounded-xs border border-line px-3 ${
+            className={`min-h-[34px] justify-center rounded-chip border border-line px-3 ${
               active ? 'bg-accent' : 'bg-surface'
             }`}
           >
@@ -241,7 +241,7 @@ export function Fab({
       onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityLabel="Create"
-      className="absolute right-4 h-14 w-14 items-center justify-center rounded-sm bg-accent active:opacity-90"
+      className="absolute right-4 h-14 w-14 items-center justify-center rounded-panel bg-accent active:opacity-90"
       style={{
         bottom: insets.bottom + 96,
         shadowColor: colors.accent,

@@ -75,7 +75,7 @@ export function RecordPaymentSheet({
         <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
           <Pressable
             onPress={(e) => e.stopPropagation()}
-            className="rounded-sm border border-line bg-surface p-5"
+            className="rounded-panel border border-line bg-surface p-5"
           >
             <Txt className="text-heading font-semibold text-fg">Record payment</Txt>
             <Txt className="mb-4 mt-1.5 text-sub text-muted">

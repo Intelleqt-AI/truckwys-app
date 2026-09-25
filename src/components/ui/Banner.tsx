@@ -31,7 +31,7 @@ export function Banner({
 }) {
   const content = (
     <View
-      className={`flex-row items-start gap-2.5 rounded-xs border p-3 ${TONE_CLASSES[tone]}`}
+      className={`flex-row items-start gap-2.5 rounded-control border p-3 ${TONE_CLASSES[tone]}`}
     >
       <Icon name="alert" size={17} color={TONE_ICON_COLOR[tone]} />
       <Txt className="flex-1 text-sub text-muted">{message}</Txt>

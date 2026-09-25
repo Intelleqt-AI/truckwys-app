@@ -243,7 +243,7 @@ function UploadButton({
   const { colors } = useTheme();
   if (uploading) {
     return (
-      <View className="min-h-[48px] flex-row items-center justify-center gap-2 rounded-xs border border-line-active bg-surface px-4">
+      <View className="min-h-[48px] flex-row items-center justify-center gap-2 rounded-control border border-line-active bg-surface px-4">
         <ActivityIndicator size="small" color={colors.fg} />
         <Mono className="text-micro uppercase tracking-wide text-fg">Uploading</Mono>
       </View>
@@ -659,7 +659,7 @@ function VehicleTypesSection() {
                 .join(' · ');
 
               return (
-                <View key={tid} className="mb-2.5 overflow-hidden rounded-xs border border-line">
+                <View key={tid} className="mb-2.5 overflow-hidden rounded-card border border-line">
                   <SwipeRow
                     // A shared default has nothing to delete/reset yet — the
                     // backend rejects it outright (VehicleTypeViewSet.perform_
@@ -685,7 +685,7 @@ function VehicleTypesSection() {
                           (SelectionDot's `disabled`). */}
                       {selectMode && <SelectionDot selected={isSel} disabled={isShared} />}
                       <View
-                        className={`h-[38px] w-[38px] items-center justify-center rounded-xs border ${
+                        className={`h-[38px] w-[38px] items-center justify-center rounded-control border ${
                           isActive ? 'border-line-active' : 'border-line'
                         }`}
                       >
@@ -1033,7 +1033,7 @@ function SecuritySection() {
             <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
               <Pressable
                 onPress={(e) => e.stopPropagation()}
-                className="rounded-sm border border-line bg-surface p-5"
+                className="rounded-panel border border-line bg-surface p-5"
               >
                 <Txt className="text-heading font-semibold text-fg">Delete account</Txt>
                 <Txt className="mt-1.5 text-sub text-muted">
@@ -1994,7 +1994,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   return (
     <View className="gap-4">
       {suspended && (
-        <View className="flex-row items-start gap-2.5 rounded-xs border border-danger bg-danger-bg p-3">
+        <View className="flex-row items-start gap-2.5 rounded-control border border-danger bg-danger-bg p-3">
           <Icon name="alert" size={17} color="#FF4949" />
           <Txt className="flex-1 text-sub text-muted">
             Your subscription is suspended. You can still view existing data and manage drivers and
@@ -2003,7 +2003,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
         </View>
       )}
       {!suspended && cancelling && (
-        <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+        <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
           <Icon name="alert" size={17} color="#F59E0B" />
           <Txt className="flex-1 text-sub text-muted">
             Cancelling
@@ -2013,7 +2013,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
         </View>
       )}
       {!suspended && !cancelling && graceDays > 0 && (
-        <View className="flex-row items-start gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+        <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
           <Icon name="alert" size={17} color="#F59E0B" />
           <Txt className="flex-1 text-sub text-muted">
             Payment is overdue — {graceDays} day{graceDays === 1 ? '' : 's'} of grace remaining

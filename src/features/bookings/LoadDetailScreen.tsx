@@ -31,7 +31,7 @@ import { mediaUrl } from '@/lib/api/client';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
+import { status as statusHues, radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -339,7 +339,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Route */}
       <SectionLabel>Route</SectionLabel>
-      <View className="mb-5 rounded-xs border border-line bg-surface p-4">
+      <View className="mb-5 rounded-card border border-line bg-surface p-4">
         <View className="flex-row gap-3">
           <View className="items-center pt-1">
             <View style={{ width: 10, height: 10, borderRadius: 10, backgroundColor: colors.accent }} />
@@ -455,7 +455,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+              className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Mark as delivered</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">
@@ -499,7 +499,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+              className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Proof of delivery</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">{podReceivedBy || 'Received'}</Txt>
@@ -518,7 +518,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                 ) : (
                   <Image
                     source={{ uri: mediaUrl(podDocumentUrl) }}
-                    style={{ width: '100%', aspectRatio: 1.2, borderRadius: 4, marginBottom: 16 }}
+                    style={{ width: '100%', aspectRatio: 1.2, borderRadius: radius.control, marginBottom: 16 }}
                     resizeMode="contain"
                   />
                 )

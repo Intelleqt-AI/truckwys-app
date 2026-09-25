@@ -72,7 +72,7 @@ export function CapitalScreen({ navigation }: Props) {
           </View>
 
           {data.facility && (
-            <View className="mb-5 rounded-xs border border-line bg-surface p-4">
+            <View className="mb-5 rounded-card border border-line bg-surface p-4">
               <View className="mb-2.5 flex-row items-center justify-between">
                 <Mono className="text-micro tracking-wide uppercase text-faint">Facility meter</Mono>
                 <Mono className="text-micro tracking-wide uppercase text-muted">
@@ -94,7 +94,7 @@ export function CapitalScreen({ navigation }: Props) {
           {/* Same partnership banner as web — Fast Pay hands off to Merchant
               Capital's own site rather than creating an in-app advance. */}
           <View
-            className="mb-5 rounded-xs border border-line bg-surface p-4"
+            className="mb-5 rounded-card border border-line bg-surface p-4"
             style={{ borderLeftWidth: 3, borderLeftColor: colors.accent }}
           >
             <Mono className="text-caption font-medium text-fg">Fast Pay powered by Merchant Capital</Mono>
@@ -110,7 +110,7 @@ export function CapitalScreen({ navigation }: Props) {
           ) : (
             <View className="mb-5 gap-2.5">
               {data.eligible.map((e) => (
-                <View key={e.id} className="rounded-xs border border-line bg-surface p-4">
+                <View key={e.id} className="rounded-card border border-line bg-surface p-4">
                   <View className="flex-row items-center justify-between">
                     <Mono className="text-body font-medium text-fg">{e.customer}</Mono>
                     <Mono className="text-callout text-muted">{formatCurrency(e.amount, { maximumFractionDigits: 0 })}</Mono>
@@ -151,7 +151,7 @@ export function CapitalScreen({ navigation }: Props) {
               {showIneligible && (
                 <View className="mb-5 gap-2.5">
                   {data.ineligible.map((e) => (
-                    <View key={e.id} className="rounded-xs border border-line bg-surface p-3.5">
+                    <View key={e.id} className="rounded-card border border-line bg-surface p-3.5">
                       <View className="flex-row items-center justify-between">
                         <Mono className="text-caption font-medium text-fg">{e.customer}</Mono>
                         <Mono className="text-caption text-muted">

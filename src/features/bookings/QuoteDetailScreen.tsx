@@ -512,7 +512,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       </View>
 
       {marginPct > 0 && marginPct < 12 && (
-        <View className="mb-5 flex-row items-center gap-2.5 rounded-xs border border-warning bg-warning-bg p-3">
+        <View className="mb-5 flex-row items-center gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
           <Icon name="alert" size={17} color="#F59E0B" />
           <Txt className="flex-1 text-sub text-muted">
             Margin <Mono className="text-warning">{formatPercent(marginPct)}</Mono> is below your
@@ -623,7 +623,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] rounded-sm border border-line bg-surface p-5"
+              className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Send quote</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">
@@ -659,7 +659,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
               <Pressable
                 onPress={(e) => e.stopPropagation()}
-                className="rounded-sm border border-line bg-surface p-5"
+                className="rounded-panel border border-line bg-surface p-5"
               >
                 <Txt className="text-heading font-semibold text-fg">
                   {outcomeType === 'accepted' ? 'Mark quote as accepted' : 'Mark quote as rejected'}

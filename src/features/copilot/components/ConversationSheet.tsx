@@ -55,7 +55,7 @@ export function ConversationSheet({
       <Pressable onPress={onClose} className="flex-1 justify-end bg-black/60">
         <Pressable
           onPress={(e) => e.stopPropagation()}
-          className="max-h-[76%] rounded-t-lg border-t border-line bg-bg-deep"
+          className="max-h-[76%] rounded-t-panel border-t border-line bg-bg-deep"
           style={{ paddingBottom: insets.bottom + 8 }}
         >
           <View className="flex-row items-center justify-between border-b border-line px-4 py-3">
@@ -71,7 +71,7 @@ export function ConversationSheet({
               onClose();
             }}
             accessibilityRole="button"
-            className="m-4 flex-row items-center justify-center gap-2 rounded-xs bg-accent py-3 active:opacity-70"
+            className="m-4 flex-row items-center justify-center gap-2 rounded-control bg-accent py-3 active:opacity-70"
           >
             <Icon name="plus" size={16} color={colors.onAccent} />
             <Mono className="text-micro tracking-wide uppercase text-on-accent">New chat</Mono>
@@ -103,7 +103,7 @@ export function ConversationSheet({
                     }}
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
-                    className="flex-row items-center gap-3 rounded-xs border bg-surface px-3.5 py-3 active:opacity-70"
+                    className="flex-row items-center gap-3 rounded-card border bg-surface px-3.5 py-3 active:opacity-70"
                     style={{
                       borderColor: active ? colors.accent : colors.line,
                       borderLeftWidth: active ? 2 : 1,

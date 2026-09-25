@@ -181,7 +181,7 @@ export function CustomersScreen({ navigation }: Props) {
             const isSelected = selectMode && selected.has(item.id);
             return (
               <View
-                className={`mb-2.5 overflow-hidden rounded-xs border ${
+                className={`mb-2.5 overflow-hidden rounded-card border ${
                   isSelected ? 'border-accent' : 'border-line bg-surface'
                 }`}
                 style={isSelected ? { backgroundColor: colors.glow } : undefined}

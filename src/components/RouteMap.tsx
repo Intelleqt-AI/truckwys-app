@@ -178,7 +178,7 @@ export function RouteMap({
   return (
     <View>
       <View
-        className={fullBleed ? 'overflow-hidden' : 'overflow-hidden rounded-xs border border-line'}
+        className={fullBleed ? 'overflow-hidden' : 'overflow-hidden rounded-card border border-line'}
         style={{ width, height, backgroundColor: colors.surface }}
       >
         {!tilesFailed &&

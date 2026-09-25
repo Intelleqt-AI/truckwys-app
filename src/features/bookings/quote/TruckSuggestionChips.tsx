@@ -57,7 +57,7 @@ function TruckSuggestionChipsImpl({
               onPress={() => onSelect(s.name)}
               accessibilityRole="button"
               accessibilityLabel={a11yLabel}
-              className="min-w-[152px] justify-center gap-1 rounded-xs border border-line bg-surface px-3 py-2.5"
+              className="min-w-[152px] justify-center gap-1 rounded-control border border-line bg-surface px-3 py-2.5"
             >
               <View className="flex-row items-center gap-1.5">
                 <Mono className="flex-shrink text-micro uppercase tracking-wide text-fg" numberOfLines={1}>

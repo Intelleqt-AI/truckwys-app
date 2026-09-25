@@ -77,7 +77,7 @@ export function Starters({ onPick }: { onPick: (prompt: string) => void }) {
             onPress={() => onPick(s.prompt)}
             accessibilityRole="button"
             accessibilityLabel={s.title}
-            className="rounded-xs border border-line bg-surface px-3.5 py-3 active:border-accent active:opacity-80"
+            className="rounded-control border border-line bg-surface px-3.5 py-3 active:border-accent active:opacity-80"
           >
             <View className="flex-row items-center justify-between gap-2">
               <Txt className="flex-1 text-callout font-medium text-fg">{s.title}</Txt>

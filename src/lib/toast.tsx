@@ -59,7 +59,7 @@ function ToastRow({ item }: { item: ToastItem }) {
     <Animated.View
       entering={FadeInDown.duration(200)}
       exiting={FadeOutDown.duration(180)}
-      className="w-full rounded-xs border border-danger bg-elevated px-4 py-3"
+      className="w-full rounded-control border border-danger bg-elevated px-4 py-3"
     >
       <Mono className="text-caption text-danger">{item.message}</Mono>
     </Animated.View>

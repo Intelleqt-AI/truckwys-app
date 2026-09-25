@@ -54,7 +54,7 @@ export function SaveSuccessOverlay({
     >
       <Animated.View
         entering={ZoomIn.duration(220)}
-        className="w-full max-w-[280px] items-center rounded-sm border border-line bg-surface px-6 py-7"
+        className="w-full max-w-[280px] items-center rounded-panel border border-line bg-surface px-6 py-7"
       >
         <View className="h-12 w-12 items-center justify-center rounded-pill bg-success-bg">
           <Icon name="checkCircle" size={28} color={statusHues.success} />

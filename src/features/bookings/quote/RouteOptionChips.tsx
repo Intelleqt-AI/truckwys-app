@@ -95,7 +95,7 @@ function RouteOptionChipsImpl({
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               accessibilityLabel={a11yLabel}
-              className={`min-w-[152px] justify-center gap-1 rounded-xs border px-3 py-2.5 ${
+              className={`min-w-[152px] justify-center gap-1 rounded-control border px-3 py-2.5 ${
                 active ? 'border-accent bg-accent-dim' : 'border-line bg-surface'
               }`}
             >

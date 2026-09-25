@@ -7,7 +7,7 @@ import { Txt } from '@/components/ui';
 // full-width apply here.
 export const UserBubble = memo(function UserBubble({ text }: { text: string }) {
   return (
-    <View className="my-1 max-w-[86%] self-end rounded-md bg-accent px-3.5 py-2.5">
+    <View className="my-1 max-w-[86%] self-end rounded-card bg-accent px-3.5 py-2.5">
       <Txt className="text-callout text-on-accent">{text}</Txt>
     </View>
   );

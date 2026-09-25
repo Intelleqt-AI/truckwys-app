@@ -127,7 +127,7 @@ function InvoicesTab() {
       }
       ListEmptyComponent={<EmptyState icon="receipt" title="No invoices" body="Invoices you raise appear here." />}
       renderItem={({ item }) => (
-        <View className="mb-2.5 overflow-hidden rounded-xs border border-line bg-surface">
+        <View className="mb-2.5 overflow-hidden rounded-card border border-line bg-surface">
           <ListRow
             leading={<Icon name="receipt" size={22} color="#888888" />}
             title={item.number}
@@ -325,7 +325,7 @@ function ReportsTab() {
       {monthlyTrend.length > 0 && (
         <View className="mb-5">
           <SectionLabel>Revenue vs expense</SectionLabel>
-          <View className="rounded-xs border border-line bg-surface p-4">
+          <View className="rounded-card border border-line bg-surface p-4">
             {monthlyTrend.map((m) => (
               <View key={m.label} className="mb-3">
                 <View className="mb-1 flex-row justify-between">
@@ -360,7 +360,7 @@ function Bar({ value, max, tone }: { value: number; max: number; tone: 'accent' 
   const { colors } = useTheme();
   const pct = Math.max(2, Math.round((value / max) * 100));
   return (
-    <View className="h-2 overflow-hidden rounded-xs bg-surface-hover">
+    <View className="h-2 overflow-hidden rounded-pill bg-surface-hover">
       <View
         style={{
           width: `${pct}%`,

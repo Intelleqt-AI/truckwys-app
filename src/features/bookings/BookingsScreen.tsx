@@ -418,7 +418,7 @@ function LoadList({
         <EmptyState icon="truck" title="No loads" body="No loads match this filter." />
       }
       renderItem={({ item }) => (
-        <View className="overflow-hidden rounded-xs border border-line bg-surface">
+        <View className="overflow-hidden rounded-card border border-line bg-surface">
           <ListRow
             leading={<Avatar name={item.customer} size={38} />}
             title={item.loadNumber}

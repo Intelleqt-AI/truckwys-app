@@ -54,7 +54,7 @@ export function CommandBar({
   ];
 
   return (
-    <View className="mb-5 flex-row rounded-xs border border-line bg-surface py-3">
+    <View className="mb-5 flex-row rounded-card border border-line bg-surface py-3">
       {stats.map((s, i) => (
         <PressScale
           key={s.label}

@@ -40,7 +40,7 @@
         "ascApiKeyId": "4K7J2RNHWH"
       },
       "android": {
-        "track": "internal",
+        "track": "production",
         "releaseStatus": "draft"
       }
     }

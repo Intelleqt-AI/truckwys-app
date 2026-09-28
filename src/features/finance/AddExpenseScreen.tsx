@@ -24,7 +24,7 @@ import {
   type ExpenseFormValues,
 } from './validation';
 import { num, str, pick } from '@/lib/api/list';
-import { parseNum, formatPlain } from '@/lib/formatters';
+import { parseNum, formatPlain, round2 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -275,7 +275,10 @@ export function AddExpenseScreen({ route, navigation }: Props) {
     const payload = {
       category: v.category,
       description: v.description.trim(),
-      amount: parseNum(v.amount),
+      // Expense.amount is DecimalField(max_digits=10, decimal_places=2) — the
+      // Amount field's decimals={2} only reformats on blur, so a value still
+      // focused when Save is tapped can still carry more than 2 decimals.
+      amount: round2(parseNum(v.amount) ?? 0),
       expense_date: v.date,
       // vehicle is a nullable FK, so null is right for "no vehicle".
       vehicle: v.vehicle || null,

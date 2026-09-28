@@ -42,6 +42,8 @@ import {
   formatNumber,
   formatPercent,
   parseNum,
+  round2,
+  decimalMax,
 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -76,7 +78,6 @@ const REJECTION_REASONS = [
   'Other',
 ] as const;
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
@@ -102,7 +103,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const [outcomeBusy, setOutcomeBusy] = useState(false);
   const [finalPrice, setFinalPrice] = useState('');
   const finalPriceNum = parseNum(finalPrice);
-  const finalPriceInvalid = finalPrice.trim() !== '' && finalPriceNum == null;
+  // QuoteOutcome.final_price is DecimalField(max_digits=12, decimal_places=2)
+  // with no serializer in front of it (services/quote_outcome_capture.py) —
+  // an unparseable-by-Decimal value (e.g. too many whole digits) 500s there
+  // instead of coming back as a clean 400, so this is checked client-side.
+  const FINAL_PRICE_MAX = decimalMax(12, 2);
+  const finalPriceInvalid =
+    finalPrice.trim() !== '' &&
+    (finalPriceNum == null || finalPriceNum < 0 || finalPriceNum > FINAL_PRICE_MAX);
   const [rejectionReason, setRejectionReason] = useState('');
   const [customReason, setCustomReason] = useState('');
 
@@ -311,7 +319,9 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             // Blank is legitimate here ("keep the quoted total"), but an
             // unparseable value is not — Number() silently dropped it and closed
             // the quote at the old total.
-            ...(finalPriceNum != null && finalPriceNum > 0 ? { final_price: finalPriceNum } : {}),
+            ...(finalPriceNum != null && finalPriceNum > 0
+              ? { final_price: round2(finalPriceNum) }
+              : {}),
           }
         : { outcome: 'rejected' as const, rejection_reason: reasonText };
     run(
@@ -677,7 +687,13 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
                       keyboardType="decimal-pad"
                       numeric
                       decimals={2}
-                      error={finalPriceInvalid ? 'Enter a number, e.g. 12 500,00' : undefined}
+                      error={
+                        finalPriceInvalid
+                          ? finalPriceNum != null && finalPriceNum > FINAL_PRICE_MAX
+                            ? "That's too large a price to record"
+                            : 'Enter a number, e.g. 12 500,00'
+                          : undefined
+                      }
                       value={finalPrice}
                       onChangeText={setFinalPrice}
                     />

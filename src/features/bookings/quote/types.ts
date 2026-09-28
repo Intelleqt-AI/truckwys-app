@@ -9,11 +9,11 @@ export interface Loc {
   cc?: string;
 }
 
-// Native map projections and pasted links can carry 15-17 significant digits
-// of floating-point noise. The backend's lat/lng columns are
-// DecimalField(max_digits=12, decimal_places=7), so anything unrounded blows
-// past max_digits and the save is rejected outright.
-export const roundCoord = (n: number) => Number(n.toFixed(7));
+// roundCoord/round2 now live in src/lib/formatters.ts (next to parseNum) so
+// every screen shares one rounding helper instead of each quietly growing
+// its own — re-exported here so existing `from './types'` imports keep
+// working unchanged.
+export { roundCoord, round2 } from '@/lib/formatters';
 
 export interface StopEntry {
   /** Client-side only — never sent anywhere, just a stable React key. */

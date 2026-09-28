@@ -69,7 +69,14 @@ import {
 } from './api';
 import { normalizeVehicleType } from '@/features/bookings/api';
 import { vehicleTypeDeleteCopy } from './validation';
-import { formatCurrency, formatDate, formatRelativeTime, parseNum } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatDate,
+  formatRelativeTime,
+  parseNum,
+  roundTo,
+  decimalMax,
+} from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
@@ -1343,14 +1350,53 @@ function CompanySection() {
     if (crossingsNum != null && (crossingsNum < 1 || crossingsNum > 5000)) {
       return toast.error('Border crossings per year must be between 1 and 5000');
     }
+    // validityDays/slaHours/crossingsPerYear are all plain IntegerFields — a
+    // comma value like "7,5" passes every check above (parseNum reads it as
+    // 7.5, well inside every range) but 400s server-side as "A valid integer
+    // is required.", not the DecimalField digit-count message but the same
+    // class of bug.
+    for (const [label, n] of [
+      ['Quote validity', validityNum],
+      ['SLA hours', slaHoursNum],
+      ['Border crossings per year', crossingsNum],
+    ] as const) {
+      if (n != null && !Number.isInteger(n)) return toast.error(`${label} must be a whole number`);
+    }
 
+    // Company's rate/price columns are DecimalField(…, decimal_places=N)
+    // with no server-side rounding — round to each column's own precision so
+    // a value with more decimals than that (a still-focused field's blur
+    // reformat hasn't run, or the field has no `decimals` prop at all)
+    // doesn't get the whole save rejected.
+    //
     // Only send a numeric field when it has a value — an empty box must leave
     // the stored default alone rather than zeroing it.
-    const optionalNum = (v: string) => (v.trim() ? (parseNum(v) ?? undefined) : undefined);
+    const optionalNum = (v: string, dp: number) =>
+      v.trim() ? (parseNum(v) != null ? roundTo(parseNum(v)!, dp) : undefined) : undefined;
     // For the nullable per-fuel-type prices, blank has to mean "clear it", which
     // needs an explicit null: optionalNum omits the key entirely, so a price
     // could be set but never removed.
-    const clearableNum = (v: string) => (v.trim() ? (parseNum(v) ?? null) : null);
+    const clearableNum = (v: string, dp: number) =>
+      v.trim() ? (parseNum(v) != null ? roundTo(parseNum(v)!, dp) : null) : null;
+
+    // default_base_rate_per_km (8,2), default_toll_rate_per_km (6,3), the
+    // four fuel prices (8,4) — an oversized typed value (more whole digits
+    // than the column allows) is caught here rather than round-tripping to a
+    // server 400, same reasoning as decimalMax elsewhere in this file.
+    const BASE_RATE_MAX = decimalMax(8, 2);
+    const TOLL_RATE_MAX = decimalMax(6, 3);
+    const FUEL_PRICE_MAX = decimalMax(8, 4);
+    for (const [label, v, max] of [
+      ['Base rate / km', baseRate, BASE_RATE_MAX],
+      ['Toll rate / km', tollRate, TOLL_RATE_MAX],
+      ['Diesel price', fuelPrice, FUEL_PRICE_MAX],
+      ['Petrol price', fuelPetrol, FUEL_PRICE_MAX],
+      ['Electric price', fuelElectric, FUEL_PRICE_MAX],
+      ['Hybrid price', fuelHybrid, FUEL_PRICE_MAX],
+    ] as const) {
+      const n = parseNum(v);
+      if (n != null && n > max) return toast.error(`${label} is too large`);
+    }
 
     setBusy(true);
     try {
@@ -1374,18 +1420,18 @@ function CompanySection() {
         // PositiveIntegerField, NOT NULL with a factory default of 24 — a
         // blank box falls back to that rather than clearing, same shape as
         // diesel below.
-        cross_border_crossings_per_year: optionalNum(crossingsPerYear) ?? 24,
-        default_quote_validity_days: optionalNum(validityDays),
-        default_base_rate_per_km: optionalNum(baseRate),
-        default_toll_rate_per_km: optionalNum(tollRate),
+        cross_border_crossings_per_year: optionalNum(crossingsPerYear, 0) ?? 24,
+        default_quote_validity_days: optionalNum(validityDays, 0),
+        default_base_rate_per_km: optionalNum(baseRate, 2),
+        default_toll_rate_per_km: optionalNum(tollRate, 3),
         fuel_zone: fuelZone,
         // Diesel is NOT NULL with a 23.50 factory default, so a blank box falls
         // back to that rather than clearing — matching the web page.
-        fuel_price_per_litre: optionalNum(fuelPrice) ?? DIESEL_DEFAULT_PRICE,
-        fuel_price_petrol: clearableNum(fuelPetrol),
-        fuel_price_electric: clearableNum(fuelElectric),
-        fuel_price_hybrid: clearableNum(fuelHybrid),
-        default_sla_hours: optionalNum(slaHours),
+        fuel_price_per_litre: optionalNum(fuelPrice, 4) ?? DIESEL_DEFAULT_PRICE,
+        fuel_price_petrol: clearableNum(fuelPetrol, 4),
+        fuel_price_electric: clearableNum(fuelElectric, 4),
+        fuel_price_hybrid: clearableNum(fuelHybrid, 4),
+        default_sla_hours: optionalNum(slaHours, 0),
       });
       invalidateFor(qc, 'company');
       toast.success();

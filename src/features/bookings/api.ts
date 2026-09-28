@@ -3,6 +3,7 @@ import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/clien
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { useInfiniteList } from '@/lib/api/useInfiniteList';
 import { normalizeQuote, normalizeLoad } from '@/types/domain';
+import { roundTo } from '@/lib/formatters';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
 export const useQuotes = () => useInfiniteList('quotes', 'quotes/', normalizeQuote);
@@ -295,7 +296,14 @@ export const fetchRecentLocations = (q?: string) =>
 // Fire-and-forget: builds the recent-locations history, never blocks or
 // surfaces an error to the location-picking flow.
 export const recordLocationPick = (label: string, lat: number, lon: number) =>
-  postData({ url: 'location/recent/', data: { location_text: label, lat, lon } }).catch(() => {});
+  postData({
+    url: 'location/recent/',
+    // LocationSearchHistory.lat/lon are DecimalField(max_digits=9,
+    // decimal_places=6) — one decimal place tighter than the (12,7) quote
+    // coordinate columns roundCoord targets, so round to this column's own
+    // precision rather than reusing that helper.
+    data: { location_text: label, lat: roundTo(lat, 6), lon: roundTo(lon, 6) },
+  }).catch(() => {});
 
 export const calculateRoute = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'route/calculate/', data });

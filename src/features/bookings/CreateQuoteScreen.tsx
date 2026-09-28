@@ -68,7 +68,7 @@ import { reverseGeocode } from '@/lib/geocode';
 import { VoiceQuoteSheet } from './VoiceQuoteSheet';
 import { WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
-import { formatDuration, formatPlain, parseNum } from '@/lib/formatters';
+import { formatDuration, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
@@ -85,6 +85,7 @@ import {
   type StopEntry,
   type SectionId,
   roundCoord,
+  round2,
   extractCode,
   isForeignCc,
   plusDays,
@@ -119,6 +120,7 @@ import {
   missingPriceInputs,
   awaitingAiCopy,
   selectWinBlocker,
+  WEIGHT_MAX_TONS,
   type QuoteIssue,
 } from './quote/validation';
 import { QuoteFooterActions, type FooterStrip } from './quote/QuoteFooterActions';
@@ -245,8 +247,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // when the user had typed `1,5`. A null here is a validation error, never a
   // substituted number.
   const weightTons = parseNum(weight);
-  const weightKg = weightTons == null ? 0 : weightTons * 1000;
+  // round2: tons * 1000 is plain float arithmetic and routinely lands on
+  // things like 16100.000000000002 (16.1t) — the backend's weight column is
+  // DecimalField(max_digits=10, decimal_places=2), so that noise blows past
+  // max_digits and the save is rejected. See round2's own comment in ./quote/types.
+  const weightKg = weightTons == null ? 0 : round2(weightTons * 1000);
   const weightInvalid = weight.trim() !== '' && weightTons == null;
+  const weightTooLarge = weightTons != null && weightTons > WEIGHT_MAX_TONS;
   const baseRateNum = parseNum(baseRatePerKm) ?? 0;
   const driverNum = parseNum(driverAllowance) ?? 0;
   const tollOverrideNum = parseNum(tollOverride) ?? 0;
@@ -1131,10 +1138,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // Applies the exact figure that is on screen. Floored at 0 because
   // serviceCharge has no line item of its own in the breakdown, so a negative
-  // would be an unexplained discount below cost.
+  // would be an unexplained discount below cost. round2 because
+  // suggestedPrice - costs.total is plain float subtraction between two
+  // already-rounded cents figures and routinely lands on things like
+  // 5678.9100000000035 — the backend's additional_charges column is
+  // DecimalField(max_digits=10, decimal_places=2), so that noise blows past
+  // max_digits and the save is rejected. See round2's own comment in ./quote/types.
   const applyRecommended = () => {
     if (suggestedPrice != null && suggestedPrice > 0) {
-      setServiceCharge((sc) => Math.max(0, sc + (suggestedPrice - costs.total)));
+      setServiceCharge((sc) => Math.max(0, round2(sc + (suggestedPrice - costs.total))));
     }
   };
 
@@ -1241,6 +1253,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         pickup,
         delivery,
         weightInvalid,
+        weightTooLarge,
         weightKg,
         pickupDate,
         deliveryDate,
@@ -1253,6 +1266,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       pickup,
       delivery,
       weightInvalid,
+      weightTooLarge,
       weightKg,
       pickupDate,
       deliveryDate,
@@ -1357,6 +1371,28 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       return toast.error('Set a collection point and drop-off first');
     if (routeBlockedMessage) return toast.error(routeBlockedMessage);
     if (weightBlockedMessage) return toast.error(weightBlockedMessage);
+    // Unlike weightInvalid (an unparseable weight quietly sends as 0 and only
+    // blocks Send), a too-large-but-valid weight WOULD be sent on a draft
+    // save too — Quote.weight is NOT NULL, so it's always in the payload —
+    // and would fail there with the backend's digit-count error. Block both.
+    if (weightTooLarge) {
+      return toast.error("That's an unusually large weight — check the unit is tons");
+    }
+    // Quote.base_rate/total_amount are both DecimalField(max_digits=10,
+    // decimal_places=2). Rate/km × distance, or a typed driver/toll override,
+    // has no upper bound of its own — this is the one place that catches all
+    // of them at once rather than bounding each input separately.
+    const QUOTE_MONEY_MAX = decimalMax(10, 2);
+    if (costs.baseCost > QUOTE_MONEY_MAX || costs.total > QUOTE_MONEY_MAX) {
+      return toast.error("That price is too large — check the rate and overrides");
+    }
+    // A negative driver/toll override isn't just an "unexplained discount"
+    // (applyRecommended's own comment on serviceCharge) — it can also drag
+    // marginPct (costs.ts) past what Quote.margin_percentage
+    // (DecimalField(5,2), max 999.99) can store.
+    if (driverNum < 0 || (tollEdited && tollOverrideNum < 0)) {
+      return toast.error("Driver allowance and tolls can't be negative");
+    }
     // Only the initial CREATE consumes the session's one quote — patching an
     // already-created quote (savedId.current set) doesn't hit this again.
     if (demo.quotaExceeded && !savedId.current) return toast.error(DEMO_QUOTA_MESSAGE);

@@ -1,7 +1,7 @@
 import { num, pick } from '@/lib/api/list';
 import type { CostBreakdown } from './costs';
 import type { GeoPoint } from '@/lib/routeGeometry';
-import { extractCode, roundCoord, type Loc, type StopEntry } from './types';
+import { extractCode, roundCoord, round2, type Loc, type StopEntry } from './types';
 
 // Moved out of CreateQuoteScreen.tsx's buildPayload (Phase 0 extraction) —
 // same object literal, same key order, no behaviour change. This is the DRF
@@ -75,16 +75,21 @@ export function buildQuotePayload(
     // so Quote Detail / a converted Load could never show the real road path.
     route_geometry: routeGeometry.map((p) => ({ lat: roundCoord(p.lat), lon: roundCoord(p.lon) })),
     cargo_description: cargo || `${weight}t ${vehicleType}`.trim(),
-    weight: weightKg,
-    distance: costs.distance,
+    // All of the below are DecimalField(max_digits=10, decimal_places=2) on
+    // the backend. weightTons * 1000, and every cost.ts figure derived from
+    // it, is plain JS float arithmetic — round2 keeps the float noise (e.g.
+    // 16100.000000000002) from blowing past max_digits/decimal_places and
+    // getting the save rejected. See round2's own comment in ./types.
+    weight: round2(weightKg),
+    distance: round2(costs.distance),
     estimated_duration_minutes: costs.duration,
     vehicle_type: vehicleType,
-    base_rate: costs.baseCost,
-    fuel_surcharge: costs.fuelCost,
-    toll_charges: costs.tollCost,
-    driver_allowance: costs.driver,
-    additional_charges: costs.crossBorderCost + serviceCharge,
-    total_amount: costs.total,
+    base_rate: round2(costs.baseCost),
+    fuel_surcharge: round2(costs.fuelCost),
+    toll_charges: round2(costs.tollCost),
+    driver_allowance: round2(costs.driver),
+    additional_charges: round2(costs.crossBorderCost + serviceCharge),
+    total_amount: round2(costs.total),
     margin_percentage: costs.marginPct,
     notes,
     status,

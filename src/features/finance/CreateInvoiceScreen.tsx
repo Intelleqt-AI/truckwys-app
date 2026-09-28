@@ -21,7 +21,7 @@ import { createInvoice, updateInvoice, useInvoice } from './api';
 import { useCustomers } from '@/features/customers/api';
 import { invoiceSchema, INVOICE_FIELD_ORDER, type InvoiceFormValues } from './validation';
 import { num, str, pick } from '@/lib/api/list';
-import { formatCurrency, parseNum, formatPlain } from '@/lib/formatters';
+import { formatCurrency, parseNum, formatPlain, round2 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -227,8 +227,11 @@ export function CreateInvoiceScreen({ route, navigation }: Props) {
   const sub = parseNum(subtotalW) ?? 0;
   // Matches the backend's own Invoice.calculate_vat(), which also hardcodes
   // 15% for South Africa — not a bug, just mirrored here for the preview.
-  const vat = Math.round(sub * 0.15 * 100) / 100;
-  const total = sub + vat;
+  // round2: sub + vat is plain float addition between two already-rounded
+  // cents figures and can land on e.g. 1.3099999999999998 — cosmetic here
+  // (it's a preview), but kept consistent with what's actually sent below.
+  const vat = round2(sub * 0.15);
+  const total = round2(sub + vat);
 
   const onValid = async (v: InvoiceFormValues) => {
     if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
@@ -236,12 +239,15 @@ export function CreateInvoiceScreen({ route, navigation }: Props) {
     // leaving it up behind SaveSuccessOverlay.
     void dismissKeyboard();
     setBusy(true);
-    const subN = parseNum(v.subtotal) ?? 0;
-    const vatN = Math.round(subN * 0.15 * 100) / 100;
+    const subN = round2(parseNum(v.subtotal) ?? 0);
+    const vatN = round2(subN * 0.15);
     const payload = {
       customer: Number(v.customer),
       subtotal: subN,
-      total_amount: subN + vatN,
+      // round2: subN + vatN is plain float addition and can land on e.g.
+      // 1.3099999999999998 (DRF: no more than 10 digits in total /
+      // no more than 2 decimal places on total_amount).
+      total_amount: round2(subN + vatN),
       notes: (v.description ?? '').trim(),
       due_date: v.due_date,
       payment_terms: v.payment_terms,

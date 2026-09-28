@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, decimalMax } from '@/lib/formatters';
 
 // Fleet's zod schemas — the vehicle and driver forms are the only Fleet
 // screens; both moved off imperative `submit()`-time checks
@@ -27,13 +27,32 @@ const CURRENT_YEAR = new Date().getFullYear();
 // VIN standard excludes I, O, Q (too easily confused with 1, 0).
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/i;
 
-const numericOptionalField = (label: string) =>
+// Vehicle.mileage / last_service_mileage are both
+// DecimalField(max_digits=10, decimal_places=2).
+const ODOMETER_MAX = decimalMax(10, 2);
+
+const numericOptionalField = (label: string, max = ODOMETER_MAX) =>
   z
     .string()
     .trim()
     .optional()
     .refine((v) => !v || parseNum(v) != null, `${label} must be a number`)
-    .refine((v) => !v || (parseNum(v) ?? -1) >= 0, `${label} can't be negative`);
+    .refine((v) => !v || (parseNum(v) ?? -1) >= 0, `${label} can't be negative`)
+    .refine((v) => !v || (parseNum(v) ?? 0) <= max, `${label} is too large`);
+
+// Vehicle.service_interval_km is a plain IntegerField (no decimal places at
+// all) — a typed "10000,5" backend-fails with "A valid integer is required",
+// not the DecimalField digit-count message, but it's the same class of "the
+// app let through a number shape the column can't store".
+const integerOptionalField = (label: string, max = 999_999_999) =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || parseNum(v) != null, `${label} must be a number`)
+    .refine((v) => !v || Number.isInteger(parseNum(v)), `${label} must be a whole number`)
+    .refine((v) => !v || (parseNum(v) ?? -1) >= 0, `${label} can't be negative`)
+    .refine((v) => !v || (parseNum(v) ?? 0) <= max, `${label} is too large`);
 
 /**
  * `originalVin` grandfathers a legacy record: a vehicle saved before this
@@ -90,7 +109,7 @@ export function vehicleSchema({ originalVin }: { originalVin?: string } = {}) {
     driver: z.string().optional(),
     registration_expiry: z.string().trim().optional(),
     last_maintenance_date: z.string().trim().optional(),
-    service_interval_km: numericOptionalField('Service interval'),
+    service_interval_km: integerOptionalField('Service interval'),
     last_service_mileage: numericOptionalField('Last service'),
   });
 }

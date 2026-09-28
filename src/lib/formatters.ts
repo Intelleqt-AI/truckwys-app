@@ -95,6 +95,42 @@ export const parseNum = (input: string | number | null | undefined): number | nu
   return negative ? -n : n;
 };
 
+/**
+ * Round a number to `dp` decimal places, as a number (not a display string).
+ *
+ * Every money/weight/rate column on the backend is a Django
+ * DecimalField(max_digits, decimal_places) with no server-side rounding —
+ * nothing there quantizes what comes in, it's a straight validation check.
+ * Plain JS float arithmetic (unit conversions like tons*1000, subtractions
+ * like suggestedPrice - total, sums like subtotal + vat) routinely lands on
+ * values like 16100.000000000002 or 1.3099999999999998, which blow past
+ * either the field's total digit count or its decimal-place count and get
+ * the whole save rejected with DRF's "Ensure that there are no more than N
+ * digits in total" / "no more than N decimal places". Round every number at
+ * the point it's about to be sent, to that column's own decimal_places.
+ */
+export const roundTo = (n: number, dp: number): number => Number(n.toFixed(dp));
+
+/** decimal_places=2 — the overwhelmingly common case (money, weight, distance). */
+export const round2 = (n: number): number => roundTo(n, 2);
+
+/**
+ * Native map projections and pasted links can carry 15-17 significant digits
+ * of floating-point noise. The backend's lat/lng columns are
+ * DecimalField(max_digits=12, decimal_places=7), so anything unrounded blows
+ * past max_digits and the save is rejected outright.
+ */
+export const roundCoord = (n: number): number => roundTo(n, 7);
+
+/**
+ * The largest value a DecimalField(max_digits, decimal_places) column
+ * accepts — for a zod `.max()` so an oversized typed value (e.g. nine digits
+ * into a (10,2) column) surfaces as an inline field error instead of a
+ * server-round-trip toast. E.g. decimalMax(10, 2) === 99999999.99.
+ */
+export const decimalMax = (maxDigits: number, decimalPlaces: number): number =>
+  Number((Math.pow(10, maxDigits - decimalPlaces) - Math.pow(10, -decimalPlaces)).toFixed(decimalPlaces));
+
 export const formatDistance = (kilometres: number): string => `${formatNumber(kilometres)} km`;
 
 export const formatDuration = (hours: number): string => {

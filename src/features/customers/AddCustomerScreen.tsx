@@ -8,13 +8,16 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, TextField, SelectField, Button, type IconName } from '@/components/ui';
 import { createCustomer, updateCustomer } from './api';
 import { str, num, pick } from '@/lib/api/list';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, round2, decimalMax } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddCustomer'>;
+
+// Customer.credit_limit is DecimalField(max_digits=10, decimal_places=2).
+const CREDIT_LIMIT_MAX = decimalMax(10, 2);
 
 // NET7/14/45 joined 30/60/90 on the backend (migration 0125) — customers on
 // those terms already existed in seeders and real lists before they were
@@ -47,7 +50,9 @@ const schema = z.object({
     .optional()
     // Validated here rather than at submit so the message lands on the field.
     // parseNum accepts `50 000` and `50000,50` as well as a plain integer.
-    .refine((v) => !v || parseNum(v) != null, 'Enter a number, e.g. 50 000'),
+    .refine((v) => !v || parseNum(v) != null, 'Enter a number, e.g. 50 000')
+    .refine((v) => !v || (parseNum(v) ?? 0) >= 0, "Credit limit can't be negative")
+    .refine((v) => !v || (parseNum(v) ?? 0) <= CREDIT_LIMIT_MAX, "That's too large a credit limit"),
 });
 type Values = z.infer<typeof schema>;
 
@@ -122,7 +127,10 @@ export function AddCustomerScreen({ route, navigation }: Props) {
       payment_terms_default: paymentTerms,
       status,
     };
-    if (v.credit_limit) payload.credit_limit = parseNum(v.credit_limit) ?? undefined;
+    if (v.credit_limit) {
+      const n = parseNum(v.credit_limit);
+      payload.credit_limit = n == null ? undefined : round2(n);
+    }
     try {
       if (editing) await updateCustomer(editId, payload);
       else await createCustomer(payload);
@@ -166,6 +174,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
               placeholder="e.g. 50 000"
               keyboardType="decimal-pad"
               numeric
+              decimals={2}
               value={value ?? ''}
               onChangeText={onChange}
               onBlur={onBlur}

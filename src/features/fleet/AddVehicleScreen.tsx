@@ -24,7 +24,7 @@ import {
 } from './validation';
 import { str, num, pick } from '@/lib/api/list';
 import { capacityTons } from '@/features/bookings/quote/types';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, round2 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -339,10 +339,16 @@ export function AddVehicleScreen({ route, navigation }: Props) {
       registration_expiry: v.registration_expiry || undefined,
       last_maintenance_date: v.last_maintenance_date || undefined,
       year: parseNum(v.year) ?? undefined,
-      capacity: capacityTons != null ? capacityTons * 1000 : undefined,
-      mileage: v.mileage ? (parseNum(v.mileage) ?? undefined) : undefined,
-      service_interval_km: v.service_interval_km ? parseNum(v.service_interval_km) : null,
-      last_service_mileage: v.last_service_mileage ? parseNum(v.last_service_mileage) : null,
+      // Vehicle.capacity is DecimalField(max_digits=10, decimal_places=2) —
+      // tons*1000 is plain float arithmetic and routinely lands on e.g.
+      // 16100.000000000002 (16.1t), which fails the save outright. Same fix
+      // as the quote weight conversion (src/lib/formatters.ts's round2).
+      capacity: capacityTons != null ? round2(capacityTons * 1000) : undefined,
+      mileage: v.mileage ? round2(parseNum(v.mileage) ?? 0) : undefined,
+      service_interval_km: v.service_interval_km
+        ? Math.round(parseNum(v.service_interval_km) ?? 0)
+        : null,
+      last_service_mileage: v.last_service_mileage ? round2(parseNum(v.last_service_mileage) ?? 0) : null,
       driver: v.driver ? Number(v.driver) : null,
       ...(typeId ? { vehicle_type: typeId } : {}),
     };

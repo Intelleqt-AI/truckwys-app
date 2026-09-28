@@ -23,7 +23,7 @@ import {
   type VehicleTypeFormValues,
 } from './validation';
 import { num, str, pick } from '@/lib/api/list';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, round2 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -192,24 +192,29 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
     void dismissKeyboard();
     setBusy(true);
     // capacity is in tons (web stores vehicle-type capacity as tons directly).
+    // Every numeric field here is a DecimalField(…, decimal_places=2) with no
+    // rounding on the backend — round2 so a value with more decimals than
+    // that (the blur-reformat only runs once the field loses focus) doesn't
+    // get the save rejected.
     const payload = {
       name: v.name.trim(),
       description: (v.description ?? '').trim(),
-      capacity: parseNum(v.capacity) ?? 0,
-      base_rate: parseNum(v.base_rate) ?? 0,
+      capacity: round2(parseNum(v.capacity) ?? 0),
+      base_rate: round2(parseNum(v.base_rate) ?? 0),
       fuel_type: v.fuel_type,
       // Left out when blank so the backend's own default (36 L/100km) stands
       // rather than being overwritten with a zero.
       ...(v.fuel_consumption_l_per_100km?.trim()
-        ? { fuel_consumption_l_per_100km: parseNum(v.fuel_consumption_l_per_100km) ?? undefined }
+        ? { fuel_consumption_l_per_100km: round2(parseNum(v.fuel_consumption_l_per_100km) ?? 0) }
         : {}),
       // Same reasoning — left out when blank so the backend's own 2% default
       // stands, rather than sending 0 (which would switch the fuel-weight
       // adjustment off entirely, unlike web which coerces a blank to 2).
       ...(v.fuel_consumption_sensitivity_pct?.trim()
         ? {
-            fuel_consumption_sensitivity_pct:
-              parseNum(v.fuel_consumption_sensitivity_pct) ?? undefined,
+            fuel_consumption_sensitivity_pct: round2(
+              parseNum(v.fuel_consumption_sensitivity_pct) ?? 0,
+            ),
           }
         : {}),
       active: v.active === 'true',

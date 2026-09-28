@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, decimalMax } from '@/lib/formatters';
+
+// Invoice.total_amount is DecimalField(max_digits=10, decimal_places=2) —
+// subtotal * 1.15 (the hardcoded VAT rate, matching Invoice.calculate_vat())
+// must still fit, so subtotal itself is capped a bit tighter than the
+// column's own max.
+const INVOICE_TOTAL_MAX = decimalMax(10, 2);
+const SUBTOTAL_MAX = Math.floor((INVOICE_TOTAL_MAX / 1.15) * 100) / 100;
+// Expense.amount is DecimalField(max_digits=10, decimal_places=2).
+const EXPENSE_AMOUNT_MAX = decimalMax(10, 2);
 
 // Finance's zod schemas — same convention as `src/features/fleet/validation.ts`:
 // both the Add Expense and Create Invoice forms moved off imperative
@@ -36,7 +45,8 @@ export function expenseSchema() {
       .trim()
       .min(1, 'Amount is required')
       .refine((v) => parseNum(v) != null, 'Enter a number, e.g. 1 250,00')
-      .refine((v) => (parseNum(v) ?? 0) > 0, 'Must be more than 0'),
+      .refine((v) => (parseNum(v) ?? 0) > 0, 'Must be more than 0')
+      .refine((v) => (parseNum(v) ?? 0) <= EXPENSE_AMOUNT_MAX, "That's too large an amount"),
     date: z.string().trim().min(1, 'Date is required'),
     litres: numericOptionalField('Litres'),
     pricePerLitre: numericOptionalField('Price / litre'),
@@ -85,7 +95,8 @@ export function invoiceSchema({ originalDueDate }: { originalDueDate?: string } 
       .trim()
       .min(1, 'Amount is required')
       .refine((v) => parseNum(v) != null, 'Enter a number, e.g. 12 500,00')
-      .refine((v) => (parseNum(v) ?? 0) > 0, 'Enter an amount'),
+      .refine((v) => (parseNum(v) ?? 0) > 0, 'Enter an amount')
+      .refine((v) => (parseNum(v) ?? 0) <= SUBTOTAL_MAX, "That's too large an amount"),
     description: z.string().trim().optional(),
     due_date: z
       .string()

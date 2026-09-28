@@ -31,6 +31,12 @@ export interface QuoteIssue {
   fixable: boolean;
 }
 
+// Quote.weight is DecimalField(max_digits=10, decimal_places=2) — 1000t is
+// well past anything that moves on a road (an abnormal-load permit territory
+// long before this) and far short of what the column could actually store,
+// so it's a generous bound whose only job is to catch a stray extra zero.
+export const WEIGHT_MAX_TONS = 1000;
+
 export interface CollectIssuesInput {
   subscriptionBlocked: boolean;
   subscriptionNotice: string | null | undefined;
@@ -39,6 +45,9 @@ export interface CollectIssuesInput {
   pickup: Loc | null;
   delivery: Loc | null;
   weightInvalid: boolean;
+  /** True once a parsed weight also exceeds WEIGHT_MAX_TONS — a distinct
+      case from weightInvalid (unparseable), with its own message. */
+  weightTooLarge: boolean;
   weightKg: number;
   pickupDate: string;
   deliveryDate: string;
@@ -119,6 +128,7 @@ export function collectIssues({
   pickup,
   delivery,
   weightInvalid,
+  weightTooLarge,
   weightKg,
   pickupDate,
   deliveryDate,
@@ -183,6 +193,14 @@ export function collectIssues({
       field: 'weight',
       section: 'load',
       message: 'Enter a number, e.g. 1,5',
+      blocks: 'send',
+      fixable: true,
+    });
+  } else if (weightTooLarge) {
+    issues.push({
+      field: 'weight',
+      section: 'load',
+      message: `That's an unusually large weight — check the unit is tons`,
       blocks: 'send',
       fixable: true,
     });

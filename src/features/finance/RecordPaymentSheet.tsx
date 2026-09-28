@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Modal, Pressable } from 'react-native';
 import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Txt, Mono, Button, TextField, DateField, SelectField, type Option } from '@/components/ui';
-import { formatCurrency, formatPlain, parseNum } from '@/lib/formatters';
+import { formatCurrency, formatPlain, parseNum, round2 } from '@/lib/formatters';
 
 // Records a payment against an invoice — the mobile counterpart of the web
 // invoice page's inline payment form.
@@ -63,7 +63,11 @@ export function RecordPaymentSheet({
   // disabled and told the user nothing about why.
   const parsed = parseNum(amount);
   const invalid = amount.trim() !== '' && parsed == null;
-  const amountNum = parsed ?? 0;
+  // Payment.amount is DecimalField(max_digits=10, decimal_places=2). This
+  // field's Amount input can still be focused when RECORD is tapped — the
+  // sheet's scroll view uses keyboardShouldPersistTaps="handled", so the
+  // decimals={2} blur-reformat may never run — so round here regardless.
+  const amountNum = round2(parsed ?? 0);
   // The backend rejects an overpayment (payments.py: amount > invoice.balance),
   // so catch it here rather than letting the user submit into a 400.
   const overpaying = amountNum > balance;

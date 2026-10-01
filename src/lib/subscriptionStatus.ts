@@ -22,19 +22,19 @@ export function subscriptionStatusLabel(
   status?: string | null,
   cancelAtPeriodEnd?: boolean,
 ): string {
-  if (cancelAtPeriodEnd) return 'CANCELLING';
+  if (cancelAtPeriodEnd) return 'Cancelling';
   switch (status) {
     case 'trialing':
-      return 'TRIAL';
+      return 'Trial';
     case 'grace_period':
-      return 'OVERDUE';
+      return 'Overdue';
     case 'suspended':
-      return 'SUSPENDED';
+      return 'Suspended';
     case 'cancelled':
-      return 'CANCELLED';
+      return 'Cancelled';
     default:
       // 'active', 'none', or not loaded yet.
-      return 'ACTIVE';
+      return 'Active';
   }
 }
 

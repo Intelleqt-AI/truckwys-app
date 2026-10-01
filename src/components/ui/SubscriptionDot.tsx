@@ -8,8 +8,8 @@ import { DemoDetailModal } from '@/features/more/DemoDetailModal';
 import { DEMO_BADGE_LABEL } from '@/lib/demoStatus';
 
 /**
- * Replaces AppHeader's hardcoded "Live" dot with the truth: the pulsing blue
- * Live indicator stays for a healthy account, but a role-visible subscription
+ * Replaces AppHeader's hardcoded "Live" dot with the truth: the static Live
+ * indicator stays for a healthy account, but a role-visible subscription
  * state (trial, overdue, cancelling, suspended, cancelled) takes over the same
  * slot, tappable for detail. Fixes the header claiming "Live" while the web
  * app's equivalent badge already says OVERDUE/SUSPENDED (OSLayout.tsx).
@@ -29,7 +29,7 @@ export function SubscriptionDot() {
     return (
       <>
         <Pressable onPress={() => setOpen(true)} hitSlop={8}>
-          <Badge label={DEMO_BADGE_LABEL} tone="warning" shape="pill" />
+          <Badge label={DEMO_BADGE_LABEL} tone="warning" dot />
         </Pressable>
         <DemoDetailModal visible={open} onClose={() => setOpen(false)} />
       </>
@@ -41,7 +41,7 @@ export function SubscriptionDot() {
   return (
     <>
       <Pressable onPress={() => setOpen(true)} hitSlop={8}>
-        <Badge label={subscription.label} tone={subscription.tone} shape="pill" dot />
+        <Badge label={subscription.label} tone={subscription.tone} dot />
       </Pressable>
       <SubscriptionDetailModal visible={open} onClose={() => setOpen(false)} />
     </>

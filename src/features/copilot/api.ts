@@ -176,6 +176,7 @@ export async function fetchConversation(id: number): Promise<Msg[]> {
       content: str(pick(o, ['content'])),
       actions: parseActions(o.actions),
       proposal: parseProposal(o.proposal),
+      ...(createdAt ? { createdAt } : {}),
     } satisfies Msg;
   });
 }

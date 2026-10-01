@@ -11,7 +11,6 @@ import {
 } from './api';
 import { resolveNotificationLink } from '@/lib/notificationLink';
 import { formatRelativeTime } from '@/lib/formatters';
-import { status as statusHues } from '@/theme/tokens';
 import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -22,11 +21,11 @@ type Props = NativeStackScreenProps<AppStackParamList, 'Notifications'>;
 
 // Notification `type` mirrors the backend's choices (INFO/SUCCESS/WARNING/ALERT,
 // serialized lowercase).
-const DOT_COLOR: Record<string, string> = {
-  info: statusHues.info,
-  success: statusHues.success,
-  warning: statusHues.warning,
-  alert: statusHues.danger,
+const DOT_TONE: Record<string, 'info' | 'success' | 'warning' | 'danger'> = {
+  info: 'info',
+  success: 'success',
+  warning: 'warning',
+  alert: 'danger',
 };
 
 export function NotificationsScreen({ navigation }: Props) {
@@ -107,7 +106,9 @@ export function NotificationsScreen({ navigation }: Props) {
                   <View
                     className="mt-1.5 h-2 w-2 rounded-pill"
                     style={{
-                      backgroundColor: n.read ? 'transparent' : DOT_COLOR[n.type] ?? statusHues.info,
+                      backgroundColor: n.read
+                        ? 'transparent'
+                        : colors[`${DOT_TONE[n.type] ?? 'info'}Dot` as const],
                     }}
                   />
                   <View className="flex-1">
@@ -137,7 +138,7 @@ export function NotificationsScreen({ navigation }: Props) {
                     accessibilityLabel={`Mark "${n.title}" as read`}
                     className="h-[44px] w-[44px] items-center justify-center active:opacity-40"
                   >
-                    <Icon name="check" size={19} color={colors.accent} strokeWidth={2.2} />
+                    <Icon name="check" size={19} color={colors.link} strokeWidth={2.2} />
                   </Pressable>
                 ) : (
                   <View className="w-3" />

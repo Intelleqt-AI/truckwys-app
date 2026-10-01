@@ -5,7 +5,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  AmbientGlow,
   SearchField,
   StatCard,
   Avatar,
@@ -105,7 +104,7 @@ export function CustomersScreen({ navigation }: Props) {
         <View className="flex-row items-center gap-1">
           {hasData && (
             <TouchableOpacity hitSlop={8} activeOpacity={0.7} className="px-2" onPress={() => enter()}>
-              <Mono className="text-micro uppercase tracking-wide text-accent">Select</Mono>
+              <Mono className="text-sub font-medium text-link">Select</Mono>
             </TouchableOpacity>
           )}
           <IconButton name="import" accessibilityLabel="Import customers" onPress={handleImport} />
@@ -133,7 +132,6 @@ export function CustomersScreen({ navigation }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep">
-      <AmbientGlow />
       <View className="px-screen pt-3">
         {data && (
           <View className="mb-3 gap-3">
@@ -162,7 +160,7 @@ export function CustomersScreen({ navigation }: Props) {
           keyExtractor={(c) => String(c.id)}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24 }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.faint} />
           }
           ListEmptyComponent={
             <EmptyState
@@ -184,7 +182,7 @@ export function CustomersScreen({ navigation }: Props) {
                 className={`mb-2.5 overflow-hidden rounded-card border ${
                   isSelected ? 'border-accent' : 'border-line bg-surface'
                 }`}
-                style={isSelected ? { backgroundColor: colors.glow } : undefined}
+                style={isSelected ? { backgroundColor: colors.accentDim } : undefined}
               >
                 <ListRow
                   leading={

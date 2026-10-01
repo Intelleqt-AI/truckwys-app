@@ -8,9 +8,9 @@ import { motion, EASE_OUT } from '@/theme/tokens';
 // https://docs.swmansion.com/react-native-reanimated/docs/layout-animations/entering-exiting-animations
 const ease = Easing.bezier(...EASE_OUT);
 
-// One entry per top-level Home section (command bar, hero, bento pair,
+// One entry per top-level Home section (command bar, hero, bento pair, needs you, funnel,
 // utilisation, quotes, bookings, actions — with one spare), in render order.
-const SECTION_COUNT = 8;
+const SECTION_COUNT = 10;
 export const SECTION_REVEAL = Array.from({ length: SECTION_COUNT }, (_, i) =>
   FadeInDown.duration(motion.reveal)
     .delay(i * motion.stagger)

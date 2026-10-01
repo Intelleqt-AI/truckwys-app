@@ -15,6 +15,7 @@ import {
   Mono,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
+import { quoteStage } from '@/lib/quoteStage';
 import { useCustomer, useCustomerQuotes, deleteCustomer, updateCustomer } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { num, str, pick } from '@/lib/api/list';
@@ -51,7 +52,13 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
 
   const quotes = quotesData ?? [];
   const totalQuotes = quotes.length;
-  const accepted = quotes.filter((q) => str(pick(q, ['status'])).toUpperCase() === 'ACCEPTED');
+  // Won work: accepted and not yet booked, plus everything already booked (which
+  // also holds the legacy In transit / Completed quotes). The same stage rule the
+  // Bookings list uses.
+  const accepted = quotes.filter((q) => {
+    const stage = quoteStage(q);
+    return stage === 'ACCEPTED' || stage === 'BOOKED';
+  });
   const totalRevenue = accepted.reduce((s, q) => s + num(pick(q, ['total_amount', 'quote_price'])), 0);
   const terms = str(pick(c, ['payment_terms_default']), 'NET30').toUpperCase();
 
@@ -208,7 +215,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
                     <Mono className="text-callout font-semibold text-fg">
                       {formatCurrency(num(pick(q, ['total_amount', 'quote_price'])), { maximumFractionDigits: 0 })}
                     </Mono>
-                    <StatusPill status={str(pick(q, ['status']), 'DRAFT').toUpperCase()} />
+                    <StatusPill status={quoteStage(q) ?? str(pick(q, ['status']), 'DRAFT').toUpperCase()} />
                   </View>
                 }
                 onPress={() => qid != null && openQuote(qid, q)}

@@ -61,11 +61,11 @@ export const QuoteJumpBar = memo(
                 <View
                   style={{ width: 6, height: 6, borderRadius: 6 }}
                   className={
-                    s.hasIssue ? 'bg-danger' : s.complete ? 'bg-success' : 'bg-line-active'
+                    s.hasIssue ? 'bg-danger-dot' : s.complete ? 'bg-success-dot' : 'bg-line-active'
                   }
                 />
                 <Mono
-                  className={`text-micro uppercase tracking-wide ${isActive ? 'text-accent' : 'text-muted'}`}
+                  className={`text-caption font-medium ${isActive ? 'text-accent' : 'text-muted'}`}
                 >
                   {s.label}
                 </Mono>

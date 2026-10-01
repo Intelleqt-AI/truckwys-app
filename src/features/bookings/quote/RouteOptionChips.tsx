@@ -13,6 +13,9 @@ interface RouteStat {
   distanceKm: number;
   durationMin: number;
   tollZar: number;
+  /** The backend could not calculate tolls for this route; tollZar is then a
+      meaningless 0, not "free". */
+  tollsUnavailable: boolean;
 }
 
 /**
@@ -44,14 +47,18 @@ function RouteOptionChipsImpl({
     distanceKm: num(pick(r, ['distance_km'])),
     durationMin: num(pick(r, ['duration_minutes'])) || num(pick(r, ['duration_min'])),
     tollZar: num(pick(r, ['toll_cost_zar'])),
+    tollsUnavailable: pick(r, ['tolls_unavailable']) === true,
   }));
   const fastestIdx = stats.reduce(
     (best, s, i) =>
       s.durationMin > 0 && (best < 0 || s.durationMin < stats[best]!.durationMin) ? i : best,
     -1,
   );
+  // A route whose tolls could not be calculated reports 0, which would
+  // otherwise win "Cheapest" for a cost nobody knows.
   const cheapestIdx = stats.reduce(
-    (best, s, i) => (best < 0 || s.tollZar < stats[best]!.tollZar ? i : best),
+    (best, s, i) =>
+      s.tollsUnavailable ? best : best < 0 || s.tollZar < stats[best]!.tollZar ? i : best,
     -1,
   );
   const selected = stats[selectedRouteIndex];
@@ -75,14 +82,17 @@ function RouteOptionChipsImpl({
 
           const deltaDistance = !active && selected ? s.distanceKm - selected.distanceKm : null;
           const deltaDuration = !active && selected ? s.durationMin - selected.durationMin : null;
-          const deltaToll = !active && selected ? s.tollZar - selected.tollZar : null;
+          const deltaToll =
+            !active && selected && !s.tollsUnavailable && !selected.tollsUnavailable
+              ? s.tollZar - selected.tollZar
+              : null;
           const sign = (n: number) => (n > 0 ? '+' : n < 0 ? '−' : '±');
 
           const a11yLabel = [
             label,
             `${Math.round(s.distanceKm)} kilometres`,
             formatDuration(s.durationMin / 60),
-            `${formatCurrency(s.tollZar)} in tolls`,
+            s.tollsUnavailable ? 'tolls unavailable' : `${formatCurrency(s.tollZar)} in tolls`,
             tags.length ? tags.join(', ') : null,
           ]
             .filter(Boolean)
@@ -101,14 +111,14 @@ function RouteOptionChipsImpl({
             >
               <View className="flex-row items-center gap-1.5">
                 <Mono
-                  className={`flex-shrink text-micro uppercase tracking-wide ${active ? 'text-accent' : 'text-muted'}`}
+                  className={`flex-shrink text-caption font-medium ${active ? 'text-accent' : 'text-muted'}`}
                   numberOfLines={1}
                 >
                   {label}
                 </Mono>
                 {tags[0] && (
                   <Mono
-                    className="text-nano uppercase tracking-wide text-success"
+                    className="text-micro font-medium text-success"
                     numberOfLines={1}
                   >
                     {tags[0]}
@@ -120,7 +130,7 @@ function RouteOptionChipsImpl({
               </Mono>
               {deltaDistance == null || deltaDuration == null || deltaToll == null ? (
                 <Mono className="text-micro text-faint" numberOfLines={1}>
-                  {formatCurrency(s.tollZar)} tolls
+                  {s.tollsUnavailable ? 'Tolls unavailable' : `${formatCurrency(s.tollZar)} tolls`}
                 </Mono>
               ) : (
                 <Mono className="text-micro text-faint" numberOfLines={1}>

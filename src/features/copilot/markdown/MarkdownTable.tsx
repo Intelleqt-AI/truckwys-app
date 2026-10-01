@@ -1,6 +1,5 @@
 import { memo } from 'react';
 import { View, ScrollView, Text } from 'react-native';
-import { MONO_FONT } from '@/theme/tokens';
 import { useTheme } from '@/theme/ThemeProvider';
 import { renderInline } from './InlineText';
 import type { Align, Inline } from './types';
@@ -86,14 +85,15 @@ export const MarkdownTable = memo(function MarkdownTable({
         // is the least useful part of an invoice number or a customer name.
         ellipsizeMode="middle"
         style={{
-          fontSize: opts.head ? 10.5 : FONT_SIZE,
-          lineHeight: opts.head ? 14 : 18,
+          fontSize: opts.head ? 12 : FONT_SIZE,
+          lineHeight: opts.head ? 16 : 18,
           color: opts.head ? colors.faint : colors.fg,
           textAlign: alignOf(c),
+          // v3: sentence-case sans headers; figure/ID columns are tabular, not mono.
           ...(opts.head
-            ? { fontFamily: MONO_FONT, textTransform: 'uppercase' as const }
+            ? { fontWeight: '500' as const, fontVariant: ['tabular-nums' as const] }
             : mono[c]
-              ? { fontFamily: MONO_FONT }
+              ? { fontVariant: ['tabular-nums' as const] }
               : null),
         }}
       >

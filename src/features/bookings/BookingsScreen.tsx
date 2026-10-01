@@ -1,11 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Pressable, Platform, ActivityIndicator } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
-  AmbientGlow,
   AppHeader,
   SwipeTabs,
   FilterChips,
@@ -22,13 +21,16 @@ import {
   EmptyState,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useQuotes, useLoads, useLoadsForConvertLookup, needsLoadsLookup } from './api';
+import { useQuotes, useLoads } from './api';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
+import { bookedLoadOf, quoteStage, type QuoteStage } from '@/lib/quoteStage';
+import { staleOf, staleLabel } from '@/lib/staleWork';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { formatCurrency, formatCurrencyCompact, formatPercent } from '@/lib/formatters';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
+import { useTheme } from '@/theme/ThemeProvider';
 
 type Props = BottomTabScreenProps<TabParamList, 'Bookings'>;
 
@@ -42,7 +44,6 @@ export function BookingsScreen({ route }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
-      <AmbientGlow />
       <View className="px-screen">
         <AppHeader eyebrow="Operations" title="Bookings" live />
       </View>
@@ -74,15 +75,29 @@ export function BookingsScreen({ route }: Props) {
 }
 
 // ── Quotes ───────────────────────────────────────────────────────────────
-const QUOTE_FILTERS = [
+// Same stages as the web board. Accepted means won and still to book; Booked
+// is a quote converted into a load; Expired is a Draft or Sent quote past its
+// valid-until day, so it is never counted as live work.
+const QUOTE_FILTERS: { label: string; value: 'ALL' | QuoteStage }[] = [
   { label: 'All', value: 'ALL' },
   { label: 'Draft', value: 'DRAFT' },
   { label: 'Sent', value: 'SENT' },
   { label: 'Accepted', value: 'ACCEPTED' },
+  { label: 'Booked', value: 'BOOKED' },
   { label: 'Declined', value: 'DECLINED' },
+  { label: 'Expired', value: 'EXPIRED' },
 ];
 
+// The server can filter these directly. Declined (which also holds Sent quotes
+// marked lost) and Expired (a date rule, not a status) are read off the full
+// list instead.
+const SERVER_FILTERS = ['DRAFT', 'SENT', 'ACCEPTED', 'BOOKED'];
+// How many rows a narrowed view tries to fill before it stops asking for pages.
+const FILL_TO = 8;
+const MAX_AUTO_PAGES = 8;
+
 function QuotesTab() {
+  const [filter, setFilter] = useState<'ALL' | QuoteStage>('ALL');
   const {
     combinedData: data,
     isLoading,
@@ -91,14 +106,31 @@ function QuotesTab() {
     loadMore,
     hasMore,
     isFetching,
-  } = useQuotes();
-  // Only worth walking the loads table when a visible quote is accepted but
-  // doesn't already carry its own load id — see needsLoadsLookup.
-  const { data: loadByQuote } = useLoadsForConvertLookup(needsLoadsLookup(data));
+  } = useQuotes(SERVER_FILTERS.includes(filter) ? filter : undefined);
   const { refreshing, onRefresh } = useManualRefresh(refresh);
-  const [filter, setFilter] = useState('ALL');
   const [q, setQ] = useState('');
   const { openQuote, openAssign, openLoad } = useAppNavigation();
+
+  const list = data.filter(
+    (item) =>
+      (filter === 'ALL' || quoteStage(item.raw) === filter) &&
+      (!q || `${item.code} ${item.customer}`.toLowerCase().includes(q.toLowerCase())),
+  );
+
+  // A narrowed view can come up short on the pages loaded so far (for example
+  // Expired among a long list of live quotes), so keep asking for the next page
+  // a few times rather than showing an empty list that is only empty so far.
+  const autoPages = useRef(0);
+  useEffect(() => {
+    autoPages.current = 0;
+  }, [filter, q]);
+  useEffect(() => {
+    if (isLoading || isFetching || !hasMore) return;
+    if (filter === 'ALL' && !q) return;
+    if (list.length >= FILL_TO || autoPages.current >= MAX_AUTO_PAGES) return;
+    autoPages.current += 1;
+    void loadMore();
+  }, [isLoading, isFetching, hasMore, filter, q, list.length, loadMore]);
 
   if (isLoading)
     return (
@@ -108,12 +140,6 @@ function QuotesTab() {
     );
   if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load quotes." />;
 
-  const list = data.filter(
-    (item) =>
-      (filter === 'ALL' || item.status === filter) &&
-      (!q || `${item.code} ${item.customer}`.toLowerCase().includes(q.toLowerCase())),
-  );
-
   return (
     <FlashList
       data={list}
@@ -121,6 +147,7 @@ function QuotesTab() {
       showsVerticalScrollIndicator={false}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      extraData={filter}
       onEndReached={() => hasMore && !isFetching && loadMore()}
       onEndReachedThreshold={0.5}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
@@ -130,7 +157,11 @@ function QuotesTab() {
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search quotes…" />
           </View>
-          <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
+          <FilterChips
+            options={QUOTE_FILTERS}
+            value={filter}
+            onChange={(v) => setFilter(v as 'ALL' | QuoteStage)}
+          />
         </View>
       }
       ListFooterComponent={
@@ -141,20 +172,24 @@ function QuotesTab() {
         ) : null
       }
       ListEmptyComponent={
-        <EmptyState icon="file" title="No quotes" body="No quotes match this filter." />
+        <EmptyState
+          icon="file"
+          title="No quotes"
+          body={
+            filter === 'BOOKED'
+              ? 'No booked quotes. Accepted quotes land here once converted to a booking.'
+              : 'No quotes match this filter.'
+          }
+        />
       }
       renderItem={({ item }) => {
-        // The quote row carries its load once converted; fall back to scanning
-        // loads by their `quote` back-reference, matching QuoteDetailScreen.
-        const convertedFromQuote = pick(item.raw, ['load_id', 'load', 'booking_id']);
-        const convertedLoadId =
-          convertedFromQuote != null
-            ? (convertedFromQuote as string | number)
-            : (loadByQuote?.get(String(item.id)) ?? null);
+        // The quote API names the load it was booked as, so no scan of the
+        // loads table is needed.
+        const booked = bookedLoadOf(item.raw);
         return (
           <QuoteCard
             quote={item}
-            convertedLoadId={convertedLoadId}
+            bookedLoad={booked}
             onPress={() => openQuote(item.id, item.raw)}
             onConvert={() =>
               openAssign({
@@ -164,7 +199,7 @@ function QuotesTab() {
                 vehicleType: str(pick(item.raw, ['vehicle_type'])) || undefined,
               })
             }
-            onViewBooking={() => openLoad(convertedLoadId!)}
+            onViewBooking={() => booked && openLoad(booked.id)}
           />
         );
       }}
@@ -174,28 +209,27 @@ function QuotesTab() {
 
 function QuoteCard({
   quote,
-  convertedLoadId,
+  bookedLoad,
   onPress,
   onConvert,
   onViewBooking,
 }: {
   quote: QuoteLite;
-  convertedLoadId: string | number | null;
+  bookedLoad: { id: number | string; load_number?: string } | null;
   onPress: () => void;
   onConvert: () => void;
   onViewBooking: () => void;
 }) {
-  // Web offers → Booking on accepted cards in the list as well as on the
-  // detail page (QuotesList.tsx).
-  const accepted = ['ACCEPTED', 'APPROVED'].includes(quote.status);
+  const { colors } = useTheme();
+  const stage = quoteStage(quote.raw) ?? quote.status;
   return (
     <Card>
       <Pressable className="p-3.5 active:bg-surface-hover" onPress={onPress}>
         <View className="mb-2 flex-row items-center justify-between">
           <View className="flex-row items-center gap-2">
-            <Mono className="text-micro font-semibold text-accent">{quote.code}</Mono>
+            <Mono className="text-caption font-medium text-muted">{quote.code}</Mono>
           </View>
-          <StatusPill status={quote.status} />
+          <StatusPill status={stage} />
         </View>
         <Txt className="text-body font-medium text-fg">{quote.customer}</Txt>
         <Txt className="mt-0.5 text-sub text-muted" numberOfLines={1} ellipsizeMode="tail">
@@ -203,29 +237,32 @@ function QuoteCard({
         </Txt>
         <View className="mt-3 flex-row items-center justify-between">
           <Mono className="text-body font-semibold text-fg">{formatCurrency(quote.amount)}</Mono>
-          {quote.marginPct != null && (
+          {/* A quote has no live margin once it is booked or expired. */}
+          {quote.marginPct != null && stage !== 'EXPIRED' && stage !== 'BOOKED' && (
             <Mono className="text-micro text-faint">Margin {formatPercent(quote.marginPct)}</Mono>
           )}
         </View>
       </Pressable>
-      {accepted && convertedLoadId == null && (
+      {/* Accepted still has to be booked; once booked, the quote just points at
+          its booking. A quote converts to at most one load. */}
+      {stage === 'ACCEPTED' && (
         <Pressable
           onPress={onConvert}
           className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
         >
-          <Mono className="text-micro uppercase tracking-label text-accent">
-            Convert to booking
-          </Mono>
-          <Icon name="arrowRight" size={14} color="#4D9EFF" />
+          <Mono className="text-sub font-medium text-link">Convert to booking</Mono>
+          <Icon name="arrowRight" size={14} color={colors.link} />
         </Pressable>
       )}
-      {accepted && convertedLoadId != null && (
+      {stage === 'BOOKED' && bookedLoad && (
         <Pressable
           onPress={onViewBooking}
           className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
         >
-          <Mono className="text-micro uppercase tracking-label text-accent">View booking</Mono>
-          <Icon name="arrowRight" size={14} color="#4D9EFF" />
+          <Mono className="text-sub font-medium text-link">
+            View booking{bookedLoad.load_number ? ` ${bookedLoad.load_number}` : ''}
+          </Mono>
+          <Icon name="arrowRight" size={14} color={colors.link} />
         </Pressable>
       )}
     </Card>
@@ -258,6 +295,10 @@ function OrdersTab() {
   const active = data.filter((l) => ACTIVE.includes(l.status));
   const list = active.filter((l) => filter === 'ALL' || l.status === filter);
   const revenue = active.reduce((s, l) => s + l.amount, 0);
+  // Past its delivery date, or open for over 30 days: said as "left open",
+  // never counted as current work.
+  const current = active.filter((l) => !staleOf(l.raw));
+  const staleCount = active.length - current.length;
 
   return (
     <LoadList
@@ -268,12 +309,14 @@ function OrdersTab() {
       onEndReached={() => hasMore && !isFetching && loadMore()}
       isFetchingMore={isFetching}
       stats={[
-        { label: 'Active orders', value: String(active.length) },
+        { label: 'Active orders', value: String(current.length) },
         {
           label: 'In transit',
-          value: String(active.filter((l) => l.status === 'IN_TRANSIT').length),
+          value: String(current.filter((l) => l.status === 'IN_TRANSIT').length),
         },
-        { label: 'Loading', value: String(active.filter((l) => l.status === 'LOADING').length) },
+        staleCount > 0
+          ? { label: 'Left open', value: String(staleCount) }
+          : { label: 'Loading', value: String(current.filter((l) => l.status === 'LOADING').length) },
         { label: 'Revenue', value: formatCurrencyCompact(revenue) },
       ]}
       filters={[
@@ -345,6 +388,12 @@ function HistoryTab() {
       onFilter={setFilter}
     />
   );
+}
+
+/** " · left open since 20 Jun 2026 (101 days)" for stale open work, else nothing. */
+function staleNote(raw: Record<string, unknown>): string {
+  const st = staleOf(raw);
+  return st ? ` · left open ${staleLabel(st).text}` : '';
 }
 
 function LoadList({
@@ -422,7 +471,7 @@ function LoadList({
           <ListRow
             leading={<Avatar name={item.customer} size={38} />}
             title={item.loadNumber}
-            subtitle={`${item.customer} · ${item.pickupState}→${item.deliveryState}`}
+            subtitle={`${item.customer} · ${item.pickupState}→${item.deliveryState}${staleNote(item.raw)}`}
             trailing={
               <View className="items-end gap-1">
                 <Mono className="text-callout font-semibold text-fg">

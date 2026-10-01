@@ -15,6 +15,7 @@ import {
   TextField,
   RadioRows,
   Badge,
+  Banner,
   Button,
   Icon,
   Txt,
@@ -24,15 +25,17 @@ import { ErrorState } from '@/components/feedback';
 import { RouteMap } from '@/components/RouteMap';
 import {
   useQuote,
+  useQuoteFuelAlert,
   sendQuote,
-  useLoadsForConvertLookup,
-  needsLoadsLookup,
   recordQuoteOutcome,
   deleteQuote,
   downloadQuotePdf,
   patchQuote,
 } from './api';
 import { num, str, pick, asArray } from '@/lib/api/list';
+import { bookedLoadOf, quoteLapsed } from '@/lib/quoteStage';
+import { STATUS_LABEL as LOAD_STATUS_LABEL } from './constants';
+import { QuoteSendPreview, type QuotePreviewData } from './QuoteSendPreview';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { quoteShareUrl } from '@/lib/legal';
 import { openWhatsApp } from '@/lib/whatsapp';
@@ -51,6 +54,7 @@ import { useDemo } from '@/hooks/useDemo';
 import { DEMO_EMAIL_SIMULATED } from '@/lib/demoStatus';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
+import { useTheme } from '@/theme/ThemeProvider';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -81,21 +85,21 @@ const REJECTION_REASONS = [
 const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
+  const { colors } = useTheme();
   const subscription = useSubscription();
   const demo = useDemo();
   const { id, preview } = route.params;
   const { data, isError, refetch } = useQuote(id, preview);
   const q = (data ?? {}) as Record<string, unknown>;
   const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
-  // Only worth walking the loads table when this quote is accepted but
-  // doesn't already carry its own load id — see bookings/api.ts.
-  const { data: loadByQuote } = useLoadsForConvertLookup(
-    !!data && needsLoadsLookup([{ status, raw: q }]),
-  );
+  // Diesel moving since a quote was priced matters while it can still change.
+  const { data: fuelAlert } = useQuoteFuelAlert(id, !!data && ['DRAFT', 'SENT'].includes(status));
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  // Which channel the preview is for; the send itself runs on confirm.
+  const [sendPreview, setSendPreview] = useState<'email' | 'whatsapp' | null>(null);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -181,40 +185,97 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     { label: 'Assigned driver', value: str(pick(q, ['driver_display'])) },
   ].filter((r) => r.value);
 
-  // Cost breakdown — exact web order + conditionals.
+  // Price lines — the same ones the web shows, and they must add up to the
+  // total. The old derived "Service charge" (total minus the other lines) was
+  // really the stored base rate under another name.
+  const baseRate = num(pick(q, ['base_rate']));
   const fuel = num(pick(q, ['fuel_surcharge']));
   const toll = num(pick(q, ['toll_charges']));
   const driver = num(pick(q, ['driver_allowance']));
   const additional = num(pick(q, ['additional_charges']));
   const returnBaseRate = num(pick(q, ['return_base_rate']));
-  const serviceCharge = round2(total - fuel - toll - driver - additional);
   const costRows: { label: string; value: number }[] = [
+    { label: 'Base rate', value: baseRate },
     { label: 'Fuel surcharge', value: fuel },
     { label: 'Toll charges', value: toll },
     { label: 'Driver allowance', value: driver },
   ];
   if (additional > 0) costRows.push({ label: 'Additional charges', value: additional });
-  if (serviceCharge > 0) costRows.push({ label: 'Service charge', value: serviceCharge });
   if (roundTrip && returnBaseRate > 0)
-    costRows.push({ label: 'Return leg', value: returnBaseRate });
+    costRows.push({ label: `Return leg (${str(pick(q, ['return_cargo'])) ? 'with cargo' : 'empty'})`, value: returnBaseRate });
+  // A stored total that carries charges not broken down here gets its own line
+  // rather than an unexplained gap.
+  const linesSum = costRows.reduce((a, r) => a + r.value, 0);
+  const notItemised = round2(total - linesSum);
+  const hasGap = Math.abs(notItemised) > 0.5;
+  // Margin only when the costs behind it are itemised: no unexplained gap and
+  // more than a bare base rate. Otherwise a stored 0 reads as "0% margin".
+  const costsItemised = !hasGap && costRows.some((r) => r.label !== 'Base rate' && r.value > 0);
 
   const validUntil = str(pick(q, ['valid_until']));
   const createdAt = str(pick(q, ['created_at']));
   const notes = str(pick(q, ['notes']));
 
-  const accepted = ['ACCEPTED', 'APPROVED'].includes(status);
-  // The quote row carries its load once converted; fall back to scanning loads
-  // by their `quote` back-reference, which is what the web list keys on.
-  const convertedFromQuote = pick(q, ['load_id', 'load', 'booking_id']);
-  const convertedLoadId =
-    convertedFromQuote != null
-      ? (convertedFromQuote as string | number)
-      : (loadByQuote?.get(String(id)) ?? null);
+  // The quote API names the load it was booked as (booked_load); a quote
+  // converts to at most one, and the backend refuses a second conversion.
+  const bookedLoad = bookedLoadOf(q);
+  const booked = bookedLoad !== null;
+  // Legacy quotes carrying a load status (In transit, Completed) with no load
+  // found: nothing to send or convert, and no booking to open.
+  const loadStateOnly = !booked && (status === 'IT' || status === 'COMPLETED');
+  const openStatus = status === 'DRAFT' || status === 'SENT';
+  // One expiry rule with the list and Home: a Draft or Sent quote past its
+  // valid-until day is Expired, not live work.
+  const lapsed = !booked && openStatus && quoteLapsed(q);
+  // An expired quote, or a draft priced before a diesel rise, is edited before
+  // it goes out: Edit is the primary action and Send steps down.
+  const needsEdit = !booked && openStatus && (lapsed || (status === 'DRAFT' && !!fuelAlert));
+  const shownStatus = booked ? 'BOOKED' : lapsed ? 'EXPIRED' : status;
+  const canConvert = ['ACCEPTED', 'APPROVED'].includes(status) && !booked && !loadStateOnly;
+  const bookedLabel = bookedLoad
+    ? `${bookedLoad.load_number || 'a booking'}${
+        bookedLoad.status ? ` · ${LOAD_STATUS_LABEL(String(bookedLoad.status).toUpperCase())}` : ''
+      }`
+    : '';
+  // Diesel note built from the numbers, not the server's free text.
+  const fuelDelta = Number(fuelAlert?.fuel_delta_zar);
+  const fuelImpact = Number(fuelAlert?.estimated_cost_impact);
+  const fuelNote = fuelAlert
+    ? Number.isFinite(fuelDelta) && Number.isFinite(fuelImpact)
+      ? `Diesel is up ${formatCurrency(fuelDelta)}/L since this quote was made, so the job costs about ${formatCurrency(fuelImpact, { maximumFractionDigits: 0 })} more.${
+          status === 'DRAFT' || lapsed ? ' Update the price before sending.' : ''
+        }`
+      : (fuelAlert.message ?? '')
+    : '';
+  // "expired" / "N h left" beside the valid-until date.
+  const validMs = validUntil ? Date.parse(validUntil) : NaN;
+  const validNote = lapsed
+    ? 'expired'
+    : openStatus && Number.isFinite(validMs) && validMs > Date.now() && validMs - Date.now() < 48 * 3600_000
+      ? `${Math.ceil((validMs - Date.now()) / 3600_000)} h left`
+      : '';
   const outcome = str(pick(q, ['outcome'])).toLowerCase();
   // Web only offers won/lost capture while the quote is still open.
   const canRecordOutcome = !outcome && ['SENT', 'DRAFT'].includes(status);
 
   const refresh = () => invalidateFor(qc, 'quote');
+
+  // What the customer will be sent, for the preview. customer_email is only
+  // passed when the quote carries the key, so the preview looks it up otherwise.
+  const rawCustomer = pick(q, ['customer']);
+  const previewData: QuotePreviewData = {
+    id,
+    quote_number: str(pick(q, ['quote_number'])),
+    customer_id:
+      typeof rawCustomer === 'number' || typeof rawCustomer === 'string' ? rawCustomer : undefined,
+    customer_name: str(pick(q, ['customer_name'])),
+    customer_email: 'customer_email' in q ? str(q.customer_email) : undefined,
+    pickup_location: origin === '—' ? '' : origin,
+    delivery_location: dest === '—' ? '' : dest,
+    total_amount: total,
+    valid_until: validUntil,
+    pickup_date: str(pick(q, ['pickup_date'])),
+  };
 
   // Each action drives its own spinner so buttons never co-load.
   const run = async (
@@ -241,8 +302,12 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   // quote is sent first, then handed off.
   const sendViaEmail = () => {
     setSendOpen(false);
+    setSendPreview('email');
+  };
+
+  const sendEmailNow = () => {
     setSendBusy(true);
-    sendQuote(id)
+    return sendQuote(id)
       .then((res) => {
         refresh();
         // The backend still returns 200 in demo mode (send_to_customer skips
@@ -266,6 +331,13 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
   const sendViaWhatsApp = async () => {
     setSendOpen(false);
+    // With a link already minted, WhatsApp just opens with it. Without one the
+    // quote is sent first (which emails the customer), so preview that.
+    if (shareUrl) await sendWhatsAppNow();
+    else setSendPreview('whatsapp');
+  };
+
+  const sendWhatsAppNow = async () => {
     setSendBusy(true);
     try {
       let link = shareUrl;
@@ -298,6 +370,15 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     } finally {
       setSendBusy(false);
     }
+  };
+
+  // Runs after the person confirms in the preview.
+  const confirmSend = async () => {
+    const kind = sendPreview;
+    if (!kind) return;
+    if (kind === 'email') await sendEmailNow();
+    else await sendWhatsAppNow();
+    setSendPreview(null);
   };
 
   const closeOutcome = () => {
@@ -385,76 +466,80 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
   const footer = (
     <View className="gap-2.5">
-      <View className="flex-row gap-2.5">
-        <View className="flex-1">
-          <Button
-            label="Edit quote"
-            icon="edit"
-            variant="secondary"
-            onPress={editQuote}
-            fullWidth
-          />
-        </View>
-        <View className="flex-1">
-          <Button
-            label="Send"
-            icon="send"
-            loading={sendBusy}
-            onPress={() => setSendOpen(true)}
-            fullWidth
-          />
-        </View>
-      </View>
-      {canRecordOutcome && (
-        <View className="flex-row gap-2.5">
-          <View className="flex-1">
-            <Button
-              label="Mark accepted"
-              icon="checkCircle"
-              variant="secondary"
-              onPress={() => setOutcomeType('accepted')}
-              fullWidth
-            />
-          </View>
-          <View className="flex-1">
-            <Button
-              label="Mark rejected"
-              icon="x"
-              variant="secondary"
-              onPress={() => setOutcomeType('rejected')}
-              fullWidth
-            />
-          </View>
-        </View>
-      )}
-      {/* A quote converts to at most one load — convert_to_load rejects a
-          second attempt — so once it has, offer the booking instead of a button
-          that can only fail. */}
-      {accepted && convertedLoadId != null && (
+      {booked ? (
+        // Once booked there is nothing left to send, edit or convert: the
+        // booking owns the job from here.
         <Button
           label="View booking"
           icon="arrowRight"
-          variant="secondary"
-          onPress={() => navigation.navigate('LoadDetail', { id: convertedLoadId })}
+          onPress={() => navigation.navigate('LoadDetail', { id: bookedLoad!.id })}
           fullWidth
         />
-      )}
-      {accepted && convertedLoadId == null && (
-        <Button
-          label="Convert to booking"
-          icon="arrowRight"
-          disabled={subscription.blocked}
-          onPress={() =>
-            nav.openAssign({
-              mode: 'convert',
-              quoteId: id,
-              reference: str(pick(q, ['quote_number'])),
-              vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
-              popCallerOnSuccess: true,
-            })
-          }
-          fullWidth
-        />
+      ) : (
+        <>
+          <View className="flex-row gap-2.5">
+            <View className="flex-1">
+              <Button
+                label="Edit quote"
+                icon="edit"
+                variant={needsEdit ? 'primary' : 'secondary'}
+                onPress={editQuote}
+                fullWidth
+              />
+            </View>
+            {!loadStateOnly && (
+              <View className="flex-1">
+                <Button
+                  label={status === 'SENT' ? 'Resend' : 'Send'}
+                  icon="send"
+                  variant={needsEdit ? 'secondary' : 'primary'}
+                  loading={sendBusy}
+                  onPress={() => setSendOpen(true)}
+                  fullWidth
+                />
+              </View>
+            )}
+          </View>
+          {canRecordOutcome && (
+            <View className="flex-row gap-2.5">
+              <View className="flex-1">
+                <Button
+                  label="Mark accepted"
+                  icon="checkCircle"
+                  variant="secondary"
+                  onPress={() => setOutcomeType('accepted')}
+                  fullWidth
+                />
+              </View>
+              <View className="flex-1">
+                <Button
+                  label="Mark rejected"
+                  icon="x"
+                  variant="secondary"
+                  onPress={() => setOutcomeType('rejected')}
+                  fullWidth
+                />
+              </View>
+            </View>
+          )}
+          {canConvert && (
+            <Button
+              label="Convert to booking"
+              icon="arrowRight"
+              disabled={subscription.blocked}
+              onPress={() =>
+                nav.openAssign({
+                  mode: 'convert',
+                  quoteId: id,
+                  reference: str(pick(q, ['quote_number'])),
+                  vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
+                  popCallerOnSuccess: true,
+                })
+              }
+              fullWidth
+            />
+          )}
+        </>
       )}
       <View className="flex-row gap-2.5">
         <View className="flex-1">
@@ -467,16 +552,18 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             fullWidth
           />
         </View>
-        <View className="flex-1">
-          <Button
-            label="Delete"
-            variant="danger"
-            icon="x"
-            loading={deleteBusy}
-            onPress={confirmDelete}
-            fullWidth
-          />
-        </View>
+        {!booked && (
+          <View className="flex-1">
+            <Button
+              label="Delete"
+              variant="danger"
+              icon="x"
+              loading={deleteBusy}
+              onPress={confirmDelete}
+              fullWidth
+            />
+          </View>
+        )}
       </View>
     </View>
   );
@@ -492,14 +579,42 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       footer={footer}
     >
       <View className="mb-4 flex-row flex-wrap items-center gap-2.5">
-        <StatusPill status={status} />
+        <StatusPill status={shownStatus} />
         {/* {outcome === 'accepted' && <Badge label="✓ Won" tone="success" />} */}
         {/* {outcome === 'rejected' && <Badge label="✗ Lost" tone="danger" />} */}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
-        {marginPct > 0 && (
+        {marginPct > 0 && costsItemised && (
           <Mono className="text-micro text-faint">Margin {formatPercent(marginPct)}</Mono>
         )}
       </View>
+
+      {booked && (
+        <Txt className="-mt-2 mb-4 text-sub text-muted">Booked as {bookedLabel}</Txt>
+      )}
+      {loadStateOnly && (
+        <Txt className="-mt-2 mb-4 text-sub text-muted">
+          Marked {(LEGACY_STATUS_LABELS[status] ?? status).toLowerCase()} on an older record. No
+          booking is linked to this quote.
+        </Txt>
+      )}
+      {lapsed && (
+        <View className="mb-5">
+          <Banner
+            tone="warning"
+            message={
+              token
+                ? `The customer's link still opens, but shows this quote as expired on ${formatDate(validUntil)}. Tap to edit it and send an updated quote.`
+                : `This quote expired on ${formatDate(validUntil)}. Tap to edit it and set a new valid-until date before sending.`
+            }
+            onPress={editQuote}
+          />
+        </View>
+      )}
+      {!!fuelNote && (
+        <View className="mb-5">
+          <Banner tone="warning" message={fuelNote} />
+        </View>
+      )}
 
       <View className="mb-5">
         <RoutePreview
@@ -521,9 +636,9 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      {marginPct > 0 && marginPct < 12 && (
+      {marginPct > 0 && marginPct < 12 && costsItemised && (
         <View className="mb-5 flex-row items-center gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color="#F59E0B" />
+          <Icon name="alert" size={17} color={colors.warningDot} />
           <Txt className="flex-1 text-sub text-muted">
             Margin <Mono className="text-warning">{formatPercent(marginPct)}</Mono> is below your
             pricing guardrail — review before sending.
@@ -578,15 +693,22 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         </Group>
       )}
 
-      {costRows.length > 0 && (
+      {total > 0 && (
         <Group label="Cost breakdown">
           {costRows.map((c) => (
             <DetailRow key={c.label} label={c.label} value={formatCurrency(c.value)} />
           ))}
+          {hasGap && (
+            <DetailRow
+              label="Not itemised"
+              hint="Set on the quote; its total includes charges not broken down here."
+              value={formatCurrency(notItemised)}
+            />
+          )}
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
               {roundTrip ? 'Total · both legs' : 'Total'}
-              {marginPct ? ` · ${marginPct}% margin` : ''}
+              {marginPct && costsItemised ? ` · ${marginPct}% margin` : ''}
             </Txt>
             <Mono className="text-heading font-semibold text-accent">{formatCurrency(total)}</Mono>
           </View>
@@ -594,26 +716,39 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       )}
 
       <Group label="Quote info">
-        <View className="border-b border-line-row px-3.5 py-3">
-          <SelectField
-            label="Status"
-            options={
-              status === 'IT' || status === 'COMPLETED'
+        {booked ? (
+          // A booked quote cannot go back to Sent; its status is the booking's.
+          <DetailRow label="Status" value={`Booked as ${bookedLabel}`} mono={false} />
+        ) : (
+          <View className="border-b border-line-row px-3.5 py-3">
+            <SelectField
+              label="Status"
+              options={(status === 'IT' || status === 'COMPLETED'
                 ? [
                     ...STATUS_OPTIONS,
                     { label: LEGACY_STATUS_LABELS[status] ?? status, value: status },
                   ]
                 : STATUS_OPTIONS
-            }
-            value={status}
-            onSelect={changeStatus}
-          />
-        </View>
+              ).map((o) =>
+                o.value === 'SENT' && lapsed ? { ...o, sub: 'Quote has expired, edit first' } : o,
+              )}
+              value={status}
+              onSelect={changeStatus}
+            />
+          </View>
+        )}
         {confidence ? (
           <DetailRow label="Confidence" value={titleCase(confidence)} mono={false} />
         ) : null}
         {/* <DetailRow label="Margin" value={formatPercent(marginPct || 0)} /> */}
-        {validUntil ? <DetailRow label="Valid until" value={formatDate(validUntil)} /> : null}
+        {validUntil ? (
+          <DetailRow
+            label="Valid until"
+            value={formatDate(validUntil)}
+            hint={validNote || undefined}
+            hintColor={lapsed ? colors.danger : undefined}
+          />
+        ) : null}
         {createdAt ? <DetailRow label="Created" value={formatDate(createdAt)} last /> : null}
       </Group>
 
@@ -629,7 +764,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         <Modal visible transparent animationType="fade" onRequestClose={() => setSendOpen(false)}>
           <Pressable
             onPress={() => setSendOpen(false)}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}
@@ -660,11 +795,24 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         </Modal>
       )}
 
+      {sendPreview && (
+        <QuoteSendPreview
+          quote={previewData}
+          sending={sendBusy}
+          onEdit={() => {
+            setSendPreview(null);
+            editQuote();
+          }}
+          onConfirm={confirmSend}
+          onCancel={() => !sendBusy && setSendPreview(null)}
+        />
+      )}
+
       {outcomeType && (
         <Modal visible transparent animationType="fade" onRequestClose={closeOutcome}>
           <Pressable
             onPress={closeOutcome}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
               <Pressable

@@ -60,12 +60,12 @@ function TruckSuggestionChipsImpl({
               className="min-w-[152px] justify-center gap-1 rounded-control border border-line bg-surface px-3 py-2.5"
             >
               <View className="flex-row items-center gap-1.5">
-                <Mono className="flex-shrink text-micro uppercase tracking-wide text-fg" numberOfLines={1}>
+                <Mono className="flex-shrink text-caption font-medium text-fg" numberOfLines={1}>
                   {s.name} ({s.cap}t)
                 </Mono>
               </View>
               <Mono
-                className={`text-nano uppercase tracking-wide ${best ? 'text-success' : 'text-faint'}`}
+                className={`text-micro font-medium ${best ? 'text-success' : 'text-faint'}`}
                 numberOfLines={1}
               >
                 {s.fitLabel}

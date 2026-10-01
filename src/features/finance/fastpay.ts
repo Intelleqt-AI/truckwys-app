@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchData } from '@/lib/api/client';
 
-// Fast Pay eligibility, shared by the invoice detail screen and the Capital
-// screen so the two can never disagree — the web app uses one query key across
-// its three Fast Pay surfaces for the same reason.
+// Fast Pay is not live (lib/features.ts CAPITAL_LAUNCHED), so nothing in the
+// app applies for it; the Capital screen only shows the receivables Fast Pay
+// would work on and the invoice checks that would hold invoices back.
+//
+// Eligibility data from capital/eligible/, shared under one query key.
 //
 // Eligibility is decided ENTIRELY server-side by RiskEngine, wrapped by
 // capital/eligible/, which also requires status in SENT/VIEWED/OVERDUE, no
@@ -49,6 +50,7 @@ export interface IneligibleInvoice {
   /** Backend-authored explanation — display verbatim, don't re-word it. */
   reason?: string;
   rule?: string;
+  all_reasons?: string[];
 }
 
 export interface CapitalEligible {
@@ -85,38 +87,25 @@ export function useCapitalEligible() {
   });
 }
 
-/** Ids are compared as strings: the backend sends numbers, routes carry strings. */
-export const findEligible = (list: EligibleInvoice[], id: string | number) =>
-  list.find((e) => String(e.id) === String(id));
+/**
+ * The checks that belong to the invoice itself. Facility-dependent results
+ * (limit exceeded, score threshold) mean nothing before launch, and "No active
+ * facility on file" is true of every invoice, so those are not listed. Matches
+ * the web's CapitalPrelaunch.
+ */
+export const INVOICE_CHECKS: { key: string; label: string; match: (reason: string) => boolean }[] = [
+  { key: 'pod', label: 'No proof of delivery on file', match: (r) => /proof of delivery/i.test(r) },
+  { key: 'age', label: 'Older than 90 days', match: (r) => /^invoice age/i.test(r) },
+  { key: 'dispute', label: 'Customer is disputing the invoice', match: (r) => /dispute/i.test(r) },
+  {
+    key: 'inactive',
+    label: 'Customer account is not active',
+    match: (r) => /customer account is not active/i.test(r),
+  },
+];
 
-export const findIneligible = (list: IneligibleInvoice[], id: string | number) =>
-  list.find((e) => String(e.id) === String(id));
-
-// Applications happen on Merchant Capital's own site, so there's nothing on our
-// backend to record that one was started. Web keeps the same list in
-// localStorage under this key; mobile mirrors it in AsyncStorage. Device-local
-// by nature — it won't follow the user to another handset.
-const APPLIED_KEY = 'mc_applied_invoice_ids';
-
-export const MERCHANT_CAPITAL_URL =
-  'https://getstarted.merchantcapital.co.za?actiontype=C_C&channel=Part_Trad&who=IA_SP';
-
-export async function loadAppliedIds(): Promise<Set<string>> {
-  try {
-    const raw = await AsyncStorage.getItem(APPLIED_KEY);
-    return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set<string>();
-  }
-}
-
-export async function saveAppliedId(id: string | number): Promise<Set<string>> {
-  const next = await loadAppliedIds();
-  next.add(String(id));
-  try {
-    await AsyncStorage.setItem(APPLIED_KEY, JSON.stringify([...next]));
-  } catch {
-    // Losing the flag only means the button reads "Apply" again — never block.
-  }
-  return next;
+/** Which invoice checks an ineligible invoice fails (keys of INVOICE_CHECKS). */
+export function checksFor(inv: IneligibleInvoice): string[] {
+  const reasons = inv.all_reasons?.length ? inv.all_reasons : [inv.reason ?? ''];
+  return INVOICE_CHECKS.filter((c) => reasons.some((r) => c.match(r))).map((c) => c.key);
 }

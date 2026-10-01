@@ -112,13 +112,13 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
 
   const confirmLabel = busy
     ? reassigning
-      ? 'SAVING…'
-      : 'CONVERTING…'
+      ? 'Saving…'
+      : 'Converting…'
     : reassigning
-      ? 'CONFIRM'
+      ? 'Confirm'
       : vehicleId
-        ? 'CONFIRM'
-        : 'ASSIGN LATER';
+        ? 'Confirm'
+        : 'Assign later';
 
   const confirm = async () => {
     if (!canProceed) return;

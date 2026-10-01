@@ -6,27 +6,7 @@ import { Icon, type IconName } from './icons';
 import { SubscriptionDot } from './SubscriptionDot';
 import { useTheme } from '@/theme/ThemeProvider';
 
-// ── Ambient glow: one fixed, faint accent bloom behind the workspace ───────
-export function AmbientGlow() {
-  const { colors } = useTheme();
-  return (
-    <View pointerEvents="none" className="absolute inset-0 overflow-hidden">
-      <View
-        style={{
-          position: 'absolute',
-          top: -120,
-          left: '18%',
-          width: 320,
-          height: 320,
-          borderRadius: 320,
-          backgroundColor: colors.glow,
-        }}
-      />
-    </View>
-  );
-}
-
-// ── Screen: deep canvas + safe area + ambient glow ─────────────────────────
+// ── Screen: deep canvas + safe area (v3: no ambient glow) ──────────────────
 export function Screen({
   children,
   scroll = true,
@@ -64,8 +44,8 @@ export function Screen({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.accent}
-            colors={[colors.accent]}
+            tintColor={colors.faint}
+            colors={[colors.faint]}
             progressBackgroundColor={colors.surface}
           />
         ) : undefined
@@ -80,13 +60,12 @@ export function Screen({
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: topInset ? insets.top : 0 }}>
-      <AmbientGlow />
       {body}
     </View>
   );
 }
 
-// ── AppHeader: mono eyebrow + big title + optional live/trailing ───────────
+// ── AppHeader: optional eyebrow + page title + optional live/trailing ──────
 export function AppHeader({
   eyebrow,
   title,
@@ -108,9 +87,7 @@ export function AppHeader({
       <View className="flex-1">
         {eyebrow && <Label className="mb-1">{eyebrow}</Label>}
         <View className="flex-row items-center gap-2.5">
-          <Txt className="text-title font-semibold tracking-[-0.02em]" style={{ fontSize: 26 }}>
-            {title}
-          </Txt>
+          <Txt className="text-display font-semibold">{title}</Txt>
           {live && <SubscriptionDot />}
         </View>
       </View>
@@ -119,7 +96,7 @@ export function AppHeader({
   );
 }
 
-// ── SectionLabel: mono caps row, optional trailing action ──────────────────
+// ── SectionLabel: muted section caption, optional trailing link action ─────
 export function SectionLabel({
   children,
   action,
@@ -131,10 +108,10 @@ export function SectionLabel({
 }) {
   return (
     <View className="mb-2.5 flex-row items-center justify-between">
-      <Label className="tracking-label">{children as string}</Label>
+      <Label className="text-sub">{children as string}</Label>
       {action && (
         <Pressable hitSlop={8} onPress={onAction} accessibilityRole="button">
-          <Mono className="text-micro uppercase tracking-label text-accent">{action}</Mono>
+          <Mono className="text-sub font-medium text-link">{action}</Mono>
         </Pressable>
       )}
     </View>
@@ -161,13 +138,11 @@ export function UnderlineTabs<T extends string>({
             onPress={() => onChange(t.value)}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            className={`border-b-2 py-3 ${active ? 'border-accent' : 'border-transparent'}`}
+            className={`min-h-[44px] justify-center border-b-2 ${
+              active ? 'border-fg' : 'border-transparent'
+            }`}
           >
-            <Mono
-              className={`text-caption uppercase tracking-wide ${
-                active ? 'font-semibold text-fg' : 'text-muted'
-              }`}
-            >
+            <Mono className={`text-callout ${active ? 'font-medium text-fg' : 'text-muted'}`}>
               {t.label}
             </Mono>
           </Pressable>
@@ -187,6 +162,7 @@ export function FilterChips<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  const { colors } = useTheme();
   return (
     <ScrollView
       horizontal
@@ -202,15 +178,14 @@ export function FilterChips<T extends string>({
             accessibilityRole="button"
 
             accessibilityState={{ selected: active }}
-            className={`min-h-[34px] justify-center rounded-chip border border-line px-3 ${
-              active ? 'bg-accent' : 'bg-surface'
+            className={`min-h-[34px] justify-center rounded-pill border px-3.5 ${
+              active ? 'border-btn-primary bg-btn-primary' : 'border-line-active bg-transparent'
             }`}
           >
             <Mono
               numberOfLines={1}
-              className={`text-micro uppercase tracking-wide ${
-                active ? 'text-on-accent' : 'text-muted'
-              }`}
+              className={`text-caption font-medium ${active ? '' : 'text-muted'}`}
+              style={active ? { color: colors.btnPrimaryFg } : undefined}
             >
               {o.label}
             </Mono>
@@ -241,17 +216,10 @@ export function Fab({
       onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityLabel="Create"
-      className="absolute right-4 h-14 w-14 items-center justify-center rounded-panel bg-accent active:opacity-90"
-      style={{
-        bottom: insets.bottom + 96,
-        shadowColor: colors.accent,
-        shadowOpacity: 0.4,
-        shadowRadius: 12,
-        shadowOffset: { width: 0, height: 8 },
-        elevation: 8,
-      }}
+      className="absolute right-4 h-14 w-14 items-center justify-center rounded-panel bg-btn-primary active:opacity-90"
+      style={{ bottom: insets.bottom + 96, boxShadow: colors.shadowPop }}
     >
-      <Icon name={icon} size={26} color={colors.onAccent} strokeWidth={2.4} />
+      <Icon name={icon} size={24} color={colors.btnPrimaryFg} strokeWidth={2.2} />
     </Pressable>
   );
 }

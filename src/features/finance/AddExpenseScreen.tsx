@@ -32,10 +32,11 @@ import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import type { AppStackParamList } from '@/navigation/types';
+import { localDateISO } from '@/lib/dates';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddExpense'>;
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDateISO();
 
 // Web embeds fuel litres/price into `notes` as "Fuel: {L}L @ R{price}/L".
 //

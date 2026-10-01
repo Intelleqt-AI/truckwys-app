@@ -30,14 +30,11 @@ import { useErrorShake } from '@/hooks/useErrorShake';
 import { useFieldAnchors } from '@/hooks/useFieldAnchors';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import type { AppStackParamList } from '@/navigation/types';
+import { localDatePlusDays } from '@/lib/dates';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateInvoice'>;
 
-function plusDays(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-}
+const plusDays = (n: number) => localDatePlusDays(n);
 
 const PAYMENT_TERMS = ['NET30', 'NET60', 'NET90'].map((v) => ({
   label: v.replace('NET', 'Net '),

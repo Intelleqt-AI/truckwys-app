@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
+import { fetchAllRows } from '@/lib/api/fetchAllPages';
 import {
   normalizeInvoice,
   normalizeExpense,
@@ -13,14 +14,14 @@ import {
 export function useInvoices() {
   return useQuery<InvoiceLite[]>({
     queryKey: ['invoices'],
-    queryFn: async () => asArray(await fetchData('invoices/')).map(normalizeInvoice),
+    queryFn: async () => (await fetchAllRows('invoices/')).map(normalizeInvoice),
   });
 }
 
 export function useExpenses() {
   return useQuery<ExpenseLite[]>({
     queryKey: ['expenses'],
-    queryFn: async () => asArray(await fetchData('expenses/')).map(normalizeExpense),
+    queryFn: async () => (await fetchAllRows('expenses/')).map(normalizeExpense),
   });
 }
 
@@ -89,6 +90,25 @@ export const paymentMethodLabel = (v: string) =>
   PAYMENT_METHOD_LABELS[v] ??
   (v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase().replace(/_/g, ' ') : '—');
 
+// invoices/aging/: what customers still owe, by how late it is. Backend bucket
+// keys (core/services/aging_service.py): current, 1-30, 31-60, 61-90, 90+.
+export interface InvoiceAging {
+  summary: {
+    total_outstanding: number;
+    total_invoice_count: number;
+    customer_count: number;
+    dso: number | null;
+  };
+  buckets: { bucket_name: string; invoice_count: number; total_amount: number }[];
+}
+
+export function useInvoiceAging() {
+  return useQuery<InvoiceAging>({
+    queryKey: ['invoice-aging'],
+    queryFn: () => fetchData<InvoiceAging>('invoices/aging/'),
+  });
+}
+
 export interface FinanceReports {
   summary: FinanceSummary;
   marginByLane: { lane: string; margin: number }[];
@@ -151,7 +171,10 @@ export function useFinanceReports() {
     queryKey: ['finance-reports'],
     queryFn: async () => {
       const [finance, lanes] = await Promise.all([
-        fetchData('dashboard/finance/').catch(() => null),
+        // The summary is the screen: when it fails that must show as an error,
+        // not as a normalised-null set of R 0 totals. Lanes are supplementary,
+        // so a failure there just leaves that block empty.
+        fetchData('dashboard/finance/'),
         fetchData('reports/margin-by-lane/').catch(() => []),
       ]);
       const f = finance as Record<string, unknown> | null;

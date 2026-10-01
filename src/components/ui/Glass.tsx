@@ -63,7 +63,8 @@ export function Glass({
   // Android blur is unreliable/transparent on many devices — render a near-solid
   // frosted surface there instead so the bar is always clearly visible.
   if (Platform.OS === 'android') {
-    const solid = scheme === 'dark' ? 'rgba(16,16,16,0.96)' : 'rgba(255,255,255,0.96)';
+    // Card surface (#131518 / #FFFFFF) at 96%.
+    const solid = scheme === 'dark' ? 'rgba(19,21,24,0.96)' : 'rgba(255,255,255,0.96)';
     return (
       <View style={[{ overflow: 'hidden', borderRadius: radius, backgroundColor: solid, borderColor: colors.line, borderWidth: 1 }, style]}>
         {children}
@@ -72,7 +73,7 @@ export function Glass({
   }
 
   // iOS < 26 — expo-blur frosted surface + translucent theme overlay.
-  const overlay = scheme === 'dark' ? 'rgba(10,10,10,0.6)' : 'rgba(255,255,255,0.65)';
+  const overlay = scheme === 'dark' ? 'rgba(19,21,24,0.6)' : 'rgba(255,255,255,0.65)';
   return (
     <BlurView
       tint={scheme === 'dark' ? 'dark' : 'light'}

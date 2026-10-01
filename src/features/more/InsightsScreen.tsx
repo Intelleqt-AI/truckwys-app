@@ -3,36 +3,25 @@ import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import {
-  Screen,
-  SwipeTabs,
-  Label,
-  Card,
-  Badge,
-  Group,
-  DetailRow,
-  StatCard,
-  Txt,
-  EmptyState,
-} from '@/components/ui';
+import { Screen, SwipeTabs, Group, DetailRow, StatCard, EmptyState } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { fetchData } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { formatCurrencyCompact, formatPercent } from '@/lib/formatters';
-import { useInsights, type Signal } from './api';
+import { FindingsTab } from './insights/FindingsTab';
+import { MarginTab } from './insights/MarginTab';
 import { useTheme } from '@/theme/ThemeProvider';
-import type { AppStackParamList, InsightsTab } from '@/navigation/types';
+import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Insights'>;
 
-const SEV: Record<Signal['severity'], 'danger' | 'warning' | 'info'> = {
-  high: 'danger',
-  medium: 'warning',
-  low: 'info',
-};
+// 'findings' is the first tab. Deep links that still ask for the old 'briefing'
+// tab land on it.
+type Tab = 'findings' | 'margin' | 'cashflow' | 'lanes';
+const startTab = (t?: string): Tab => (t === 'cashflow' || t === 'lanes' || t === 'margin' ? t : 'findings');
 
 export function InsightsScreen({ navigation, route }: Props) {
-  const [tab, setTab] = useState<InsightsTab>(route.params?.tab ?? 'briefing');
+  const [tab, setTab] = useState<Tab>(startTab(route.params?.tab));
   const { colors } = useTheme();
 
   // SheetScreen's ScrollView can't host SwipeTabs' PagerView (a ScrollView's
@@ -52,60 +41,21 @@ export function InsightsScreen({ navigation, route }: Props) {
     <Screen scroll={false} padded={false} topInset={false} contentClassName="pt-2">
       <SwipeTabs
         tabs={[
-          { label: 'Briefing', value: 'briefing' },
+          { label: 'Findings', value: 'findings' },
+          { label: 'Margin', value: 'margin' },
           { label: 'Cash flow', value: 'cashflow' },
           { label: 'Lanes', value: 'lanes' },
         ]}
         value={tab}
         onChange={setTab}
+        lazy
       >
-        <Briefing />
+        <FindingsTab />
+        <MarginTab />
         <Cashflow />
         <Lanes />
       </SwipeTabs>
     </Screen>
-  );
-}
-
-function Briefing() {
-  const { data, isLoading, isError, refetch } = useInsights();
-  const insets = useSafeAreaInsets();
-  if (isLoading)
-    return (
-      <View className="p-screen">
-        <ListSkeleton />
-      </View>
-    );
-  if (isError) return <ErrorState onRetry={refetch} message="Couldn't load insights." />;
-  if (!data || data.length === 0)
-    return (
-      <EmptyState
-        icon="sparkle"
-        title="No insights yet"
-        body="AI signals about your operations appear here."
-      />
-    );
-  return (
-    <ScrollView
-      contentContainerStyle={{
-        paddingHorizontal: 16,
-        paddingTop: 12,
-        paddingBottom: insets.bottom + 24,
-      }}
-      showsVerticalScrollIndicator={false}
-    >
-      <View className="gap-2.5">
-        {data.map((s) => (
-          <Card key={s.id} className="p-4">
-            <View className="mb-2 flex-row items-center gap-2">
-              <Badge label={s.category} tone={SEV[s.severity]} />
-            </View>
-            {s.title ? <Txt className="text-body font-medium text-fg">{s.title}</Txt> : null}
-            {s.body ? <Txt className="mt-1 text-sub text-muted">{s.body}</Txt> : null}
-          </Card>
-        ))}
-      </View>
-    </ScrollView>
   );
 }
 
@@ -123,6 +73,14 @@ function Cashflow() {
       </View>
     );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load cash flow." />;
+  // The figures live under `summary` (CashFlowForecastView). They used to be
+  // read off the top level, where none of those keys exist, so every tile read
+  // R 0. A failed forecast is a 503 with no `summary`, which lands in the error
+  // state above rather than as zeros.
+  const summary = (data.summary ?? {}) as Record<string, unknown>;
+  const periodDays = num(pick(data, ['period_days']), 90);
+  const totalWeeks = num(pick(summary, ['total_weeks']));
+  const weeksNegative = num(pick(summary, ['weeks_negative']));
   return (
     <ScrollView
       contentContainerStyle={{
@@ -135,26 +93,26 @@ function Cashflow() {
       <View className="flex-row flex-wrap gap-3">
         <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard
-            label="Inflow"
-            value={formatCurrencyCompact(num(pick(data, ['inflow', 'total_inflow'])))}
+            label={`Expected in, ${periodDays} days`}
+            value={formatCurrencyCompact(num(pick(summary, ['total_expected_in'])))}
           />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard
-            label="Outflow"
-            value={formatCurrencyCompact(num(pick(data, ['outflow', 'total_outflow'])))}
+            label={`Expected out, ${periodDays} days`}
+            value={formatCurrencyCompact(num(pick(summary, ['total_expected_out'])))}
           />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard
             label="Net position"
-            value={formatCurrencyCompact(num(pick(data, ['net', 'net_position'])))}
+            value={formatCurrencyCompact(num(pick(summary, ['net_position'])))}
           />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard
-            label="Projected"
-            value={formatCurrencyCompact(num(pick(data, ['projected', 'forecast'])))}
+            label="Weeks in the red"
+            value={totalWeeks > 0 ? `${weeksNegative} of ${totalWeeks}` : 'None'}
           />
         </View>
       </View>
@@ -169,7 +127,7 @@ function Lanes() {
       asArray(await fetchData('reports/margin-by-lane/')).map((l) => {
         const r = l as Record<string, unknown>;
         return {
-          lane: str(pick(r, ['lane', 'route']), '—'),
+          lane: str(pick(r, ['lane', 'route']), 'Unknown lane'),
           margin: num(pick(r, ['margin', 'margin_percent'])),
         };
       }),

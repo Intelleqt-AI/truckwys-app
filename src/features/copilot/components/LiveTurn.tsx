@@ -58,9 +58,9 @@ export function LiveTurn({
           <Pressable
             onPress={() => onRetry(turn.userText)}
             accessibilityRole="button"
-            className="mt-2.5 self-start rounded-chip border border-accent px-2.5 py-1.5 active:opacity-60"
+            className="mt-2.5 self-start rounded-chip border border-line-active px-2.5 py-1.5 active:opacity-60"
           >
-            <Mono className="text-micro tracking-wide uppercase text-accent">Retry</Mono>
+            <Mono className="text-caption font-medium text-link">Retry</Mono>
           </Pressable>
         </View>
       )}

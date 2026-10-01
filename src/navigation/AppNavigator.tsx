@@ -71,9 +71,9 @@ export function AppNavigator() {
       : undefined,
     headerLargeTitleShadowVisible: false,
     headerShadowVisible: false,
-    headerTintColor: colors.accent,
-    headerTitleStyle: { color: colors.fg },
-    headerLargeTitleStyle: { color: colors.fg },
+    headerTintColor: colors.fg,
+    headerTitleStyle: { color: colors.fg, fontWeight: '600' },
+    headerLargeTitleStyle: { color: colors.fg, fontWeight: '600' },
     headerStyle: { backgroundColor: iosHeader ? 'transparent' : colors.bgDeep },
     // Round chevron button only — no "Tabs"/previous-screen label.
     headerBackButtonDisplayMode: 'minimal',

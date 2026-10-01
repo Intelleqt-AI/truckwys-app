@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
+import { fetchAllRows } from '@/lib/api/fetchAllPages';
 import {
   normalizeVehicle,
   normalizeDriver,
@@ -13,14 +14,14 @@ import { normalizeVehicleType } from '@/features/bookings/api';
 export function useVehicles() {
   return useQuery<VehicleLite[]>({
     queryKey: ['vehicles'],
-    queryFn: async () => asArray(await fetchData('vehicles/')).map(normalizeVehicle),
+    queryFn: async () => (await fetchAllRows('vehicles/')).map(normalizeVehicle),
   });
 }
 
 export function useDrivers() {
   return useQuery<DriverLite[]>({
     queryKey: ['drivers'],
-    queryFn: async () => asArray(await fetchData('drivers/')).map(normalizeDriver),
+    queryFn: async () => (await fetchAllRows('drivers/')).map(normalizeDriver),
   });
 }
 

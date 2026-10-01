@@ -1,10 +1,23 @@
 import { memo } from 'react';
-import { View, Pressable, ActivityIndicator } from 'react-native';
+import { View, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useBottomSheetInternal, KEYBOARD_STATUS } from '@gorhom/bottom-sheet';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Button, Icon, Mono } from '@/components/ui';
-import { formatCurrency, formatPercent } from '@/lib/formatters';
+import { formatCurrency } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
+
+/**
+ * What the price bar offers beside the total, from the market price check:
+ *  prompt   no current result: run the check
+ *  apply    the market price differs: apply it
+ *  applied  market figures are in use: undo them
+ *  same     a current check found nothing to change
+ */
+export type FooterOffer =
+  | { kind: 'prompt'; onPress: () => void }
+  | { kind: 'apply'; label: string; onPress: () => void }
+  | { kind: 'applied'; onPress: () => void }
+  | { kind: 'same' };
 
 export interface FooterStrip {
   tone: 'danger' | 'warning';
@@ -23,8 +36,7 @@ export interface FooterStrip {
  */
 function QuoteFooterActionsImpl({
   total,
-  statsTrusted,
-  marginPct,
+  offer,
   ready,
   priceHint,
   onPriceHintPress,
@@ -37,8 +49,8 @@ function QuoteFooterActionsImpl({
   onSend,
 }: {
   total: number;
-  statsTrusted: boolean;
-  marginPct: number;
+  /** Market price check offer; null while there is nothing to offer. */
+  offer: FooterOffer | null;
   ready: boolean;
   /** What's still missing before a price can be worked out, e.g. "Pick a client
       to price this" — shown in place of the total while !ready. */
@@ -71,10 +83,10 @@ function QuoteFooterActionsImpl({
     };
   });
 
-  const stripColor = strip?.tone === 'danger' ? '#FF4949' : '#F59E0B';
-  // The two above are theme-independent status hues; faint isn't, so the price
-  // hint's chevron has to read it off the theme to match its own text colour.
+  // Status hues and faint are theme-aware, so the chevrons read them off the
+  // theme to match their own text colours.
   const { colors } = useTheme();
+  const stripColor = strip?.tone === 'danger' ? colors.dangerDot : colors.warningDot;
 
   // The total used to be suppressed by *any* strip, which hid the price at the
   // one moment the user is watching for it — right after a Send attempt, while
@@ -118,14 +130,10 @@ function QuoteFooterActionsImpl({
               >
                 {formatCurrency(total)}
               </Mono>
-              {/* total > 0 here is belt-and-braces — showTotal above already
-                  requires it whenever a strip is up, and it's always true once
-                  statsTrusted is (a route has actually returned). */}
-              {statsTrusted && total > 0 && (
-                <Mono className="shrink-0 text-micro text-muted" maxFontSizeMultiplier={1.2}>
-                  · {formatPercent(marginPct, 0)} margin
-                </Mono>
-              )}
+              {/* The one price: what the client is sent, excluding VAT. */}
+              <Mono className="shrink-0 text-micro text-muted" maxFontSizeMultiplier={1.2}>
+                · excl. VAT
+              </Mono>
               {calculating && <ActivityIndicator size="small" />}
             </>
           ) : strip ? null : (
@@ -150,6 +158,7 @@ function QuoteFooterActionsImpl({
             </Pressable>
           )}
         </View>
+        {!strip && showTotal && offer && <OfferAction offer={offer} />}
         {strip && (
           <Pressable
             onPress={strip.onPress}
@@ -158,12 +167,11 @@ function QuoteFooterActionsImpl({
             accessibilityLabel={strip.message}
             className="min-w-0 flex-shrink flex-row items-center justify-end gap-1"
           >
-            {/* One notch smaller than every other footer label (text-nano, not
-                text-micro) — this strip carries the longest messages in the
-                footer (e.g. the overload warning), and a single 26px line
-                still has to fit them next to the chevron. */}
+            {/* This strip carries the longest messages in the footer (e.g. the
+                overload warning); they truncate to a single 26px line next to
+                the chevron. */}
             <Mono
-              className={`shrink text-nano ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
+              className={`shrink text-micro ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
               numberOfLines={1}
               maxFontSizeMultiplier={1.2}
             >
@@ -197,6 +205,43 @@ function QuoteFooterActionsImpl({
         </View>
       </View>
     </View>
+  );
+}
+
+/** The market price check's one-line action beside the total. */
+function OfferAction({ offer }: { offer: FooterOffer }) {
+  const { colors } = useTheme();
+  if (offer.kind === 'same') {
+    return (
+      <Mono
+        className="min-w-0 shrink text-micro text-faint"
+        numberOfLines={1}
+        maxFontSizeMultiplier={1.2}
+      >
+        Market check: nothing to change
+      </Mono>
+    );
+  }
+  const text =
+    offer.kind === 'prompt'
+      ? 'Check market price'
+      : offer.kind === 'apply'
+        ? offer.label
+        : 'Using market price · Undo';
+  return (
+    <TouchableOpacity
+      onPress={offer.onPress}
+      activeOpacity={0.6}
+      accessibilityRole="button"
+      accessibilityLabel={text}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+      className="min-w-0 shrink flex-row items-center justify-end gap-1"
+    >
+      <Mono className="shrink text-micro text-link" numberOfLines={1} maxFontSizeMultiplier={1.2}>
+        {text}
+      </Mono>
+      <Icon name="chevronRight" size={13} color={colors.link} />
+    </TouchableOpacity>
   );
 }
 

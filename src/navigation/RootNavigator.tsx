@@ -31,8 +31,9 @@ function useNavTheme(): Theme {
       card: colors.surface,
       text: colors.fg,
       border: colors.line,
-      primary: colors.accent,
-      notification: colors.accent,
+      // v3: chrome tint is ink, not accent; the unread badge is the danger dot.
+      primary: colors.fg,
+      notification: colors.dangerDot,
     },
   };
 }

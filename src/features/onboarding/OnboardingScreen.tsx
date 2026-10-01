@@ -4,7 +4,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { AmbientGlow, Txt, Mono, TextField, SelectField, Button } from '@/components/ui';
+import { Txt, Mono, TextField, SelectField, Button } from '@/components/ui';
 import { ListSkeleton } from '@/components/feedback';
 import { useCompanyProfile, updateCompanyProfile } from '@/features/more/api';
 import { INDUSTRY_OPTIONS } from '@/lib/companyOptions';
@@ -86,8 +86,6 @@ export function OnboardingScreen({ navigation }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep">
-      <AmbientGlow />
-
       {/* A grid, not space-between: the step count stays centred whether or
           not Back is showing, instead of shifting as it appears. */}
       <View className="px-screen" style={{ paddingTop: insets.top + 12 }}>
@@ -95,18 +93,18 @@ export function OnboardingScreen({ navigation }: Props) {
           <View style={{ minWidth: 64 }}>
             {step > 1 && step < 4 && (
               <TouchableOpacity onPress={() => setStep((s) => (s - 1) as Step)} hitSlop={8}>
-                <Mono className="text-micro uppercase tracking-wide text-faint">← Back</Mono>
+                <Mono className="text-micro text-faint">← Back</Mono>
               </TouchableOpacity>
             )}
           </View>
-          <Mono className="text-micro uppercase tracking-wide text-faint">STEP {step} OF 4</Mono>
-          {/* Kept empty (not removed) so "STEP n OF 4" stays centred against
+          <Mono className="text-micro text-faint">Step {step} of 4</Mono>
+          {/* Kept empty (not removed) so "Step n of 4" stays centred against
               the Back slot on the left. Every step's own way to skip lives
               in its body now, as a real button, instead of up here. */}
           <View style={{ minWidth: 64, alignItems: 'flex-end' }} />
         </View>
-        <View className="h-1 overflow-hidden rounded-full bg-line">
-          <View className="h-full rounded-full bg-accent" style={{ width: `${(step / 4) * 100}%` }} />
+        <View className="h-1 overflow-hidden rounded-pill bg-line">
+          <View className="h-full rounded-pill bg-btn-primary" style={{ width: `${(step / 4) * 100}%` }} />
         </View>
       </View>
 

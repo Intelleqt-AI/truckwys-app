@@ -233,6 +233,43 @@ function renderPlain(nodes: Inline[]): string {
 }
 
 /**
+ * Stored replies list items inline: "Intro. • INV-1: A: R1. • INV-2: B: R2.
+ * Closing sentence." (display only; the stored text is untouched). Each " • "
+ * run becomes a list; a closing sentence after the last item becomes its own
+ * paragraph. Mirrors the web's bulletsToList. Fenced code and table rows are
+ * left alone.
+ */
+export function bulletsToList(text: string): string {
+  let inFence = false;
+  return text
+    .split('\n')
+    .map((line) => {
+      if (RE_FENCE.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence || line.includes('|') || !line.includes(' • ')) return line;
+      const [intro = '', ...items] = line.split(/\s+•\s+/);
+      if (items.length === 0) return line;
+      let outro = '';
+      const lastIdx = items.length - 1;
+      // The closing sentence starts after the last item's first ". " + capital letter.
+      const m = /^(.*?\.)\s+([A-Z][\s\S]*)$/.exec(items[lastIdx] ?? '');
+      if (m && m[1] && m[2]) {
+        items[lastIdx] = m[1];
+        outro = m[2];
+      }
+      return [
+        intro.trim(),
+        '',
+        ...items.map((it) => `- ${it.trim()}`),
+        ...(outro ? ['', outro] : []),
+      ].join('\n');
+    })
+    .join('\n');
+}
+
+/**
  * Public entry point. Never throws and never returns an empty list for
  * non-empty input — a mangled reply is bad, a crashed chat screen is worse.
  */
@@ -241,7 +278,7 @@ export function parseBlocks(src: string): Block[] {
   // its own fallback text rather than an empty bubble.
   if (!src || !src.trim()) return [];
   try {
-    const blocks = parse(src);
+    const blocks = parse(bulletsToList(src));
     return blocks.length ? blocks : [{ kind: 'p', inline: [{ t: 'text', v: src }] }];
   } catch {
     return [{ kind: 'p', inline: [{ t: 'text', v: src }] }];

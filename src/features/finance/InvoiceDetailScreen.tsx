@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { View, Share, Linking, Modal, Pressable } from 'react-native';
+import { useState } from 'react';
+import { View, Share, Modal, Pressable } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, StatCard, StatusPill, Group, DetailRow, Button, Badge, Txt, Mono } from '@/components/ui';
+import { SheetScreen, StatCard, StatusPill, Group, DetailRow, Button, Txt, Mono, Banner } from '@/components/ui';
+import { useTheme } from '@/theme/ThemeProvider';
 import { ErrorState } from '@/components/feedback';
 import {
   useInvoice,
@@ -14,21 +15,19 @@ import {
   sendInvoiceReminder,
   markInvoicePaid,
   recordPayment,
+  updateInvoice,
 } from './api';
-import {
-  useCapitalEligible,
-  findEligible,
-  findIneligible,
-  loadAppliedIds,
-  saveAppliedId,
-  MERCHANT_CAPITAL_URL,
-} from './fastpay';
 import { RecordPaymentSheet, type PaymentDraft } from './RecordPaymentSheet';
+import { DueDateSheet } from './DueDateSheet';
+import { InvoiceSendPreview, type InvoiceMessageKind } from './InvoiceSendPreview';
 import { num, str, pick } from '@/lib/api/list';
 import { invoiceShareUrl } from '@/lib/legal';
 import { openWhatsApp } from '@/lib/whatsapp';
 import { formatCurrency, formatDate } from '@/lib/formatters';
+import { saDaysBetween } from '@/lib/dates';
+import { canEditDueDate, canSendReminder, isInvoiceOverdue } from '@/lib/invoiceStatus';
 import { toast } from '@/lib/toast';
+import { CAPITAL_LAUNCHED, CAPITAL_COMING_SOON } from '@/lib/features';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -39,7 +38,6 @@ type Props = NativeStackScreenProps<AppStackParamList, 'InvoiceDetail'>;
 // instance, is rejected with "Reminders can only be sent for outstanding
 // invoices", so offering the button there just produces an error toast.
 const CAN_SEND = ['DRAFT', 'SENT', 'VIEWED'];
-const CAN_REMIND = ['SENT', 'VIEWED', 'OVERDUE'];
 const CAN_PAY = ['SENT', 'VIEWED', 'OVERDUE', 'PARTIALLY_PAID'];
 // Editing is only offered pre-send: once an invoice is SENT/VIEWED/PAID/etc.
 // the customer has already seen or paid it, so changing the customer/amount
@@ -49,7 +47,6 @@ const CAN_EDIT = ['DRAFT'];
 export function InvoiceDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
   const { data, isError, refetch } = useInvoice(id, preview);
-  const { data: capital } = useCapitalEligible();
   const { data: payments } = useInvoicePayments(id);
   const qc = useQueryClient();
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -57,11 +54,14 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const [payBusy, setPayBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
-  const [applied, setApplied] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    void loadAppliedIds().then(setApplied);
-  }, []);
+  // Which message is being previewed, and what happens after it is confirmed.
+  // WhatsApp needs the public link, which only exists once the invoice has been
+  // sent, and sending it emails the customer, so that path is previewed too.
+  const [sendPreview, setSendPreview] = useState<{ kind: InvoiceMessageKind; then: 'email' | 'whatsapp' } | null>(null);
+  const [dueOpen, setDueOpen] = useState(false);
+  const [dueBusy, setDueBusy] = useState(false);
+  const [dueError, setDueError] = useState<string | null>(null);
+  const { colors } = useTheme();
 
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this invoice." />;
   const inv = (data ?? {}) as Record<string, unknown>;
@@ -72,25 +72,20 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const token = str(pick(inv, ['view_token', 'token']));
   // 'DRAFT' is the model default; the old 'UNPAID' fallback isn't a real status.
   const status = str(pick(inv, ['status']), 'DRAFT').toUpperCase();
+  // One overdue rule for the whole app (lib/invoiceStatus): the invoice has been
+  // sent, still has a balance, and its due date has passed. The server only
+  // flips SENT to OVERDUE on a schedule, so the status string alone lags.
+  const overdue = isInvoiceOverdue(inv);
+  const shownStatus = overdue && (status === 'SENT' || status === 'VIEWED') ? 'OVERDUE' : status;
+  const dueDate = str(pick(inv, ['due_date']));
+  const issueDate = str(pick(inv, ['issue_date', 'created_at'])).slice(0, 10);
+  const daysPastDue = dueDate ? saDaysBetween(dueDate.slice(0, 10), new Date()) : null;
+  const daysLate = overdue && daysPastDue != null && daysPastDue > 0 ? daysPastDue : null;
+  const draftPastDue = status === 'DRAFT' && daysPastDue != null && daysPastDue > 0;
+  const canRemind = canSendReminder(inv);
 
-  // Eligibility is set membership against the backend's list — never computed
-  // here. See fastpay.ts for why `early_pay_eligible` must not be used.
-  const eligibleEntry = findEligible(capital?.invoices ?? [], id);
-  const ineligibleEntry = eligibleEntry ? undefined : findIneligible(capital?.ineligible_invoices ?? [], id);
-  // The Capital page honours this and the invoice pages historically didn't;
-  // the stricter behaviour is the correct one.
-  const riskBlocked = !!eligibleEntry?.risk_blocked;
-  const tier = str(eligibleEntry?.risk_tier ?? eligibleEntry?.tier);
-  const hasApplied = applied.has(String(id));
-
-  const applyForCapital = async () => {
-    setApplied(await saveAppliedId(id));
-    await Linking.openURL(MERCHANT_CAPITAL_URL);
-  };
-
-  // 'invoice' covers the detail + list + Fast Pay eligibility + the Home
-  // dashboard and finance reports. The web app forgets capital-eligible after
-  // a payment and goes stale; the shared map can't.
+  // 'invoice' covers the detail + list + the Home dashboard and finance
+  // reports; the shared map can't forget one the way hand-rolled lists did.
   const refresh = () => invalidateFor(qc, 'invoice');
 
   // Per-action flags so each button spins independently.
@@ -133,11 +128,20 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   // first sent — so send it first if it hasn't been, then hand off.
   const sendViaEmail = () => {
     setSendOpen(false);
-    void run(setSendBusy, () => sendInvoice(id), 'Invoice emailed');
+    setSendPreview({ kind: 'invoice', then: 'email' });
   };
 
   const sendViaWhatsApp = async () => {
     setSendOpen(false);
+    // No link yet means sending first, which emails the customer: preview that.
+    if (!token) {
+      setSendPreview({ kind: 'invoice', then: 'whatsapp' });
+      return;
+    }
+    await openWhatsAppForInvoice();
+  };
+
+  const openWhatsAppForInvoice = async () => {
     setSendBusy(true);
     try {
       let link = token;
@@ -166,6 +170,37 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       toast.error(e instanceof Error ? e.message : 'Could not open WhatsApp');
     } finally {
       setSendBusy(false);
+    }
+  };
+
+  // Runs after the person confirms in the preview.
+  const confirmPreview = async () => {
+    const current = sendPreview;
+    if (!current) return;
+    if (current.kind === 'reminder') {
+      await run(setSendBusy, () => sendInvoiceReminder(id), 'Reminder sent');
+    } else if (current.then === 'whatsapp') {
+      await openWhatsAppForInvoice();
+    } else {
+      await run(setSendBusy, () => sendInvoice(id), 'Invoice emailed');
+    }
+    setSendPreview(null);
+  };
+
+  const saveDueDate = async (next: string) => {
+    setDueBusy(true);
+    setDueError(null);
+    try {
+      await updateInvoice(id, { due_date: next });
+      refresh();
+      setDueOpen(false);
+      toast.success('Due date changed');
+    } catch (e) {
+      // Kept inside the sheet: e.g. "can't be before the issue date", or the
+      // invoice has been paid in the meantime.
+      setDueError(e instanceof Error ? e.message : "Couldn't change the due date");
+    } finally {
+      setDueBusy(false);
     }
   };
 
@@ -224,9 +259,9 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
             )}
           </View>
           <View className="flex-row gap-2.5">
-            {CAN_REMIND.includes(status) && (
+            {canRemind && (
               <View className="flex-1">
-                <Button label="Reminder" icon="bell" variant="secondary" onPress={() => run(setSendBusy, () => sendInvoiceReminder(id), 'Reminder sent')} fullWidth />
+                <Button label="Reminder" icon="bell" variant="secondary" onPress={() => setSendPreview({ kind: 'reminder', then: 'email' })} fullWidth />
               </View>
             )}
             {CAN_PAY.includes(status) && (
@@ -235,42 +270,38 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
               </View>
             )}
           </View>
-          {status !== 'PAID' && (
+          {CAN_PAY.includes(status) && (
             <Button label="Mark as paid" variant="secondary" onPress={() => run(setPayBusy, () => markInvoicePaid(id), 'Marked paid')} fullWidth />
           )}
-          {/* Applications are completed on Merchant Capital's own site — there's
-              no in-app advance request behind this, same as the web app. */}
-          {eligibleEntry && !riskBlocked && (
-            <Button
-              label={hasApplied ? 'Applied ✓' : 'Apply for capital →'}
-              icon="dollar"
-              variant={hasApplied ? 'secondary' : 'primary'}
-              onPress={applyForCapital}
-              fullWidth
-            />
+          {/* Fast Pay has no funding partner yet: the action stays visible so
+              people know it is coming, but it does nothing until
+              CAPITAL_LAUNCHED is flipped (lib/features.ts). */}
+          {!CAPITAL_LAUNCHED && CAN_PAY.includes(status) && (
+            <View>
+              <Button label="Request Fast Pay (coming soon)" icon="dollar" variant="secondary" disabled fullWidth />
+              <Txt className="mt-1.5 text-micro text-faint">{CAPITAL_COMING_SOON}</Txt>
+            </View>
           )}
         </View>
       }
     >
       <View className="mb-4 flex-row flex-wrap items-center gap-2.5">
-        <StatusPill status={status} />
-        {eligibleEntry && !riskBlocked && tier && <Badge label={tier.toUpperCase()} tone="info" />}
-        {riskBlocked && <Badge label="High risk" tone="danger" />}
+        <StatusPill status={shownStatus} />
       </View>
 
-      {/* The backend writes these reasons (no POD, invoice too old, no facility,
-          …) — show them verbatim rather than a generic "not eligible". */}
-      {ineligibleEntry?.reason && (
-        <View className="mb-5 rounded-card border border-line bg-surface p-3">
-          <Mono className="mb-1 text-micro tracking-wide uppercase text-faint">Fast Pay</Mono>
-          <Txt className="text-caption text-muted">{ineligibleEntry.reason}</Txt>
-        </View>
-      )}
-      {riskBlocked && (
-        <View className="mb-5 rounded-control border border-warning bg-warning-bg p-3">
-          <Txt className="text-caption text-fg">
-            {`Customer risk ${eligibleEntry?.customer_risk_pct ?? '—'}% is above the 70% Fast Pay limit.`}
-          </Txt>
+      {/* A draft whose due date has passed goes out already overdue. */}
+      {draftPastDue && (
+        <View className="mb-5">
+          <Banner
+            tone="warning"
+            message={`Draft · due date ${formatDate(dueDate)} has passed. Sent as it is, it arrives ${daysPastDue} ${
+              daysPastDue === 1 ? 'day' : 'days'
+            } overdue. Tap to change the due date.`}
+            onPress={() => {
+              setDueError(null);
+              setDueOpen(true);
+            }}
+          />
         </View>
       )}
 
@@ -281,8 +312,22 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
 
       <Group label="Details">
         <DetailRow label="Customer" value={str(pick(inv, ['customer_name', 'customer']), '—')} mono={false} />
-        <DetailRow label="Issued" value={formatDate(str(pick(inv, ['issue_date', 'created_at'])) || new Date().toISOString())} />
-        <DetailRow label="Due" value={formatDate(str(pick(inv, ['due_date'])) || new Date().toISOString())} />
+        <DetailRow label="Issued" value={formatDate(str(pick(inv, ['issue_date', 'created_at'])))} />
+        <DetailRow
+          label="Due"
+          value={formatDate(dueDate)}
+          hint={daysLate ? `${daysLate} ${daysLate === 1 ? 'day' : 'days'} late` : undefined}
+          hintColor={daysLate ? colors.danger : undefined}
+          onEdit={
+            canEditDueDate(inv) && dueDate
+              ? () => {
+                  setDueError(null);
+                  setDueOpen(true);
+                }
+              : undefined
+          }
+          editLabel="Change due date"
+        />
         <DetailRow label="Paid" value={formatCurrency(paid)} last />
       </Group>
 
@@ -291,9 +336,9 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
         <DetailRow label="VAT (15%)" value={formatCurrency(num(pick(inv, ['vat', 'tax', 'vat_amount'])))} />
         <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
           <Txt className="text-callout font-semibold text-fg">Total</Txt>
-          <Txt className="text-heading font-semibold text-accent" style={{ fontFamily: 'Menlo' }}>
+          <Mono className="text-heading font-semibold text-accent">
             {formatCurrency(total)}
-          </Txt>
+          </Mono>
         </View>
       </Group>
 
@@ -319,15 +364,37 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
         />
       )}
 
+      {sendPreview && (
+        <InvoiceSendPreview
+          kind={sendPreview.kind}
+          invoice={inv}
+          sending={sendBusy}
+          onConfirm={confirmPreview}
+          onCancel={() => !sendBusy && setSendPreview(null)}
+        />
+      )}
+
+      {dueOpen && (
+        <DueDateSheet
+          invoiceNumber={str(pick(inv, ['invoice_number', 'number']), 'Invoice')}
+          issueDate={issueDate}
+          dueDate={dueDate}
+          busy={dueBusy}
+          error={dueError}
+          onSave={saveDueDate}
+          onCancel={() => setDueOpen(false)}
+        />
+      )}
+
       {sendOpen && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setSendOpen(false)}>
           <Pressable
             onPress={() => setSendOpen(false)}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
+              className="w-full max-w-[420px] rounded-panel border border-line bg-elevated p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Send invoice</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">

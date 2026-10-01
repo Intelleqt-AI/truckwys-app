@@ -58,7 +58,7 @@ function FuelBreakdownModalImpl({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={onClose}>
+      <Pressable className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
         <Pressable
           className="rounded-panel border border-line bg-elevated p-4"
           onPress={(e) => e.stopPropagation()}

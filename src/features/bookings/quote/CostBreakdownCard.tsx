@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { View, Pressable } from 'react-native';
 import { Group, DetailRow, Icon, Txt, Mono } from '@/components/ui';
 import { formatCurrency, formatNumber } from '@/lib/formatters';
+import { useTheme } from '@/theme/ThemeProvider';
 import type { CostBreakdown } from './costs';
 
 /**
@@ -42,6 +43,7 @@ function CostBreakdownCardImpl({
   /** Same as the AI card's "Use actual price" — drops serviceCharge to 0. */
   onRemoveUplift: () => void;
 }) {
+  const { colors } = useTheme();
   const hasVehicleType = !!vehicleType;
   const crossBorderNote =
     costs.crossBorderCost > 0 && countries?.length ? ` · crosses ${countries.join('→')}` : '';
@@ -66,20 +68,25 @@ function CostBreakdownCardImpl({
             {costs.fuelZoneNote}
             {costs.fuelBasisInferred ? ' · est. from your fleet' : ''}
           </Txt>
+          {!!costs.fuelLiveHint && (
+            <Txt className="text-micro text-faint" numberOfLines={1}>
+              {costs.fuelLiveHint}
+            </Txt>
+          )}
         </View>
         <View className="shrink-0 flex-row items-center gap-1">
           <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
             {formatCurrency(costs.fuelCost)}
           </Mono>
-          <Icon name="chevronRight" size={14} color="#888888" />
+          <Icon name="chevronRight" size={14} color={colors.faint} />
         </View>
       </Pressable>
       <Pressable
         onPress={onTollPress}
         accessibilityRole="button"
-        accessibilityLabel={`Tolls, ${formatCurrency(costs.tollCost)}.${
+        accessibilityLabel={`Tolls, ${formatCurrency(costs.tollCost)}, excluding VAT.${
           costs.tollFree && costs.tollCost === 0 ? ' No plazas on this route.' : ''
-        } Show toll plaza breakdown`}
+        }${costs.tollsUnavailable ? ' Tolls could not be calculated. Add them manually.' : ''} Show toll plaza breakdown`}
         className="flex-row items-center justify-between border-b border-line-row px-3.5 py-3"
       >
         <View className="flex-1 shrink">
@@ -87,10 +94,18 @@ function CostBreakdownCardImpl({
             <Txt className="shrink text-callout text-muted" numberOfLines={1}>
               Tolls (SA plazas)
             </Txt>
-            <Icon name="alert" size={13} color="#888888" />
+            <Icon name="alert" size={13} color={colors.faint} />
           </View>
-          {costs.tollFree && costs.tollCost === 0 && (
-            <Txt className="text-micro text-faint">No plazas on this route</Txt>
+          {costs.tollsUnavailable ? (
+            // toll_cost_zar is 0 here but that is a gap, not a toll-free route;
+            // say so in the backend's own words so it gets filled in by hand.
+            <Txt className="text-micro text-warning">{costs.tollWarning}</Txt>
+          ) : costs.tollFree && costs.tollCost === 0 ? (
+            <Txt className="text-micro text-faint">No plazas on this route · excl. VAT</Txt>
+          ) : (
+            <Txt className="text-micro text-faint">
+              {costs.tollsEstimated ? 'Estimated · excl. VAT' : 'Excl. VAT'}
+            </Txt>
           )}
         </View>
         {/* shrink-0: RN's Yoga defaults flexShrink to 0, so without this the
@@ -100,7 +115,7 @@ function CostBreakdownCardImpl({
           <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
             {formatCurrency(costs.tollCost)}
           </Mono>
-          <Icon name="chevronRight" size={14} color="#888888" />
+          <Icon name="chevronRight" size={14} color={colors.faint} />
         </View>
       </Pressable>
       {costs.crossBorderCost > 0 && (
@@ -119,7 +134,7 @@ function CostBreakdownCardImpl({
             <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
               {formatCurrency(costs.crossBorderCost)}
             </Mono>
-            <Icon name="chevronRight" size={14} color="#888888" />
+            <Icon name="chevronRight" size={14} color={colors.faint} />
           </View>
         </Pressable>
       )}
@@ -145,7 +160,7 @@ function CostBreakdownCardImpl({
             <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
               {formatCurrency(serviceCharge)}
             </Mono>
-            <Icon name="x" size={15} color="#888888" />
+            <Icon name="x" size={15} color={colors.faint} />
           </View>
         </Pressable>
       )}
@@ -157,7 +172,7 @@ function CostBreakdownCardImpl({
         <Txt className="shrink text-callout font-semibold text-fg" numberOfLines={1}>
           Quote total
         </Txt>
-        <Mono className="shrink-0 text-heading font-bold text-accent" numberOfLines={1}>
+        <Mono className="shrink-0 text-heading font-semibold text-accent" numberOfLines={1}>
           {formatCurrency(costs.total)}
         </Mono>
       </View>

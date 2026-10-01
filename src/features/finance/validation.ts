@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { parseNum, decimalMax } from '@/lib/formatters';
+import { localDateISO } from '@/lib/dates';
 
 // Invoice.total_amount is DecimalField(max_digits=10, decimal_places=2) —
 // subtotal * 1.15 (the hardcoded VAT rate, matching Invoice.calculate_vat())
@@ -24,7 +25,7 @@ const EXPENSE_AMOUNT_MAX = decimalMax(10, 2);
 // `NaN` for the comma-decimal / grouped-thousands input a South African
 // keyboard produces (see `src/lib/formatters.ts`).
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => localDateISO();
 
 const numericOptionalField = (label: string) =>
   z

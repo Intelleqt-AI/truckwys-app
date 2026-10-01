@@ -5,7 +5,7 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 // (voice quotes), photo library (POD / avatar / logo uploads), notifications
 // (operational push), location (declared only — the map SDKs link CoreLocation,
 // the app itself never requests it). Each has a usage string below.
-const DEEP = '#030303';
+const DEEP = '#0B0C0E'; // dark page background (web v3 --bg-deep)
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,

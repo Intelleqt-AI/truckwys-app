@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react';
 import { View, type LayoutChangeEvent } from 'react-native';
-import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import Animated, {
   useAnimatedProps,
   useSharedValue,
@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Mono } from './Text';
 import { useTheme } from '@/theme/ThemeProvider';
-import { motion, EASE_OUT, status as statusHues } from '@/theme/tokens';
+import { motion, EASE_OUT } from '@/theme/tokens';
 import type { TrendPoint } from '@/types/domain';
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -22,10 +22,11 @@ const ease = Easing.bezier(...EASE_OUT);
 // side). Any value at least as long as the real path draws it identically.
 const DRAW_LENGTH = 2000;
 
-// ── Sparkline: revenue-vs-fuel area+line, mirrors the web Overview chart ───
-// Revenue draws on once via an animated stroke-dashoffset; the area fill and
-// the dashed fuel line fade in alongside it. Not scrubbable — this is a
-// glance chart, not an inspector.
+// ── Sparkline: revenue-vs-costs lines, mirrors the web Overview chart ──────
+// v3 chart rules: revenue is the one solid accent line; costs are a neutral,
+// dashed line (danger is reserved for losses); no gradient fills. Revenue draws
+// on once via an animated stroke-dashoffset; the dashed costs line fades in
+// alongside it. Not scrubbable — this is a glance chart, not an inspector.
 function SparklineImpl({
   points,
   height = 72,
@@ -39,9 +40,9 @@ function SparklineImpl({
 }) {
   const { colors } = useTheme();
   const lineColor = color ?? colors.accent;
-  // Matches web's fuel-cost line (var(--status-danger)) — a muted/faint line
-  // here read too close to the revenue line to tell apart at a glance.
-  const dashColor = fuelColor ?? statusHues.danger;
+  // Web v3 `--chart-muted`: a neutral grey, dashed so it still separates from
+  // the revenue line at a glance.
+  const dashColor = fuelColor ?? colors.chartMuted;
   const reducedMotion = useReducedMotion();
   const [w, setW] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setW(e.nativeEvent.layout.width);
@@ -78,7 +79,6 @@ function SparklineImpl({
   const revLine = points
     .map((p, i) => `${i ? 'L' : 'M'}${sx(i).toFixed(1)},${sy(p.revenue).toFixed(1)}`)
     .join(' ');
-  const revArea = `${revLine} L${sx(n - 1).toFixed(1)},${(height - pad).toFixed(1)} L${sx(0).toFixed(1)},${(height - pad).toFixed(1)} Z`;
   const fuelLine = points
     .map((p, i) => `${i ? 'L' : 'M'}${sx(i).toFixed(1)},${sy(p.expenses).toFixed(1)}`)
     .join(' ');
@@ -87,13 +87,6 @@ function SparklineImpl({
     <View onLayout={onLayout} style={{ height }}>
       {w > 0 && (
         <Svg width={w} height={height}>
-          <Defs>
-            <LinearGradient id="hero-rev" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={lineColor} stopOpacity={0.15} />
-              <Stop offset="1" stopColor={lineColor} stopOpacity={0} />
-            </LinearGradient>
-          </Defs>
-          <AnimatedPath d={revArea} fill="url(#hero-rev)" animatedProps={fadeAnimatedProps} />
           <AnimatedPath
             d={fuelLine}
             stroke={dashColor}

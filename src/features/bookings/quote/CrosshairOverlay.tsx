@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { Button, Label, Txt } from '@/components/ui';
 import { MapPin, MapReticle } from './MapPin';
-import { status as statusHues } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
 import type { PickTarget } from './types';
 
 // Lives in types.ts (this file's stated home for shared quote-builder types),
@@ -57,9 +57,10 @@ function CrosshairOverlayImpl({
   onCancel: () => void;
   bottomInset: number;
 }) {
+  const { colors } = useTheme();
   const isPickup = target === 'pickup';
   const isStop = typeof target === 'object';
-  const tint = isPickup ? statusHues.success : isStop ? statusHues.info : statusHues.danger;
+  const tint = isPickup ? colors.successDot : isStop ? colors.infoDot : colors.dangerDot;
   const noun = isPickup ? 'collection' : isStop ? 'stop' : 'drop-off';
 
   return (

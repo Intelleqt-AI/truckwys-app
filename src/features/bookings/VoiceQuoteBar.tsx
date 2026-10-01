@@ -30,8 +30,8 @@ export function VoiceQuoteBar({
   return (
     <View className="rounded-card border border-line bg-surface p-3">
       <View className="mb-2 flex-row items-center gap-1.5">
-        <Icon name="sparkle" size={14} color={colors.accent} />
-        <Label className="text-accent">Describe it</Label>
+        <Icon name="sparkle" size={14} color={colors.muted} />
+        <Label className="text-muted">Describe it</Label>
       </View>
       <TextField
         placeholder="e.g. 20t steel, Johannesburg to Cape Town, flatbed Tuesday"
@@ -48,7 +48,7 @@ export function VoiceQuoteBar({
           accessibilityLabel="Record voice"
           className="w-14 items-center justify-center rounded-control border border-line-active bg-surface active:opacity-70"
         >
-          <Icon name="mic" size={20} color={colors.accent} />
+          <Icon name="mic" size={20} color={colors.fg} />
         </Pressable>
         <View className="flex-1">
           <Button

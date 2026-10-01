@@ -12,6 +12,7 @@ import {
   DateField,
   Button,
   Label,
+  Txt,
   SaveSuccessOverlay,
   type TextFieldProps,
 } from '@/components/ui';
@@ -89,7 +90,10 @@ async function createDriverUser(v: DriverFormValues) {
         last_name: v.last_name.trim(),
         phone: v.phone?.trim() || undefined,
         address: v.address?.trim() || undefined,
-        password: 'TruckWys2026!',
+        // No password: the account is created without a usable one and the driver
+        // sets their own through "Forgot password". A shared default would let
+        // anyone who knows it sign in as any new driver. The role must stay
+        // explicit now that the backend defaults new users to VIEWER.
         role: 'DRIVER',
       });
     } catch (e) {
@@ -458,6 +462,11 @@ export function AddDriverScreen({ route, navigation }: Props) {
             autoCapitalize="none"
             keyboardType="email-address"
           />
+          {!editing && (
+            <Txt className="text-sub text-muted">
+              {'The driver sets their own password with "Forgot password" on the sign-in screen, using this email.'}
+            </Txt>
+          )}
           {/* Phone and Emergency contact both go full width too — a formatted
               phone number and a compound "Name · phone" value are just as
               cramped at half-width as Licence number above. */}

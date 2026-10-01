@@ -1,12 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
+import { fetchAllRows } from '@/lib/api/fetchAllPages';
 import { normalizeCustomer, type CustomerLite, type BulkDeleteResult } from '@/types/domain';
 
 export function useCustomers() {
   return useQuery<CustomerLite[]>({
     queryKey: ['customers'],
-    queryFn: async () => asArray(await fetchData('customers/')).map(normalizeCustomer),
+    queryFn: async () => (await fetchAllRows('customers/')).map(normalizeCustomer),
   });
 }
 

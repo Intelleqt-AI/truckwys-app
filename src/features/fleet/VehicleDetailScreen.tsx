@@ -45,10 +45,10 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
   return (
     <View className="mb-3">
       <View className="mb-1 flex-row justify-between">
-        <Mono className="text-micro uppercase tracking-wide text-faint">{label}</Mono>
+        <Mono className="text-micro text-faint">{label}</Mono>
         <Mono className="text-micro text-muted">{Math.round(value)}/100</Mono>
       </View>
-      <View className="h-2 overflow-hidden rounded-pill bg-surface-hover">
+      <View className="h-2 overflow-hidden rounded-pill" style={{ backgroundColor: colors.chartBar }}>
         <View style={{ width: `${pct}%`, height: '100%', backgroundColor: colors.accent }} />
       </View>
     </View>
@@ -220,12 +220,12 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow
               label="Km until service"
               value={kmUntilService != null ? (kmUntilService <= 0 ? 'Overdue' : `${formatNumber(kmUntilService)} km`) : '—'}
-              valueColor={kmUntilService != null && kmUntilService <= 0 ? '#FF4949' : undefined}
+              valueColor={kmUntilService != null && kmUntilService <= 0 ? colors.danger : undefined}
             />
             <DetailRow
               label="Registration expiry"
               value={showDate(regExpiry)}
-              valueColor={regOverdue ? '#FF4949' : undefined}
+              valueColor={regOverdue ? colors.danger : undefined}
               last
             />
           </Group>
@@ -276,12 +276,12 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow
               label="Km until service"
               value={kmUntilService != null ? (kmUntilService <= 0 ? 'Overdue' : `${formatNumber(kmUntilService)} km`) : '—'}
-              valueColor={kmUntilService != null && kmUntilService <= 0 ? '#FF4949' : undefined}
+              valueColor={kmUntilService != null && kmUntilService <= 0 ? colors.danger : undefined}
             />
             <DetailRow
               label="Registration expiry"
               value={showDate(regExpiry)}
-              valueColor={regOverdue ? '#FF4949' : undefined}
+              valueColor={regOverdue ? colors.danger : undefined}
             />
             <DetailRow label="VIN" value={str(pick(v, ['vin']), '—')} last />
           </Group>

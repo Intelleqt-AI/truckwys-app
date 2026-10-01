@@ -42,14 +42,14 @@ export function AdvanceDetailScreen({ route, navigation }: Props) {
       <Group label="Details">
         <DetailRow label="Invoice" value={str(pick(a, ['invoice_number', 'invoice']), '—')} />
         <DetailRow label="Tier" value={advanceTier(a)} mono={false} />
-        <DetailRow label="Repay by" value={formatDate(str(pick(a, ['invoice_due_date', 'due_date'])) || new Date().toISOString())} last />
+        <DetailRow label="Repay by" value={formatDate(str(pick(a, ['invoice_due_date', 'due_date'])))} last />
       </Group>
 
       <Group label="Status">
         <View className="p-4">
           <Timeline
             steps={LIFECYCLE.map((s, i) => ({
-              label: s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+              label: s.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase()),
               done: i <= idx,
             }))}
           />

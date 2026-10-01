@@ -30,7 +30,6 @@ export { Glass, GlassSolid } from './Glass';
 export { SwipeTabs } from './SwipeTabs';
 export {
   Screen,
-  AmbientGlow,
   AppHeader,
   SectionLabel,
   UnderlineTabs,
@@ -55,4 +54,5 @@ export { SigningInOverlay } from './SigningInOverlay';
 export { Logo } from './Logo';
 export { LogoMark } from './LogoMark';
 export { Banner, type BannerTone } from './Banner';
+export { SendPreviewSheet, type SendPreviewRow, type SendPreviewSheetProps } from './SendPreviewSheet';
 export { SubscriptionDot } from './SubscriptionDot';

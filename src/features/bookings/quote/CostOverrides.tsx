@@ -65,7 +65,7 @@ function CostOverridesImpl({
   return (
     <Group
       label="Adjustments"
-      action={overridden ? 'RESET' : undefined}
+      action={overridden ? 'Reset' : undefined}
       onAction={overridden ? onResetAll : undefined}
     >
       <View className="gap-3 p-3">

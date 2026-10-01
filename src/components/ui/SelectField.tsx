@@ -6,7 +6,7 @@ import { Txt, Mono, FieldLabel } from './Text';
 import { Icon, type IconName } from './icons';
 import { SearchField, FieldMessage } from './forms';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues, motion } from '@/theme/tokens';
+import { motion } from '@/theme/tokens';
 
 export interface Option {
   label: string;
@@ -58,9 +58,10 @@ function SelectFieldImpl({
   );
 
   const borderStyle = useAnimatedStyle(() => ({
-    borderColor: withTiming(error ? statusHues.danger : warning ? statusHues.warning : colors.line, {
-      duration: motion.fast,
-    }),
+    borderColor: withTiming(
+      error ? colors.dangerDot : warning ? colors.warningDot : colors.lineControl,
+      { duration: motion.fast },
+    ),
   }));
 
   return (
@@ -68,10 +69,10 @@ function SelectFieldImpl({
       <FieldLabel label={label} required={required} />
       <Pressable onPress={() => setOpen(true)}>
         <Animated.View
-          className="min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3"
+          className="min-h-[44px] flex-row items-center gap-2 rounded-control border bg-input px-3"
           style={borderStyle}
         >
-          {icon && <Icon name={icon} size={17} color={selected ? colors.accent : colors.faint} />}
+          {icon && <Icon name={icon} size={17} color={colors.faint} />}
           <Txt
             className={`flex-1 text-body ${selected ? 'text-fg' : 'text-faint'}`}
             numberOfLines={1}
@@ -93,7 +94,7 @@ function SelectFieldImpl({
           <View className="flex-row items-center justify-between px-screen pb-3">
             <Txt className="text-heading font-semibold text-fg">{label ?? 'Select'}</Txt>
             <Pressable hitSlop={8} onPress={() => setOpen(false)}>
-              <Mono className="text-micro uppercase tracking-wide text-accent">Close</Mono>
+              <Mono className="text-callout font-medium text-link">Close</Mono>
             </Pressable>
           </View>
           <View className="px-screen pb-2">

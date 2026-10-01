@@ -22,7 +22,6 @@ import { num, str, pick, asArray } from '@/lib/api/list';
 import { resolveDriverName } from '@/types/domain';
 import { formatCurrency, formatCurrencyCompact, formatDate, formatNumber, formatPercent } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useDemo } from '@/hooks/useDemo';
@@ -159,12 +158,12 @@ export function DriverDetailScreen({ route, navigation }: Props) {
         <DetailRow
           label="Licence expiry"
           value={showDate(licenceExpiry)}
-          valueColor={isPast(licenceExpiry) ? statusHues.danger : undefined}
+          valueColor={isPast(licenceExpiry) ? colors.danger : undefined}
         />
         <DetailRow
           label="Medical expiry"
           value={showDate(medicalExpiry)}
-          valueColor={isPast(medicalExpiry) ? statusHues.danger : undefined}
+          valueColor={isPast(medicalExpiry) ? colors.danger : undefined}
           last
         />
       </Group>

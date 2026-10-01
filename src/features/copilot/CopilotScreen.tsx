@@ -6,8 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
-import { AmbientGlow, Mono, Icon, INPUT_TEXT } from '@/components/ui';
-import { status as statusHues } from '@/theme/tokens';
+import { Mono, Icon, INPUT_TEXT } from '@/components/ui';
 import { resolveNotificationLink } from '@/lib/notificationLink';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { toast } from '@/lib/toast';
@@ -73,6 +72,7 @@ export function CopilotScreen({ navigation }: Props) {
   // there when they reopen it. Without this it lands in the wrong conversation.
   const activeConv = useRef<number | null>(conversationId);
   const inFlight = useRef(false);
+  const inputRef = useRef<TextInput>(null);
 
   const transcript = messages ?? [];
   const isEmpty = transcript.length === 0 && !pending;
@@ -167,11 +167,13 @@ export function CopilotScreen({ navigation }: Props) {
   /** Move the finished live turn into the cached transcript. */
   const settle = useCallback(
     (convId: number, userText: string, reply: string, envelope: Partial<Msg>) => {
+      const createdAt = new Date().toISOString();
       appendMessages(qc, convId, [
-        { key: localKey('user'), role: 'user', content: userText, actions: [], proposal: null },
+        { key: localKey('user'), role: 'user', content: userText, actions: [], proposal: null, createdAt },
         {
           key: localKey('assistant'),
           role: 'assistant',
+          createdAt,
           content: reply,
           actions: envelope.actions ?? [],
           proposal: envelope.proposal ?? null,
@@ -260,7 +262,7 @@ export function CopilotScreen({ navigation }: Props) {
           userText: message,
           status: 'error',
           error: isRateLimited(e)
-            ? 'Too many questions in a row — give it a minute and try again.'
+            ? 'Too many questions in a row. Give it a minute and try again.'
             : e instanceof Error
               ? e.message
               : 'Something went wrong reaching the copilot.',
@@ -303,7 +305,11 @@ export function CopilotScreen({ navigation }: Props) {
         void qc.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
         if (id === conversationId) startNewChat();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Could not delete that conversation');
+        toast.error(
+          e instanceof Error && e.message
+            ? `Couldn't delete the conversation. ${e.message}`
+            : "Couldn't delete the conversation. Try again.",
+        );
       }
     },
     [qc, conversationId, startNewChat],
@@ -330,6 +336,7 @@ export function CopilotScreen({ navigation }: Props) {
             {
               key: localKey('assistant'),
               role: 'assistant',
+              createdAt: new Date().toISOString(),
               content: outcome.message ?? 'Done.',
               actions: outcome.action ? [outcome.action] : [],
               proposal: null,
@@ -394,6 +401,13 @@ export function CopilotScreen({ navigation }: Props) {
 
   const canSend = !!input.trim() && !sending;
 
+  // A suggestion fills the ask box and focuses it; the person can edit it, then
+  // presses send.
+  const fillAsk = useCallback((prompt: string) => {
+    setInput(prompt);
+    inputRef.current?.focus();
+  }, []);
+
   // NativeWind's className doesn't apply to Animated.View (it's not in its
   // default interop registry), so the dock's static styling is inlined here
   // rather than left inert on a className prop. The insets.bottom portion of
@@ -414,21 +428,17 @@ export function CopilotScreen({ navigation }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep">
-      <AmbientGlow />
       <KeyboardAvoidingView className="flex-1" behavior="padding" automaticOffset>
         <MessageList
           messages={transcript}
           pendingStatus={pending?.status}
           header={
             isEmpty ? (
-              <Starters onPick={(prompt) => void send(prompt)} />
+              <Starters onPick={fillAsk} />
             ) : aiAvailable === false ? (
               <View className="mb-2 flex-row items-center gap-1.5">
-                <Icon name="alert" size={12} color={statusHues.warning} />
-                <Mono
-                  className="text-micro uppercase tracking-wide"
-                  style={{ color: statusHues.warning }}
-                >
+                <Icon name="alert" size={12} color={colors.warningDot} />
+                <Mono className="text-micro" style={{ color: colors.warning }}>
                   Rules engine
                 </Mono>
               </View>
@@ -451,8 +461,9 @@ export function CopilotScreen({ navigation }: Props) {
         />
 
         <Animated.View style={dockStyle}>
-          <View className="min-h-[44px] flex-1 justify-center rounded-control border border-line bg-surface px-3">
+          <View className="min-h-[44px] flex-1 justify-center rounded-control border border-line-control bg-input px-3">
             <TextInput
+              ref={inputRef}
               className="text-fg"
               placeholder="Ask about your operation…"
               placeholderTextColor={colors.faint}
@@ -478,7 +489,7 @@ export function CopilotScreen({ navigation }: Props) {
             className="h-11 w-11 items-center justify-center rounded-control active:opacity-60"
             style={{ opacity: canSend ? 1 : 0.35 }}
           >
-            <Icon name="send" size={20} color={colors.accent} />
+            <Icon name="send" size={20} color={colors.fg} />
           </Pressable>
         </Animated.View>
       </KeyboardAvoidingView>

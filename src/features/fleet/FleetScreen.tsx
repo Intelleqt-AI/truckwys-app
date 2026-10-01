@@ -5,7 +5,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
-  AmbientGlow,
   AppHeader,
   SwipeTabs,
   SearchField,
@@ -99,7 +98,6 @@ export function FleetScreen({ route }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
-      <AmbientGlow />
       <View className="px-screen">
         {selectMode ? (
           // Same row height/padding as AppHeader (layout.tsx) so nothing
@@ -132,7 +130,7 @@ export function FleetScreen({ route }: Props) {
                     className="px-2"
                     onPress={() => enter()}
                   >
-                    <Mono className="text-micro uppercase tracking-wide text-accent">Select</Mono>
+                    <Mono className="text-sub font-medium text-link">Select</Mono>
                   </TouchableOpacity>
                 )}
                 {tab === 'vehicles' && (
@@ -273,7 +271,7 @@ function VehiclesTab({
             className={`mb-2.5 overflow-hidden rounded-card border ${
               isSelected ? 'border-accent' : 'border-line bg-surface'
             }`}
-            style={isSelected ? { backgroundColor: colors.glow } : undefined}
+            style={isSelected ? { backgroundColor: colors.accentDim } : undefined}
           >
             <ListRow
               leading={

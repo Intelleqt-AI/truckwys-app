@@ -7,7 +7,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useDemo } from '@/hooks/useDemo';
-import { MONO_FONT, status as statusHues } from '@/theme/tokens';
+import { CODE_FONT } from '@/theme/tokens';
 import { validateImport, commitImport, type ImportEntity, type ImportPreview, type ImportCommitResult } from './api';
 import { fileToText, type PickedFile } from './fileToText';
 
@@ -205,7 +205,7 @@ export function ImportPanel({
           />
 
           <View>
-            <Mono className="mb-1.5 text-micro uppercase tracking-wide text-faint">
+            <Mono className="mb-1.5 text-caption font-medium text-faint">
               {fileName ? 'From your file' : 'Paste here'}
             </Mono>
             <TextField
@@ -217,7 +217,7 @@ export function ImportPanel({
               numberOfLines={10}
               autoCapitalize="none"
               autoCorrect={false}
-              style={{ minHeight: 220, fontFamily: MONO_FONT, fontSize: 12, textAlignVertical: 'top' }}
+              style={{ minHeight: 220, fontFamily: CODE_FONT, fontSize: 12, textAlignVertical: 'top' }}
             />
           </View>
 
@@ -231,7 +231,7 @@ export function ImportPanel({
           <View className="mb-3 flex-row flex-wrap items-center gap-2">
             <Mono className="text-micro text-faint">{preview.total} found</Mono>
             <Mono className="text-micro text-faint">·</Mono>
-            <Mono className="text-micro" style={{ color: preview.ready ? statusHues.success : colors.faint }}>
+            <Mono className="text-micro" style={{ color: preview.ready ? colors.success : colors.faint }}>
               {preview.ready} ready
             </Mono>
             {preview.needs_attention > 0 && (

@@ -9,7 +9,6 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
-import { AmbientGlow } from './layout';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // Fixed square so the icon centres AND the native iOS bar-button frame is
@@ -73,7 +72,7 @@ function HeaderItemLabel({
     <TouchableOpacity onPress={onPress} hitSlop={8} activeOpacity={0.4} accessibilityRole="button">
       <Mono
         numberOfLines={1}
-        className="px-1 text-micro uppercase tracking-wide text-accent"
+        className="px-1 text-callout font-medium text-link"
         style={{ fontWeight: '600' }}
       >
         {label}
@@ -161,7 +160,7 @@ export function SheetScreen({
           collapsable={false}
         >
           <View style={ICON_BTN} collapsable={false}>
-            <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
+            <Icon name={actionIcon} size={21} color={colors.fg} strokeWidth={2} />
           </View>
         </Pressable>
       ) : (
@@ -174,14 +173,14 @@ export function SheetScreen({
         >
           <Mono
             numberOfLines={1}
-            className="px-1 text-micro uppercase tracking-wide text-accent"
+            className="px-1 text-callout font-medium text-link"
             style={{ fontWeight: '600' }}
           >
             {actionLabel}
           </Mono>
         </Pressable>
       ),
-    [actionLabel, actionIcon, colors.accent],
+    [actionLabel, actionIcon, colors.fg],
   );
 
   // Modals close with an X (clear "dismiss" affordance) rather than a Cancel word.
@@ -196,11 +195,11 @@ export function SheetScreen({
         collapsable={false}
       >
         <View style={ICON_BTN} collapsable={false}>
-          <Icon name="x" size={22} color={colors.accent} strokeWidth={2} />
+          <Icon name="x" size={22} color={colors.fg} strokeWidth={2} />
         </View>
       </Pressable>
     ),
-    [colors.accent],
+    [colors.fg],
   );
 
   const iosRightItems = useCallback(
@@ -212,7 +211,7 @@ export function SheetScreen({
             icon={actionIcon}
             label={actionLabel}
             onPress={() => actionRef.current?.()}
-            color={colors.accent}
+            color={colors.fg}
           />
         ) : (
           <HeaderItemLabel label={actionLabel ?? ''} onPress={() => actionRef.current?.()} />
@@ -220,7 +219,7 @@ export function SheetScreen({
         hidesSharedBackground: true,
       },
     ],
-    [actionLabel, actionIcon, colors.accent],
+    [actionLabel, actionIcon, colors.fg],
   );
 
   const iosLeftItems = useCallback(
@@ -233,13 +232,13 @@ export function SheetScreen({
             label="Close"
             size={22}
             onPress={() => backRef.current?.()}
-            color={colors.accent}
+            color={colors.fg}
           />
         ),
         hidesSharedBackground: true,
       },
     ],
-    [colors.accent],
+    [colors.fg],
   );
 
   // A boolean, not onAction itself — the function's identity changes every
@@ -277,7 +276,6 @@ export function SheetScreen({
 
   return (
     <View className="flex-1 bg-bg-deep">
-      <AmbientGlow />
       <KeyboardAwareScrollView
         ref={scrollRef}
         className="flex-1"
@@ -304,7 +302,7 @@ export function SheetScreen({
             <RefreshControl
               refreshing={!!refreshing}
               onRefresh={onRefresh}
-              tintColor={colors.accent}
+              tintColor={colors.faint}
             />
           ) : undefined
         }

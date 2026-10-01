@@ -152,6 +152,12 @@ api.interceptors.response.use(
           : 'Network error — check your connection'),
     );
     (err as Error & { status?: number }).status = error.response?.status;
+    // A 429 carries Retry-After (seconds). Callers that rate-limit themselves
+    // (the market price check's cooldown) read it instead of guessing.
+    const retryAfterHeader = error.response?.headers?.['retry-after'];
+    const retryAfter = Number(retryAfterHeader);
+    (err as Error & { retryAfter?: number }).retryAfter =
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined;
     // Keep the raw body too — some callers need the machine-readable code, not
     // just the message (e.g. `cross_border_not_allowed` from route/calculate/).
     (err as Error & { data?: unknown }).data = data;

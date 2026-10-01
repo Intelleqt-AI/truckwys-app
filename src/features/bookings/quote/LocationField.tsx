@@ -313,7 +313,7 @@ function LocationFieldImpl({
               className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3 active:bg-surface-hover"
             >
               {r.isRecent && <Icon name="clock" size={13} color={colors.faint} />}
-              <Icon name="pin" size={15} color={r.foreign ? '#F59E0B' : colors.faint} />
+              <Icon name="pin" size={15} color={r.foreign ? colors.warningDot : colors.faint} />
               <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
                 {r.label}
               </Txt>

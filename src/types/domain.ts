@@ -189,7 +189,6 @@ export interface InvoiceLite {
   total: number;
   balance: number;
   status: string;
-  earlyPayEligible?: boolean;
   dueDate?: string;
   raw: Raw;
 }
@@ -201,7 +200,6 @@ export const normalizeInvoice = (inv: Raw): InvoiceLite => ({
   total: num(pick(inv, ['total', 'total_amount', 'amount'])),
   balance: num(pick(inv, ['balance', 'balance_due', 'amount_due'])),
   status: str(pick(inv, ['status']), 'UNPAID').toUpperCase(),
-  earlyPayEligible: Boolean(pick(inv, ['early_pay_eligible'])),
   dueDate: pick(inv, ['due_date', 'dueDate']) as string | undefined,
   raw: inv,
 });

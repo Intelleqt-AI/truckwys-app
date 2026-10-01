@@ -3,13 +3,15 @@ import { Txt, Label, Icon } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAuthStore } from '@/stores/authStore';
 import { useRole } from '@/lib/access';
+import { CAPITAL_LAUNCHED } from '@/lib/features';
 
 // The empty state: an intro plus the suggestion cards.
 //
-// Ported verbatim from the web page (src/pages/Copilot.tsx:41-62), including the
-// detail that three labels send DIFFERENT text than they show — "Fast-pay
-// capacity" sends "How much can I advance?" — because the label reads better and
-// the prompt answers better.
+// Ported from the web page (src/pages/Copilot.tsx), including the detail that
+// some labels use DIFFERENT text than they show ("Fast-pay capacity" uses "How
+// much can I advance?") because the label reads better and the prompt answers
+// better. A suggestion only FILLS the ask box (onPick); the person can edit it
+// and press send.
 
 interface Starter {
   title: string;
@@ -17,13 +19,16 @@ interface Starter {
   hint: string;
 }
 
+const FAST_PAY_STARTER: Starter = {
+  title: 'Fast-pay capacity',
+  prompt: 'How much can I advance?',
+  hint: 'Eligible invoices & net payout',
+};
+
 const STARTERS: Starter[] = [
   { title: "What's overdue?", prompt: "What's overdue?", hint: 'Chase the right accounts first' },
-  {
-    title: 'Fast-pay capacity',
-    prompt: 'How much can I advance?',
-    hint: 'Eligible invoices & net payout',
-  },
+  // Fast Pay is not live yet, so it is not suggested (lib/features.ts).
+  ...(CAPITAL_LAUNCHED ? [FAST_PAY_STARTER] : []),
   { title: 'Quotes pipeline', prompt: "How's my pipeline?", hint: 'Win/loss & open quotes' },
   { title: 'Fleet status', prompt: 'Fleet status', hint: 'Active, idle & maintenance' },
 ];
@@ -34,17 +39,18 @@ const WRITE_STARTERS: Starter[] = [
   {
     title: 'Add a customer',
     prompt: 'Add a new customer',
-    hint: 'Draft a record — you confirm before it saves',
+    hint: 'Drafts the record for you to check',
   },
   {
     title: 'Draft a quote',
     prompt: 'Create a new quote',
-    hint: 'Propose a quote for your confirmation',
+    hint: 'Drafts a quote for you to check',
   },
 ];
 
-const GENERIC_INTRO =
-  "I'm your TruckWys copilot. Ask me about your cash position, overdue invoices, quotes pipeline, fleet status or fast-pay capacity — I answer from your live data.";
+const GENERIC_INTRO = `I'm your TruckWys copilot. Ask me about your cash position, overdue invoices, quotes pipeline, fleet status${
+  CAPITAL_LAUNCHED ? ' or fast-pay capacity' : ''
+}. I answer from your live data.`;
 
 export function Starters({ onPick }: { onPick: (prompt: string) => void }) {
   const { colors } = useTheme();
@@ -60,13 +66,13 @@ export function Starters({ onPick }: { onPick: (prompt: string) => void }) {
   return (
     <View className="pt-6">
       <View className="mb-5 items-center">
-        <Icon name="sparkle" size={30} color={colors.accent} />
+        <Icon name="sparkle" size={30} color={colors.muted} />
       </View>
       <Txt className="mb-2.5 text-center text-heading font-semibold text-fg">
         How can I help you run the business today?
       </Txt>
       <Txt className="mb-6 text-center text-sub text-muted">
-        {firstName ? `Hi ${firstName} — ${GENERIC_INTRO}` : GENERIC_INTRO}
+        {firstName ? `Hi ${firstName}. ${GENERIC_INTRO}` : GENERIC_INTRO}
       </Txt>
 
       <Label className="mb-2.5 text-faint">Try asking</Label>
@@ -77,7 +83,8 @@ export function Starters({ onPick }: { onPick: (prompt: string) => void }) {
             onPress={() => onPick(s.prompt)}
             accessibilityRole="button"
             accessibilityLabel={s.title}
-            className="rounded-control border border-line bg-surface px-3.5 py-3 active:border-accent active:opacity-80"
+            accessibilityHint={`Puts "${s.prompt}" in the ask box`}
+            className="rounded-control border border-line bg-surface px-3.5 py-3 active:bg-surface-hover active:opacity-80"
           >
             <View className="flex-row items-center justify-between gap-2">
               <Txt className="flex-1 text-callout font-medium text-fg">{s.title}</Txt>

@@ -19,7 +19,7 @@ import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { Txt, Mono, Label, FieldLabel, INPUT_TEXT } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues, motion } from '@/theme/tokens';
+import { motion } from '@/theme/tokens';
 import { parseNum, formatNumber, formatPlain } from '@/lib/formatters';
 
 // Shared by TextField/SelectField/DateField: the error-or-warning message row,
@@ -62,14 +62,15 @@ export function KeyboardDoneBar({ nativeID }: { nativeID: string }) {
           accessibilityRole="button"
           accessibilityLabel="Dismiss keyboard"
         >
-          <Txt className="text-callout font-semibold text-accent">Done</Txt>
+          <Txt className="text-callout font-semibold text-link">Done</Txt>
         </Pressable>
       </View>
     </InputAccessoryView>
   );
 }
 
-// ── TextField: label + input + error, 2px radius, 44px min height ──────────
+// ── TextField: label + input + error, 8px radius, 44px min height ──────────
+// v3 field: `input` fill, a 3:1 control border, accent border + 3px focus ring.
 export interface TextFieldProps extends TextInputProps {
   label?: string;
   /** Renders a danger-coloured * after the label. Presentational only. */
@@ -170,12 +171,12 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   const borderStyle = useAnimatedStyle(() => ({
     borderColor: withTiming(
       error
-        ? statusHues.danger
+        ? colors.dangerDot
         : warning
-          ? statusHues.warning
+          ? colors.warningDot
           : focused
             ? colors.accent
-            : colors.line,
+            : colors.lineControl,
       { duration: motion.fast },
     ),
   }));
@@ -184,8 +185,11 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
     <View className={className}>
       <FieldLabel label={label} required={required} />
       <Animated.View
-        className="min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3"
-        style={borderStyle}
+        className="min-h-[44px] flex-row items-center gap-2 rounded-control border bg-input px-3"
+        style={[
+          borderStyle,
+          focused && !error && !warning ? { boxShadow: `0 0 0 3px ${colors.focusRing}` } : null,
+        ]}
       >
         {icon && <Icon name={icon} size={17} color={colors.faint} />}
         {prefix && <Mono className="text-body text-muted">{prefix}</Mono>}
@@ -231,7 +235,7 @@ export function SearchField({
 }) {
   const { colors } = useTheme();
   return (
-    <View className="min-h-[44px] flex-row items-center gap-2 rounded-control border border-line bg-surface px-3">
+    <View className="min-h-[44px] flex-row items-center gap-2 rounded-control border border-line-control bg-input px-3">
       <Icon name="search" size={17} color={colors.faint} />
       <TextInput
         className="flex-1 text-fg"
@@ -248,6 +252,8 @@ export function SearchField({
 }
 
 // ── SegmentedControl ───────────────────────────────────────────────────────
+// v3: a raised track; the active option is a surface chip (ringed in light,
+// a lifted fill in dark) — never accent-filled.
 export function SegmentedControl<T extends string>({
   options,
   value,
@@ -257,8 +263,9 @@ export function SegmentedControl<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  const { scheme, colors } = useTheme();
   return (
-    <View className="flex-row rounded-control border border-line bg-surface p-0.5">
+    <View className="flex-row rounded-control bg-raised p-0.5">
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -267,15 +274,18 @@ export function SegmentedControl<T extends string>({
             onPress={() => onChange(o.value)}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
-            className={`min-h-[36px] flex-1 items-center justify-center rounded-chip ${
-              active ? 'bg-accent' : ''
-            }`}
+            className="min-h-[36px] flex-1 items-center justify-center rounded-chip"
+            style={
+              active
+                ? {
+                    backgroundColor: scheme === 'dark' ? colors.lineActive : colors.surface,
+                    borderWidth: scheme === 'dark' ? 0 : 1,
+                    borderColor: colors.lineActive,
+                  }
+                : undefined
+            }
           >
-            <Mono
-              className={`text-micro uppercase tracking-wide ${
-                active ? 'text-on-accent' : 'text-muted'
-              }`}
-            >
+            <Mono className={`text-sub font-medium ${active ? 'text-fg' : 'text-muted'}`}>
               {o.label}
             </Mono>
           </Pressable>
@@ -306,9 +316,12 @@ export function Toggle({
         width: 46,
         height: 28,
         borderRadius: 100,
-        backgroundColor: value ? colors.accent : colors.lineActive,
+        backgroundColor: value ? colors.btnPrimaryBg : colors.raised,
+        borderWidth: 1,
+        borderColor: value ? colors.btnPrimaryBg : colors.lineActive,
         justifyContent: 'center',
-        padding: 3,
+        padding: 2,
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       <View
@@ -316,7 +329,7 @@ export function Toggle({
           width: 22,
           height: 22,
           borderRadius: 11,
-          backgroundColor: '#fff',
+          backgroundColor: value ? colors.btnPrimaryFg : colors.faint,
           transform: [{ translateX: value ? 18 : 0 }],
         }}
       />
@@ -343,7 +356,7 @@ export function RadioRows({
   const { colors } = useTheme();
   return (
     <View>
-      {label && <Label className="mb-1.5 text-muted">{label}</Label>}
+      {label && <Label className="mb-1.5 text-sub text-muted">{label}</Label>}
       {options.length === 0 ? (
         <Mono className="text-micro text-warning">{emptyText ?? 'Nothing available'}</Mono>
       ) : (

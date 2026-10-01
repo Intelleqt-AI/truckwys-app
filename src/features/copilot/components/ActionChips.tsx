@@ -33,9 +33,9 @@ export function ActionChips({ actions }: { actions: NavAction[] }) {
               a.target!.params,
             )
           }
-          className="rounded-chip border border-accent px-2.5 py-1.5 active:opacity-60"
+          className="rounded-chip border border-line-active px-2.5 py-1.5 active:opacity-60"
         >
-          <Mono className="text-micro tracking-wide uppercase text-accent">{a.label} →</Mono>
+          <Mono className="text-caption font-medium text-link">{a.label} →</Mono>
         </Pressable>
       ))}
     </View>

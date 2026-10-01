@@ -1,9 +1,8 @@
-import { View, Pressable, ActivityIndicator } from 'react-native';
-import { Txt, Mono, Label, Icon } from '@/components/ui';
+import { View } from 'react-native';
+import { Txt, Mono, Label, Icon, Badge, Button } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
 import type { Proposal } from '../types';
-import { OPERATION_TONE, STATUS_CHIP, toneHue } from './proposalTone';
+import { OPERATION_TONE, STATUS_CHIP, toneText } from './proposalTone';
 
 // A confirm-first write the agent has drafted.
 //
@@ -26,7 +25,9 @@ export function ProposalCard({
 }) {
   const { colors } = useTheme();
   const pending = proposal.status === 'pending';
-  const toneColor = toneHue(OPERATION_TONE[proposal.operation] ?? 'info');
+  const operationTone = OPERATION_TONE[proposal.operation] ?? 'info';
+  const operationLabel =
+    proposal.operation.charAt(0).toUpperCase() + proposal.operation.slice(1).toLowerCase();
 
   return (
     <View
@@ -34,21 +35,14 @@ export function ProposalCard({
       style={{ borderColor: pending ? colors.accent : colors.line }}
     >
       <View className="flex-row items-center gap-2 px-3.5 pt-3">
-        <View
-          className="rounded-chip px-1.5 py-0.5"
-          style={{ backgroundColor: toneColor + '22', borderWidth: 1, borderColor: toneColor }}
-        >
-          <Mono className="text-micro tracking-wide uppercase" style={{ color: toneColor }}>
-            {proposal.operation}
-          </Mono>
-        </View>
+        <Badge label={operationLabel} tone={operationTone} dot />
         <Txt className="flex-1 text-callout font-semibold text-fg">{proposal.label}</Txt>
       </View>
 
       {!!proposal.warning && (
         <View className="mx-3.5 mt-3 flex-row gap-2 rounded-chip bg-surface-hover p-2.5">
-          <Icon name="alert" size={14} color={statusHues.warning} />
-          <Txt className="flex-1 text-caption" style={{ color: statusHues.warning }}>
+          <Icon name="alert" size={14} color={colors.warningDot} />
+          <Txt className="flex-1 text-caption" style={{ color: colors.warning }}>
             {proposal.warning}
           </Txt>
         </View>
@@ -89,32 +83,21 @@ export function ProposalCard({
 
       <View className="border-t border-line px-3.5 py-2.5">
         {pending ? (
-          <View className="flex-row gap-2.5" style={{ opacity: busy ? 0.6 : 1 }}>
-            <Pressable
-              disabled={busy}
+          <View className="flex-row gap-2.5">
+            <Button
+              label={proposal.confirmText}
+              icon="check"
+              loading={busy}
               onPress={onConfirm}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !!busy }}
-              className="flex-1 flex-row items-center justify-center gap-1.5 rounded-control bg-accent py-2.5 active:opacity-70"
-            >
-              {busy ? (
-                <ActivityIndicator size="small" color={colors.onAccent} />
-              ) : (
-                <Icon name="check" size={15} color={colors.onAccent} />
-              )}
-              <Mono className="text-micro tracking-wide uppercase text-on-accent">
-                {proposal.confirmText}
-              </Mono>
-            </Pressable>
-            <Pressable
+              className="flex-1"
+            />
+            <Button
+              label="Dismiss"
+              variant="secondary"
               disabled={busy}
               onPress={onDismiss}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !!busy }}
-              className="flex-1 items-center justify-center rounded-control border border-line py-2.5 active:opacity-70"
-            >
-              <Mono className="text-micro tracking-wide uppercase text-muted">Dismiss</Mono>
-            </Pressable>
+              className="flex-1"
+            />
           </View>
         ) : (
           <Settled proposal={proposal} />
@@ -126,17 +109,18 @@ export function ProposalCard({
 
 /** The inert state chip. `failed` also shows the server's reason. */
 function Settled({ proposal }: { proposal: Proposal }) {
+  const { colors } = useTheme();
   const chip = STATUS_CHIP[proposal.status] ?? { text: proposal.status, tone: 'neutral' as const };
   // SEND is "Sent", everything else is "Saved" — matching the web wording.
   const text =
     proposal.status === 'executed' && proposal.operation === 'SEND' ? '✓ Sent' : chip.text;
   return (
     <View>
-      <Mono className="text-micro tracking-wide uppercase" style={{ color: toneHue(chip.tone) }}>
+      <Mono className="text-caption font-medium" style={{ color: toneText(chip.tone, colors) }}>
         {text}
       </Mono>
       {!!proposal.result?.error && (
-        <Txt className="mt-1 text-caption" style={{ color: statusHues.danger }}>
+        <Txt className="mt-1 text-caption" style={{ color: colors.danger }}>
           {proposal.result.error}
         </Txt>
       )}

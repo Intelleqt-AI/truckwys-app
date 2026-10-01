@@ -3,6 +3,7 @@ import { View, Modal, Pressable } from 'react-native';
 import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Txt, Mono, Button, TextField, DateField, SelectField, type Option } from '@/components/ui';
 import { formatCurrency, formatPlain, parseNum, round2 } from '@/lib/formatters';
+import { localDateISO } from '@/lib/dates';
 
 // Records a payment against an invoice — the mobile counterpart of the web
 // invoice page's inline payment form.
@@ -26,12 +27,7 @@ const PAYMENT_METHODS: Option[] = [
   { label: 'Cheque', value: 'CHEQUE' },
 ];
 
-const todayISO = () => {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-};
+const todayISO = () => localDateISO();
 
 export interface PaymentDraft {
   amount: number;
@@ -75,11 +71,11 @@ export function RecordPaymentSheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
-      <Pressable onPress={onCancel} className="flex-1 items-center justify-center bg-black/65 px-6">
+      <Pressable onPress={onCancel} className="flex-1 items-center justify-center bg-backdrop px-6">
         <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
           <Pressable
             onPress={(e) => e.stopPropagation()}
-            className="rounded-panel border border-line bg-surface p-5"
+            className="rounded-panel border border-line bg-elevated p-5"
           >
             <Txt className="text-heading font-semibold text-fg">Record payment</Txt>
             <Txt className="mb-4 mt-1.5 text-sub text-muted">
@@ -108,7 +104,7 @@ export function RecordPaymentSheet({
                     onPress={() => setAmount(formatPlain(balance, 2))}
                     className="mt-1.5 self-start"
                   >
-                    <Mono className="text-caption text-accent">
+                    <Mono className="text-caption text-link">
                       Full — {formatCurrency(balance)}
                     </Mono>
                   </Pressable>
@@ -150,7 +146,7 @@ export function RecordPaymentSheet({
               </View>
               <View className="flex-1">
                 <Button
-                  label={busy ? 'RECORDING…' : 'RECORD'}
+                  label={busy ? 'Recording…' : 'Record'}
                   loading={busy}
                   disabled={!canSubmit}
                   onPress={() =>

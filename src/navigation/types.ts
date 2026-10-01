@@ -8,7 +8,7 @@ type Id = number | string;
 export type BookingsTab = 'quotes' | 'orders' | 'history';
 export type FleetTab = 'vehicles' | 'drivers';
 export type FinanceTab = 'invoices' | 'expenses' | 'reports';
-export type InsightsTab = 'briefing' | 'cashflow' | 'lanes';
+export type InsightsTab = 'findings' | 'margin' | 'cashflow' | 'lanes';
 
 export type TabParamList = {
   Home: undefined;

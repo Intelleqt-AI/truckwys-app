@@ -1,6 +1,6 @@
 import { View, Modal, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Txt, Mono, Label, Icon, EmptyState } from '@/components/ui';
+import { Txt, Mono, Label, Icon, EmptyState, Button } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { ConversationSummary } from '../types';
 
@@ -45,18 +45,18 @@ export function ConversationSheet({
   const insets = useSafeAreaInsets();
 
   const confirmDelete = (c: ConversationSummary) =>
-    Alert.alert('Delete conversation?', `"${c.title}" will be removed for good.`, [
+    Alert.alert('Delete this conversation?', `"${c.title}" and its messages will be removed. This can't be undone.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => onDelete(c.id) },
     ]);
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable onPress={onClose} className="flex-1 justify-end bg-black/60">
+      <Pressable onPress={onClose} className="flex-1 justify-end bg-backdrop">
         <Pressable
           onPress={(e) => e.stopPropagation()}
-          className="max-h-[76%] rounded-t-panel border-t border-line bg-bg-deep"
-          style={{ paddingBottom: insets.bottom + 8 }}
+          className="max-h-[76%] rounded-t-panel border-t border-line bg-elevated"
+          style={{ paddingBottom: insets.bottom + 8, boxShadow: colors.shadowPop }}
         >
           <View className="flex-row items-center justify-between border-b border-line px-4 py-3">
             <Txt className="text-heading font-semibold text-fg">Conversations</Txt>
@@ -65,17 +65,17 @@ export function ConversationSheet({
             </Pressable>
           </View>
 
-          <Pressable
-            onPress={() => {
-              onNewChat();
-              onClose();
-            }}
-            accessibilityRole="button"
-            className="m-4 flex-row items-center justify-center gap-2 rounded-control bg-accent py-3 active:opacity-70"
-          >
-            <Icon name="plus" size={16} color={colors.onAccent} />
-            <Mono className="text-micro tracking-wide uppercase text-on-accent">New chat</Mono>
-          </Pressable>
+          <View className="m-4">
+            <Button
+              label="New chat"
+              icon="plus"
+              fullWidth
+              onPress={() => {
+                onNewChat();
+                onClose();
+              }}
+            />
+          </View>
 
           {loading && !conversations.length ? (
             <View className="items-center py-10">
@@ -103,11 +103,8 @@ export function ConversationSheet({
                     }}
                     accessibilityRole="button"
                     accessibilityState={{ selected: active }}
-                    className="flex-row items-center gap-3 rounded-card border bg-surface px-3.5 py-3 active:opacity-70"
-                    style={{
-                      borderColor: active ? colors.accent : colors.line,
-                      borderLeftWidth: active ? 2 : 1,
-                    }}
+                    className="flex-row items-center gap-3 rounded-card border border-line px-3.5 py-3 active:opacity-70"
+                    style={{ backgroundColor: active ? colors.accentDim : colors.surface }}
                   >
                     <View className="flex-1">
                       <Txt numberOfLines={1} className="text-callout text-fg">

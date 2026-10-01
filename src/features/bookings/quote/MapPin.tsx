@@ -101,7 +101,7 @@ export function NumberedMapPin({
           x="12"
           y="12.7"
           fontSize="8.5"
-          fontWeight="700"
+          fontWeight="600"
           fill={color}
           textAnchor="middle"
         >

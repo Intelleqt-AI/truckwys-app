@@ -11,16 +11,23 @@
 // Hermes' ICU is partial, though: `notation: 'compact'` is unreliable, which is
 // why formatCurrencyCompact below is hand-rolled.
 
+// A true minus sign (U+2212), as the web and the backend's emails and PDFs use
+// ("−R 4 200"), instead of the hyphen Intl emits. parseNum below reads both.
+const MINUS = '−';
+const typographicMinus = (formatted: string) => formatted.replace(/^-/, MINUS);
+
 export const formatCurrency = (
   amount: number | null | undefined,
   options: Intl.NumberFormatOptions = {},
 ): string => {
   const n = Number(amount);
-  return new Intl.NumberFormat('en-ZA', {
-    style: 'currency',
-    currency: 'ZAR',
-    ...options,
-  }).format(amount == null || isNaN(n) ? 0 : n);
+  return typographicMinus(
+    new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency: 'ZAR',
+      ...options,
+    }).format(amount == null || isNaN(n) ? 0 : n),
+  );
 };
 
 export const formatNumber = (
@@ -28,7 +35,7 @@ export const formatNumber = (
   options: Intl.NumberFormatOptions = {},
 ): string => {
   if (value == null || isNaN(Number(value))) return '0';
-  return new Intl.NumberFormat('en-ZA', options).format(Number(value));
+  return typographicMinus(new Intl.NumberFormat('en-ZA', options).format(Number(value)));
 };
 
 /** Takes a fraction (0..1). For a 0..100 value use formatPercent instead. */
@@ -69,7 +76,8 @@ export const parseNum = (input: string | number | null | undefined): number | nu
 
   // Drop every space-like grouping char Intl may have emitted, plus the rand
   // symbol / currency code if the value was round-tripped from a display string.
-  let s = input.replace(/\s/g, '').replace(/ZAR|R/gi, '');
+  // U+2212 is how the app itself writes a negative amount.
+  let s = input.replace(/\s/g, '').replace(/ZAR|R/gi, '').replace(/−/g, '-');
   if (!s) return null;
 
   const negative = s.startsWith('-');
@@ -145,7 +153,14 @@ export const formatDate = (
   date: string | Date,
   options: Intl.DateTimeFormatOptions = {},
 ): string => {
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  // A bare YYYY-MM-DD is a calendar date, not a UTC instant: new Date() would
+  // read it as UTC midnight and show the previous day on a device west of UTC.
+  const dateOnly = typeof date === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) : null;
+  const dateObj = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : typeof date === 'string'
+      ? new Date(date)
+      : date;
   if (isNaN(dateObj.getTime())) return '—';
   return new Intl.DateTimeFormat('en-GB', {
     day: 'numeric',
@@ -224,7 +239,7 @@ export const formatCompactNumber = (value: number): string => {
 export const formatCurrencyCompact = (amount: number | null | undefined): string => {
   const n = Number(amount);
   if (amount == null || isNaN(n)) return 'R 0';
-  const sign = n < 0 ? '-' : '';
+  const sign = n < 0 ? MINUS : '';
   const abs = Math.abs(n);
   if (abs >= 1_000_000) {
     const m = formatNumber(abs / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 });

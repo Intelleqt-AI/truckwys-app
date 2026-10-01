@@ -4,7 +4,6 @@ import { Mono } from '@/components/ui';
 import { RouteMap } from '@/components/RouteMap';
 import { getMapLibreLib, getMapsLib, IS_EXPO_GO, MAPTILER_KEY } from '@/lib/mapNative';
 import { decimate, regionFor, toLatLng, type GeoPoint } from '@/lib/routeGeometry';
-import { status as statusHues } from '@/theme/tokens';
 import { MapPin, NumberedMapPin } from './MapPin';
 import type { PickTarget } from './types';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -102,12 +101,12 @@ function MapCanvasImpl({
           className="bg-bg-deep/85 absolute self-center rounded-pill border border-line px-2.5 py-1"
           style={{ bottom: bottomInset + 28 }}
         >
-          <Mono className="text-nano text-faint">
+          <Mono className="text-micro text-faint">
             {IS_EXPO_GO
-              ? 'STATIC MAP · PIN PICKING NEEDS A DEV BUILD'
+              ? 'Static map · pin picking needs a dev build'
               : Platform.OS === 'android' && !MAPTILER_KEY
-                ? 'STATIC MAP · ANDROID NEEDS A MAPTILER KEY'
-                : 'STATIC MAP'}
+                ? 'Static map · Android needs a MapTiler key'
+                : 'Static map'}
           </Mono>
         </View>
       </View>
@@ -210,6 +209,7 @@ function StopMarker({
   index: number;
 }) {
   const tracking = useSettledTracking(point.lat, point.lon);
+  const { colors } = useTheme();
   return (
     <Marker
       coordinate={toLatLng(point)}
@@ -217,7 +217,7 @@ function StopMarker({
       centerOffset={pinCenterOffset(30)}
       tracksViewChanges={tracking}
     >
-      <NumberedMapPin index={index} color={statusHues.info} size={30} />
+      <NumberedMapPin index={index} color={colors.infoDot} size={30} />
     </Marker>
   );
 }
@@ -253,6 +253,9 @@ function InteractiveMap({
 }) {
   const MapView = maps.default;
   const { Marker, Polyline } = maps;
+  const { colors, scheme } = useTheme();
+  // Outline under the route line so it holds against any tile colour.
+  const casing = scheme === 'dark' ? '#0B0C0E' : '#FFFFFF';
   const ref = useRef<InstanceType<typeof MapView> | null>(null);
   // Hooks can't be conditional on pickup/delivery being set, so these run
   // every render regardless of whether the marker they gate is drawn.
@@ -333,6 +336,9 @@ function InteractiveMap({
         onRegionChangeComplete={handleRegionChangeComplete}
       >
         {route.length > 1 && (
+          <Polyline coordinates={latLngs} strokeWidth={7} strokeColor={casing} />
+        )}
+        {route.length > 1 && (
           <Polyline coordinates={latLngs} strokeWidth={4} strokeColor={accent} />
         )}
         {/* Only the pin for the field currently being picked is hidden — so it
@@ -348,7 +354,7 @@ function InteractiveMap({
             centerOffset={pinCenterOffset(34)}
             tracksViewChanges={pickupTracking}
           >
-            <MapPin color={statusHues.success} size={34} />
+            <MapPin color={colors.successDot} size={34} />
           </Marker>
         )}
         {delivery && !hideDelivery && (
@@ -358,7 +364,7 @@ function InteractiveMap({
             centerOffset={pinCenterOffset(34)}
             tracksViewChanges={deliveryTracking}
           >
-            <MapPin color={statusHues.danger} size={34} />
+            <MapPin color={colors.dangerDot} size={34} />
           </Marker>
         )}
         {(stops ?? [])
@@ -408,6 +414,9 @@ function InteractiveMapLibre({
   topInset: number;
 }) {
   const { Map: MapLibreView, Camera, ViewAnnotation, GeoJSONSource, Layer } = maplibre;
+  const { colors, scheme } = useTheme();
+  // Outline under the route line so it holds against any tile colour.
+  const casing = scheme === 'dark' ? '#0B0C0E' : '#FFFFFF';
   const cameraRef = useRef<CameraRef | null>(null);
   const mapViewRef = useRef<MapLibreViewRef | null>(null);
   // The point being placed right now, if any — only its own pin is hidden
@@ -487,6 +496,12 @@ function InteractiveMapLibre({
           <GeoJSONSource id="route" data={routeGeoJSON}>
             <Layer
               type="line"
+              id="route-casing"
+              layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+              paint={{ 'line-color': casing, 'line-width': 7 }}
+            />
+            <Layer
+              type="line"
               id="route-line"
               layout={{ 'line-cap': 'round', 'line-join': 'round' }}
               paint={{ 'line-color': accent, 'line-width': 4 }}
@@ -508,7 +523,7 @@ function InteractiveMapLibre({
             anchor="bottom"
             offset={[0, pinBottomGap(34)]}
           >
-            <MapPin color={statusHues.success} size={34} />
+            <MapPin color={colors.successDot} size={34} />
           </ViewAnnotation>
         )}
         {delivery && !hideDelivery && (
@@ -518,7 +533,7 @@ function InteractiveMapLibre({
             anchor="bottom"
             offset={[0, pinBottomGap(34)]}
           >
-            <MapPin color={statusHues.danger} size={34} />
+            <MapPin color={colors.dangerDot} size={34} />
           </ViewAnnotation>
         )}
         {(stops ?? [])
@@ -531,7 +546,7 @@ function InteractiveMapLibre({
               anchor="bottom"
               offset={[0, pinBottomGap(30)]}
             >
-              <NumberedMapPin index={s.index} color={statusHues.info} size={30} />
+              <NumberedMapPin index={s.index} color={colors.infoDot} size={30} />
             </ViewAnnotation>
           ))}
       </MapLibreView>

@@ -29,7 +29,7 @@ export function Skeleton({
   const style = useAnimatedStyle(() => ({ opacity: o.value }));
   return (
     <Animated.View
-      className={`bg-surface-hover ${className}`}
+      className={`bg-raised ${className}`}
       style={[{ width: width as number, height, borderRadius: radius }, style]}
     />
   );
@@ -144,7 +144,7 @@ export function WorkingOverlay({ visible, title }: { visible: boolean; title: st
   if (!visible) return null;
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent>
-      <View className="flex-1 items-center justify-center bg-black/70 px-10">
+      <View className="flex-1 items-center justify-center bg-backdrop px-10">
         <View className="w-full max-w-[300px] items-center rounded-panel border border-line bg-surface px-6 py-8">
           <BreathingLogo />
           <Txt className="mt-5 text-center text-callout font-medium text-fg">{title}</Txt>

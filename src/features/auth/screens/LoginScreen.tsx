@@ -165,7 +165,7 @@ export function LoginScreen({ navigation }: Props) {
             hitSlop={10}
             className="mb-1 mt-2.5 self-end"
           >
-            <Txt className="text-sub text-accent">Forgot password?</Txt>
+            <Txt className="text-sub text-link">Forgot password?</Txt>
           </Pressable>
         </Animated.View>
 
@@ -223,12 +223,12 @@ export function LoginScreen({ navigation }: Props) {
               accessibilityRole="link"
             >
               <Mono
-                className="text-sub text-accent"
+                className="text-sub text-link"
                 style={{ textDecorationLine: 'underline' }}
               >
                 truckwys.com
               </Mono>
-              <Icon name="externalLink" size={12} color={colors.accent} strokeWidth={2} />
+              <Icon name="externalLink" size={12} color={colors.link} strokeWidth={2} />
             </Pressable>
             <Txt className="text-sub text-muted">, then sign in here.</Txt>
           </View>

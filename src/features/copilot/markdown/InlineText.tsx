@@ -1,5 +1,5 @@
 import { Text, Linking } from 'react-native';
-import { MONO_FONT } from '@/theme/tokens';
+import { CODE_FONT } from '@/theme/tokens';
 import { useTheme } from '@/theme/ThemeProvider';
 import { resolveNotificationLink } from '@/lib/notificationLink';
 import type { Inline } from './types';
@@ -50,8 +50,8 @@ export function renderInline(
             // on a nested Text gives uneven baselines and clipping on Android.
             // Thin spaces stand in for the padding a nested Text can't have.
             style={{
-              fontFamily: MONO_FONT,
-              color: colors.accent,
+              fontFamily: CODE_FONT,
+              color: colors.fg,
               backgroundColor: colors.surfaceHover,
             }}
           >
@@ -63,7 +63,7 @@ export function renderInline(
         return (
           <Text
             key={key}
-            style={{ color: colors.accent, textDecorationLine: 'underline' }}
+            style={{ color: colors.link, textDecorationLine: 'underline' }}
             suppressHighlighting
             accessibilityRole="link"
             onPress={() => openHref(n.href, onNavigate)}

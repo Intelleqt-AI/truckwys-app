@@ -19,6 +19,7 @@ import {
   Txt,
   Mono,
   Label,
+  Banner,
 } from '@/components/ui';
 import { ErrorState } from '@/components/feedback';
 import { RouteMap } from '@/components/RouteMap';
@@ -30,8 +31,9 @@ import { num, str, pick, asArray } from '@/lib/api/list';
 import { mediaUrl } from '@/lib/api/client';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
+import { staleWork, staleLabel, staleAction } from '@/lib/staleWork';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues, radius } from '@/theme/tokens';
+import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -62,6 +64,25 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const distance = num(pick(l, ['distance']));
   const total = num(pick(l, ['total_amount']));
   const ratePerKm = distance ? rate / distance : 0;
+  const fuelSurcharge = num(pick(l, ['fuel_surcharge']));
+  const additional = num(pick(l, ['additional_charges', 'additional']));
+  // The lines shown must add up to the total. When the stored total carries
+  // charges that were never broken down on this order, say so in one line
+  // instead of leaving a silent gap.
+  const notItemised = Math.round((total - (rate + fuelSurcharge + additional)) * 100) / 100;
+  // What fuel was expected to cost (the quote's fuel line) against what was
+  // spent (approved FUEL expenses logged on this order's trips). Null when
+  // there is no such figure; the block hides itself when both are null.
+  const fuelEst = pick(l, ['fuel_cost_estimated']) != null ? num(pick(l, ['fuel_cost_estimated'])) : null;
+  const fuelAct = pick(l, ['fuel_cost_actual']) != null ? num(pick(l, ['fuel_cost_actual'])) : null;
+  const fuelDiff = fuelEst != null && fuelAct != null ? Math.round((fuelAct - fuelEst) * 100) / 100 : null;
+  // Open too long, or past its delivery date: not current work.
+  const stale = staleWork({
+    status,
+    delivery_date: str(pick(l, ['delivery_date'])) || null,
+    pickup_date: str(pick(l, ['pickup_date'])) || null,
+    created_at: str(pick(l, ['created_at'])) || null,
+  });
   const invoiced = status === 'INVOICED' || !!pick(l, ['invoice_id', 'invoice']);
   const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
   const podDocumentUrl = str(pick(l, ['pod_document']));
@@ -153,7 +174,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   // is to leave every stage muted (idx is -1) and cap the list with its own
   // terminal row, rather than guessing which stage it was cancelled from.
   if (status === 'CANCELLED') {
-    timelineSteps.push({ label: 'Cancelled', done: true, current: false, color: statusHues.danger });
+    timelineSteps.push({ label: 'Cancelled', done: true, current: false, color: colors.dangerDot });
   }
 
   const refresh = () => invalidateFor(qc, 'load');
@@ -303,6 +324,18 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         </View>
       </Group>
 
+      {/* Stale work is never shown as current: say how long and what to do. */}
+      {stale && (
+        <View className="mb-5">
+          <Banner
+            tone="warning"
+            message={`Still ${STATUS_LABEL(status).toLowerCase()}, ${
+              stale.overdue ? `${staleLabel(stale).days} past its delivery date` : `open ${staleLabel(stale).text}`
+            }. ${staleAction({ status })}.`}
+          />
+        </View>
+      )}
+
       {/* Update status — single dropdown (current + valid next states) */}
       {transitions.length > 0 && (
         <View className="mb-5">
@@ -354,11 +387,11 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                 marginVertical: 4,
               }}
             />
-            <Icon name="pin" size={16} color="#22C55E" />
+            <Icon name="pin" size={16} color={colors.successDot} />
           </View>
           <View className="flex-1">
-            <Label className="text-faint" style={{ fontSize: 9 }}>
-              Pickup · {formatDate(str(pick(l, ['pickup_date'])) || new Date().toISOString())}
+            <Label className="text-faint">
+              Pickup · {formatDate(str(pick(l, ['pickup_date'])))}
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg">
               {str(pick(l, ['pickup_location', 'pickup_city']), '—')}
@@ -369,7 +402,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
             </Txt>
             {stopsRaw.length > 0 && (
               <View className="my-2">
-                <Label className="text-faint" style={{ fontSize: 9 }}>
+                <Label className="text-faint">
                   Stops ({stopsRaw.length})
                 </Label>
                 {stopsRaw.map((s, i) => (
@@ -380,8 +413,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
               </View>
             )}
             <Mono className="my-3 text-caption text-faint">{str(pick(l, ['cargo']), 'General cargo')}</Mono>
-            <Label className="text-faint" style={{ fontSize: 9 }}>
-              Delivery · {formatDate(str(pick(l, ['delivery_date'])) || new Date().toISOString())}
+            <Label className="text-faint">
+              Delivery · {formatDate(str(pick(l, ['delivery_date'])))}
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg">
               {str(pick(l, ['delivery_location', 'delivery_city']), '—')}
@@ -407,14 +440,55 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Financials */}
       <Group label="Financials">
-        <DetailRow label="Base rate" value={formatCurrency(rate)} />
-        <DetailRow label="Fuel surcharge" value={formatCurrency(num(pick(l, ['fuel_surcharge'])))} />
-        <DetailRow label="Additional" value={formatCurrency(num(pick(l, ['additional_charges', 'additional'])))} />
+        {/* The per-km figure is a rate, not a summand, so it sits under Base
+            rate as a note rather than among the lines that add up. */}
+        <DetailRow
+          label="Base rate"
+          hint={ratePerKm > 0 ? `${formatCurrency(ratePerKm)}/km` : undefined}
+          value={formatCurrency(rate)}
+        />
+        <DetailRow label="Fuel surcharge" value={formatCurrency(fuelSurcharge)} />
+        <DetailRow label="Additional" value={formatCurrency(additional)} />
+        {Math.abs(notItemised) > 0.5 && (
+          <DetailRow
+            label="Not itemised"
+            hint={
+              str(pick(l, ['quote_number']))
+                ? `The total includes charges not broken down here. Quote ${str(pick(l, ['quote_number']))} has the full breakdown.`
+                : 'The total includes charges that were not entered as separate lines.'
+            }
+            value={formatCurrency(notItemised)}
+          />
+        )}
         <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
           <Txt className="text-callout font-semibold text-fg">Total</Txt>
           <Mono className="text-heading font-semibold text-accent">{formatCurrency(total)}</Mono>
         </View>
       </Group>
+
+      {(fuelEst != null || fuelAct != null) && (
+        <Group label="Fuel cost">
+          <DetailRow
+            label="Estimated"
+            hint="The fuel line of the quote this order came from"
+            value={fuelEst != null ? formatCurrency(fuelEst) : 'Not recorded'}
+          />
+          <DetailRow
+            label="Actual"
+            hint="Approved fuel expenses logged on this order's trips"
+            value={fuelAct != null ? formatCurrency(fuelAct) : 'Not recorded'}
+            last={fuelDiff == null || Math.abs(fuelDiff) < 0.5}
+          />
+          {fuelDiff != null && Math.abs(fuelDiff) >= 0.5 && (
+            <DetailRow
+              label="Difference"
+              value={fuelDiff > 0 ? `${formatCurrency(fuelDiff)} over` : `${formatCurrency(-fuelDiff)} under`}
+              valueColor={fuelDiff > 0 ? colors.danger : undefined}
+              last
+            />
+          )}
+        </Group>
+      )}
 
       {/* Assignment */}
       <Group
@@ -451,7 +525,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowDeliverModal(false)}>
           <Pressable
             onPress={() => setShowDeliverModal(false)}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}
@@ -495,7 +569,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowPodPreview(false)}>
           <Pressable
             onPress={() => setShowPodPreview(false)}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <Pressable
               onPress={(e) => e.stopPropagation()}

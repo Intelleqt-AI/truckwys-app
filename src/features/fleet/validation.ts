@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { parseNum, decimalMax } from '@/lib/formatters';
+import { localDateISO } from '@/lib/dates';
 
 // Fleet's zod schemas — the vehicle and driver forms are the only Fleet
 // screens; both moved off imperative `submit()`-time checks
@@ -19,7 +20,7 @@ import { parseNum, decimalMax } from '@/lib/formatters';
 // is `NaN` for the comma-decimal / grouped-thousands input a South African
 // keyboard produces (see `src/lib/formatters.ts`).
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => localDateISO();
 
 // ── Vehicle ──────────────────────────────────────────────────────────────
 

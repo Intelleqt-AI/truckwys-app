@@ -1,149 +1,199 @@
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { focusManager, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
-import { asArray } from '@/lib/api/list';
-import {
-  normalizeFinance,
-  normalizeQuote,
-  normalizeLoad,
-  type FinanceSummary,
-  type QuoteLite,
-  type LoadLite,
-} from '@/types/domain';
+import type { AllPages } from '@/lib/api/fetchAllPages';
+import type { Customer, Expense, Invoice, Load, Payment, Quote, Vehicle } from '@/lib/ledger';
+import { useLedger, type Ledger, type SourceName } from '@/lib/useLedger';
+import { normalizeLoad, normalizeQuote } from '@/types/domain';
+import { computeFunnel, computeHomeMoney, summariseFleet, summariseLoads } from './derive';
+import { parseSignals, type HomeSignal } from './signals';
 
-// The Overview dashboard used to be one query fanning out to all six of these
-// endpoints via Promise.all, with HomeScreen gated behind a single isLoading —
-// so the screen stayed on its skeleton until the *slowest* of the six
-// returned, and a sluggish `advances/` blanked the revenue hero exactly as
-// hard as a sluggish `dashboard/finance/` would. Split into three sibling
-// queries (still all keyed under 'overview', so the prefix-based invalidation
-// in queryInvalidation.ts needs no change) so HomeScreen can paint each
-// section as soon as its own data lands.
-const DAY = 24 * 60 * 60 * 1000;
+// Home's data. Money, loads, quotes and vehicles are the full ledgers
+// (lib/useLedger.ts), the same lists and rules the Insights and Bookings screens
+// use, so Home agrees with them. `dashboard/finance/` is no longer read: it
+// missed paid invoices, so its revenue disagreed with the payments ledger.
+//
+// Each section reads only the lists it needs and fails on its own: a failure is
+// an error with a Retry, never a zero. A failed background refresh keeps the
+// last good figures on screen (see useHomeLedger) and the stale-data notice says so.
 
-// Sentinel for a sub-request that failed, so we can tell "the server said
-// zero" apart from "we never got an answer" within a query that combines more
-// than one endpoint.
-const FAILED = Symbol('failed');
+// ── Ledgers ─────────────────────────────────────────────────────────────────
+type HomeLedger = ReturnType<typeof useLedger> & {
+  /** The latest refresh failed; `data` is the last good load. */
+  refreshFailed: boolean;
+};
 
-// ── Finance — the hero + bento pair ─────────────────────────────────────────
-export interface OverviewFinance {
-  finance: FinanceSummary;
+/**
+ * `useLedger`, except that a failed background refresh does not throw away the
+ * figures already loaded: lib/useLedger.ts reports any errored list as an error
+ * with no data, so a dropped connection would turn good numbers into "Couldn't
+ * load". Here the last good rows (still in the query cache) stay on screen and
+ * `refreshFailed` is set; only a load with nothing to show is an error.
+ */
+function useHomeLedger(need: SourceName[]): HomeLedger {
+  const qc = useQueryClient();
+  const ledger = useLedger(need);
+  if (ledger.data || !ledger.error) return { ...ledger, refreshFailed: false };
+
+  const pages = need.map((n) => qc.getQueryData<AllPages<unknown>>([`ledger-${n}`]));
+  if (need.length === 0 || pages.some((p) => !p)) return { ...ledger, refreshFailed: false };
+
+  const rows = <T,>(n: SourceName) => (qc.getQueryData<AllPages<T>>([`ledger-${n}`])?.rows ?? []) as T[];
+  const partial = need.flatMap((n, i) => {
+    const p = pages[i];
+    return p && !p.complete ? [`first ${p.rows.length} of ${p.count} ${n}`] : [];
+  });
+  const data: Ledger = {
+    invoices: rows<Invoice>('invoices'),
+    payments: rows<Payment>('payments'),
+    expenses: rows<Expense>('expenses'),
+    loads: rows<Load>('loads'),
+    quotes: rows<Quote>('quotes'),
+    customers: rows<Customer>('customers'),
+    vehicles: rows<Vehicle>('vehicles'),
+    partial,
+    loadedAt: Math.min(...need.map((n) => qc.getQueryState([`ledger-${n}`])?.dataUpdatedAt || Date.now())),
+  };
+  return { ...ledger, data, error: false, refreshFailed: true };
 }
 
-async function loadFinance(): Promise<OverviewFinance> {
-  const finance = await fetchData('dashboard/finance/');
-  return { finance: normalizeFinance(finance as Record<string, unknown> | null) };
+/** Owed to you, revenue received, net margin and the monthly chart: invoices, payments and expenses. */
+export function useHomeMoney() {
+  const l = useHomeLedger(['invoices', 'payments', 'expenses']);
+  const invoices = l.data?.invoices;
+  const payments = l.data?.payments;
+  const expenses = l.data?.expenses;
+  const money = useMemo(
+    () => (invoices && payments && expenses ? computeHomeMoney({ invoices, payments, expenses }) : null),
+    [invoices, payments, expenses],
+  );
+  return { ...l, money, partial: l.data?.partial ?? [] };
 }
 
-export function useOverviewFinance() {
-  return useQuery({
-    queryKey: ['overview', 'finance'],
-    queryFn: loadFinance,
-    // A failed background refresh must never blank a hero that was already
-    // showing good numbers.
-    placeholderData: (prev) => prev,
+/** Active loads (open and not left open), the 28-day grid, and the latest bookings. */
+export function useHomeLoads() {
+  const l = useHomeLedger(['loads']);
+  const loads = l.data?.loads;
+  const summary = useMemo(() => (loads ? summariseLoads(loads) : null), [loads]);
+  const recent = useMemo(
+    () => (loads ? loads.slice(0, 4).map((x) => normalizeLoad(x as unknown as Record<string, unknown>)) : []),
+    [loads],
+  );
+  return { ...l, loads: loads ?? null, summary, recent };
+}
+
+/** The quote funnel and latest quotes. Needs the loads too: stale in-transit loads are not "on the road". */
+export function useHomeQuotes() {
+  const l = useHomeLedger(['quotes', 'loads']);
+  const quotes = l.data?.quotes;
+  const loads = l.data?.loads;
+  const funnel = useMemo(() => (quotes && loads ? computeFunnel(quotes, loads) : null), [quotes, loads]);
+  const recent = useMemo(
+    () => (quotes ? quotes.slice(0, 4).map((q) => normalizeQuote(q as unknown as Record<string, unknown>)) : []),
+    [quotes],
+  );
+  return { ...l, funnel, recent, total: quotes?.length ?? 0 };
+}
+
+/** Fleet ready and the idle-trucks row: every vehicle, and every load for who is on a job. */
+export function useHomeFleet() {
+  const l = useHomeLedger(['vehicles', 'loads']);
+  const vehicles = l.data?.vehicles;
+  const summary = useMemo(() => (vehicles ? summariseFleet(vehicles) : null), [vehicles]);
+  return { ...l, vehicles: vehicles ?? null, summary };
+}
+
+// ── Signals ─────────────────────────────────────────────────────────────────
+/**
+ * The backend's attention signals. `dashboard/signals/` first, the older
+ * `dashboard/insights/` as a fallback (as features/more/api.ts#useInsights does).
+ * If both fail the error is thrown, so the block says "Couldn't load" instead of
+ * "Nothing needs you right now". Keyed under 'overview' so every event that
+ * refreshes Home refreshes this too (lib/queryInvalidation.ts).
+ */
+export function useHomeSignals() {
+  return useQuery<HomeSignal[]>({
+    queryKey: ['overview', 'signals'],
+    queryFn: async () => {
+      const raw = await fetchData('dashboard/signals/').catch(() => fetchData('dashboard/insights/'));
+      return parseSignals(raw);
+    },
   });
 }
 
-// ── Jobs — recent quotes/bookings, active count, the utilisation heatmap ───
-export interface OverviewJobs {
-  quotes: QuoteLite[];
-  loads: LoadLite[];
-  activeLoads: number;
-  heat: number[];
-}
+// ── Freshness and refresh ───────────────────────────────────────────────────
+const HOME_KEYS: QueryKey[] = [
+  ['ledger-invoices'],
+  ['ledger-payments'],
+  ['ledger-expenses'],
+  ['ledger-loads'],
+  ['ledger-quotes'],
+  ['ledger-vehicles'],
+  ['overview', 'signals'],
+];
 
-async function loadJobs(): Promise<OverviewJobs> {
-  const [quotesData, loadsData] = await Promise.all([
-    fetchData('quotes/?limit=20').catch(() => FAILED),
-    fetchData('loads/').catch(() => FAILED),
-  ]);
-
-  // These two are recent activity + the active count + the heatmap. Throwing
-  // when both are down (rather than rendering zeros) keeps React Query
-  // showing the last good numbers via placeholderData and retrying in the
-  // background, instead of the section looking like there's no data at all.
-  if (quotesData === FAILED && loadsData === FAILED) {
-    throw new Error('Could not load recent activity');
-  }
-
-  const quotes = quotesData === FAILED ? [] : asArray(quotesData).map(normalizeQuote);
-  const loads = loadsData === FAILED ? [] : asArray(loadsData).map(normalizeLoad);
-
-  const activeLoads = loads.filter((l) =>
-    ['IN_TRANSIT', 'LOADING', 'ASSIGNED', 'PENDING'].includes(l.status),
-  ).length;
-
-  // 28-day activity heatmap bucketed into 4 intensity levels.
-  const counts = new Array(28).fill(0) as number[];
-  const now = Date.now();
-  loads.forEach((l) => {
-    if (!l.createdAt) return;
-    const daysAgo = Math.floor((now - new Date(l.createdAt).getTime()) / DAY);
-    if (daysAgo >= 0 && daysAgo < 28) {
-      const bucket = 27 - daysAgo;
-      counts[bucket] = (counts[bucket] ?? 0) + 1;
+/**
+ * How current the figures on screen are: the OLDEST load across everything Home
+ * shows, whether a background refresh failed while older figures stay up, and
+ * whether anything is being fetched. Feeds the stale-data notice.
+ */
+export function useHomeFreshness() {
+  const qc = useQueryClient();
+  const subscribe = useCallback((cb: () => void) => qc.getQueryCache().subscribe(cb), [qc]);
+  // A string, so the snapshot is stable between unrelated cache events.
+  const snapshot = useSyncExternalStore(subscribe, () => {
+    let oldest = Infinity;
+    let failed = false;
+    let fetching = false;
+    for (const key of HOME_KEYS) {
+      const st = qc.getQueryState(key);
+      if (!st) continue;
+      if (st.dataUpdatedAt) oldest = Math.min(oldest, st.dataUpdatedAt);
+      if (st.status === 'error' && st.dataUpdatedAt > 0) failed = true;
+      if (st.fetchStatus === 'fetching') fetching = true;
     }
+    return `${Number.isFinite(oldest) ? oldest : 0}|${failed ? 1 : 0}|${fetching ? 1 : 0}`;
   });
-  const max = Math.max(1, ...counts);
-  const heat = counts.map((c) => (c === 0 ? 0 : Math.min(3, Math.ceil((c / max) * 3))));
-
-  return { quotes, loads, activeLoads, heat };
+  const [updatedAt, failed, fetching] = snapshot.split('|');
+  return { updatedAt: Number(updatedAt), refreshFailed: failed === '1', fetching: fetching === '1' };
 }
 
-export function useOverviewJobs() {
-  return useQuery({
-    queryKey: ['overview', 'jobs'],
-    queryFn: loadJobs,
-    placeholderData: (prev) => prev,
-  });
+/** How long Home's figures count as current; matches the ledgers' staleTime. */
+export const STALE_MS = 5 * 60_000;
+
+/**
+ * Keeps Home's figures current on their own: when the oldest one turns stale
+ * while Home is on screen, and when the user returns to Home with stale figures.
+ * Only stale, mounted queries refetch, quietly (no spinner). Without this nothing
+ * fires when staleTime runs out, so the "may be out of date" notice showed and the
+ * user had to tap "Refresh now".
+ */
+export function useAutoRefreshHome(updatedAt: number) {
+  const qc = useQueryClient();
+  useFocusEffect(
+    useCallback(() => {
+      const refresh = () => {
+        if (!focusManager.isFocused()) return;
+        HOME_KEYS.forEach((queryKey) => void qc.refetchQueries({ queryKey, type: 'active', stale: true }));
+      };
+      if (!updatedAt) return;
+      const wait = updatedAt + STALE_MS - Date.now();
+      if (wait <= 0) {
+        refresh();
+        return;
+      }
+      const id = setTimeout(refresh, wait + 500);
+      return () => clearTimeout(id);
+    }, [qc, updatedAt]),
+  );
 }
 
-// ── Fleet — CommandBar's "Fleet ready" + "Advances pending", utilisation ────
-export interface OverviewFleet {
-  totalVehicles: number;
-  activeVehicles: number;
-  advancesPending: number;
-}
-
-async function loadFleet(): Promise<OverviewFleet> {
-  const [vehiclesData, fleet, advancesData] = await Promise.all([
-    fetchData('vehicles/').catch(() => []),
-    fetchData('fleet/overview/').catch(() => null),
-    fetchData('advances/').catch(() => []),
-  ]);
-
-  const vehicles = asArray(vehiclesData);
-  const advances = asArray(advancesData);
-
-  const fleetActive =
-    (fleet as { active_vehicles?: number } | null)?.active_vehicles ??
-    vehicles.filter((v) => ['AVAILABLE', 'IN_USE'].includes(String((v as { status?: string }).status).toUpperCase())).length;
-
-  return {
-    totalVehicles: vehicles.length,
-    activeVehicles: fleetActive,
-    advancesPending: advances.filter(
-      (a) => String((a as { status?: string }).status).toUpperCase() === 'PENDING',
-    ).length,
-  };
-}
-
-export function useOverviewFleet() {
-  return useQuery({
-    queryKey: ['overview', 'fleet'],
-    queryFn: loadFleet,
-    placeholderData: (prev) => prev,
-  });
-}
-
-// Composed for call-site convenience — HomeScreen reads `.data`/`.isLoading`
-// off each independently so a section can paint as soon as its own query
-// resolves, without waiting on the other two.
-export function useOverview() {
-  return {
-    finance: useOverviewFinance(),
-    jobs: useOverviewJobs(),
-    fleet: useOverviewFleet(),
-  };
+/** Refetches every query Home shows, once each (pull-to-refresh and "Refresh now"). */
+export function useRefreshHome() {
+  const qc = useQueryClient();
+  return useCallback(
+    () => Promise.all(HOME_KEYS.map((queryKey) => qc.refetchQueries({ queryKey, type: 'active' }))),
+    [qc],
+  );
 }

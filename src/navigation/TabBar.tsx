@@ -53,8 +53,9 @@ function Destination({
     transform: [{ scale: focusScale.value * press.value }],
   }));
 
-  const iconColor = focused ? colors.accent : colors.muted;
-  const labelColor = focused ? colors.fg : colors.faint;
+  // v3: the active destination is ink-on-ink (navActive*), never accent blue.
+  const iconColor = focused ? colors.navActiveFg : colors.faint;
+  const labelColor = focused ? colors.navActiveFg : colors.faint;
 
   return (
     <Pressable
@@ -76,11 +77,10 @@ function Destination({
         <Icon name={icon} size={22} color={iconColor} strokeWidth={focused ? 2.2 : 1.8} />
         <Mono
           style={{
-            fontSize: 9.5,
-            letterSpacing: 0.6,
-            textTransform: 'uppercase',
+            fontSize: 11,
+            lineHeight: 14,
             color: labelColor,
-            fontWeight: focused ? '700' : '500',
+            fontWeight: focused ? '600' : '500',
           }}
         >
           {label}
@@ -92,11 +92,11 @@ function Destination({
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const { scheme } = useTheme();
+  const { colors } = useTheme();
   const [innerW, setInnerW] = useState(0);
 
-  // Accent-tinted highlight reads on both themes over the glass bar.
-  const highlightBg = scheme === 'dark' ? 'rgba(77,158,255,0.20)' : 'rgba(37,99,235,0.12)';
+  // Ink highlight (the web's active nav pill): #0E1116 in light, #262A31 in dark.
+  const highlightBg = colors.navActiveBg;
 
   // Standard iOS floating-bar position: docked just above the home
   // indicator / Android nav bar, with a consistent gap on top of the safe
@@ -107,7 +107,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   // Tall, multi-stop ramp so the fade is smooth with no visible top edge; the
   // solid part sits at the very bottom, easing to transparent well above the bar.
   const shadeH = barBottom + BAR_HEIGHT + 90;
-  const shadeRGB = scheme === 'dark' ? '3,3,3' : '243,244,246';
+  // Page background as r,g,b so the fade lands exactly on the canvas colour.
+  const shadeRGB = [1, 3, 5].map((i) => parseInt(colors.bgDeep.slice(i, i + 2), 16)).join(',');
   const shadeColors = [
     `rgba(${shadeRGB},0)`,
     `rgba(${shadeRGB},0.45)`,
@@ -150,14 +151,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         <Glass
           radius={BAR_HEIGHT / 2}
           intensity={50}
-          style={{
-            height: BAR_HEIGHT,
-            shadowColor: '#000',
-            shadowOpacity: 0.28,
-            shadowRadius: 16,
-            shadowOffset: { width: 0, height: 8 },
-            elevation: 14,
-          }}
+          style={{ height: BAR_HEIGHT, boxShadow: colors.shadowPop }}
         >
           <View
             style={{ flex: 1, paddingHorizontal: HPAD }}

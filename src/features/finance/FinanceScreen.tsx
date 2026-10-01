@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
-  AmbientGlow,
   AppHeader,
   SwipeTabs,
   SearchField,
@@ -16,7 +15,6 @@ import {
   DetailRow,
   ListRow,
   Card,
-  Badge,
   Icon,
   IconButton,
   Txt,
@@ -35,9 +33,11 @@ import {
   EXPENSE_STATUSES,
   expenseCategoryLabel,
 } from './api';
-import type { ExpenseLite } from '@/types/domain';
+import type { ExpenseLite, InvoiceLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
+import { invoiceBalance, isInvoiceOverdue } from '@/lib/invoiceStatus';
+import { localDateISO } from '@/lib/dates';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -64,7 +64,6 @@ export function FinanceScreen({ route }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
-      <AmbientGlow />
       <View className="px-screen">
         <AppHeader
           title="Finance"
@@ -101,35 +100,87 @@ export function FinanceScreen({ route }: Props) {
   );
 }
 
+// Statuses that count as money still owed: the invoice has gone to the customer
+// and is not settled. Drafts are not owed until they are sent, and cancelled
+// invoices never are. Same set as the backend's one "outstanding" rule.
+const OWED_STATUSES = new Set(['SENT', 'VIEWED', 'PARTIALLY_PAID', 'OVERDUE']);
+
+type InvoiceFilter = 'ALL' | 'SENT' | 'OVERDUE' | 'PAID' | 'DRAFT';
+
+function invoiceMatches(inv: InvoiceLite, filter: InvoiceFilter): boolean {
+  if (filter === 'ALL') return true;
+  // Overdue is the one shared definition (unpaid, sent, past due), whatever the
+  // status string says, so the chip, the tile and the row badge cannot disagree.
+  if (filter === 'OVERDUE') return isInvoiceOverdue(inv.raw);
+  return inv.status === filter;
+}
+
 function InvoicesTab() {
   const { data, isLoading, isError, refetch } = useInvoices();
   const { refreshing, onRefresh } = useManualRefresh(refetch);
   const { openInvoice } = useAppNavigation();
+  const [filter, setFilter] = useState<InvoiceFilter>('ALL');
+  const { colors } = useTheme();
 
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load invoices." />;
 
-  const outstanding = data.filter((i) => i.status !== 'PAID').reduce((s, i) => s + i.balance, 0);
-  const overdue = data.filter((i) => i.status === 'OVERDUE').length;
+  const owed = data.filter((i) => OWED_STATUSES.has(i.status));
+  const outstanding = owed.reduce((s, i) => s + invoiceBalance(i.raw), 0);
+  const overdueList = data.filter((i) => isInvoiceOverdue(i.raw));
+  const overdueAmount = overdueList.reduce((s, i) => s + invoiceBalance(i.raw), 0);
+
+  const FILTERS: { label: string; value: InvoiceFilter }[] = [
+    { label: 'All', value: 'ALL' },
+    { label: 'Sent', value: 'SENT' },
+    { label: 'Overdue', value: 'OVERDUE' },
+    { label: 'Paid', value: 'PAID' },
+    { label: 'Draft', value: 'DRAFT' },
+  ];
+  // Counts use the same rule as the filter, over the full list, so a chip never
+  // disagrees with the rows it shows or with the tiles above.
+  const options = FILTERS.map((f) => ({
+    ...f,
+    label: `${f.label} ${data.filter((i) => invoiceMatches(i, f.value)).length}`,
+  }));
+  const rows = data.filter((i) => invoiceMatches(i, filter));
 
   return (
     <FlashList
-      data={data}
+      data={rows}
       keyExtractor={(i) => String(i.id)}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      extraData={filter}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
-        <View className="mb-3 flex-row gap-3">
-          <StatCard label="Outstanding" value={formatCurrencyCompact(outstanding)} />
-          <StatCard label="Overdue" value={String(overdue)} />
+        <View className="mb-3">
+          <View className="mb-3 flex-row gap-3">
+            <StatCard
+              label="Outstanding"
+              value={formatCurrencyCompact(outstanding)}
+              sub={`${owed.length} ${owed.length === 1 ? 'invoice' : 'invoices'} unpaid`}
+            />
+            <StatCard
+              label="Overdue"
+              value={formatCurrencyCompact(overdueAmount)}
+              sub={`${overdueList.length} ${overdueList.length === 1 ? 'invoice' : 'invoices'} late`}
+            />
+          </View>
+          <FilterChips options={options} value={filter} onChange={(v) => setFilter(v as InvoiceFilter)} />
         </View>
       }
-      ListEmptyComponent={<EmptyState icon="receipt" title="No invoices" body="Invoices you raise appear here." />}
+      ListEmptyComponent={
+        <EmptyState
+          icon="receipt"
+          title="No invoices"
+          body={filter === 'ALL' ? 'Invoices you raise appear here.' : 'No invoices match this filter.'}
+        />
+      }
       renderItem={({ item }) => (
         <View className="mb-2.5 overflow-hidden rounded-card border border-line bg-surface">
           <ListRow
-            leading={<Icon name="receipt" size={22} color="#888888" />}
+            leading={<Icon name="receipt" size={22} color={colors.faint} />}
             title={item.number}
             subtitle={item.customer}
             trailing={
@@ -137,10 +188,13 @@ function InvoicesTab() {
                 <Mono className="text-callout font-semibold text-fg">
                   {formatCurrency(item.total, { maximumFractionDigits: 0 })}
                 </Mono>
-                <View className="flex-row items-center gap-1.5">
-                  {item.earlyPayEligible && <Badge label="Fast Pay" tone="info" />}
-                  <StatusPill status={item.status} />
-                </View>
+                <StatusPill
+                  status={
+                    isInvoiceOverdue(item.raw) && (item.status === 'SENT' || item.status === 'VIEWED')
+                      ? 'OVERDUE'
+                      : item.status
+                  }
+                />
               </View>
             }
             onPress={() => openInvoice(item.id, item.raw)}
@@ -202,12 +256,11 @@ function ExpensesTab() {
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load expenses." />;
 
   // ── KPI cards (this calendar month, matching web) ──
-  const now = new Date();
-  const thisMonth = data.filter((e) => {
-    if (!e.date) return false;
-    const d = new Date(e.date);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
+  // Compare the stored YYYY-MM against the local month. new Date('2026-10-01')
+  // is UTC midnight, which would put the 1st into the previous month for anyone
+  // west of UTC.
+  const thisMonthKey = localDateISO().slice(0, 7);
+  const thisMonth = data.filter((e) => !!e.date && e.date.slice(0, 7) === thisMonthKey);
   const totalMtd = thisMonth.filter((e) => e.status === 'APPROVED').reduce((s, e) => s + e.amount, 0);
   const pending = data.filter((e) => e.status === 'PENDING');
   const pendingAmount = pending.reduce((s, e) => s + e.amount, 0);
@@ -263,7 +316,7 @@ function ExpensesTab() {
         <Card>
           <Pressable className="p-3.5 active:bg-surface-hover" onPress={() => openActions(item)}>
             <View className="mb-1.5 flex-row items-center justify-between gap-2">
-              <Mono className="text-micro uppercase tracking-wide text-accent">
+              <Mono className="text-caption font-medium text-muted">
                 {expenseCategoryLabel(item.category)}
               </Mono>
               <StatusPill status={item.status} />
@@ -301,8 +354,8 @@ function ReportsTab() {
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          tintColor={colors.accent}
-          colors={[colors.accent]}
+          tintColor={colors.faint}
+          colors={[colors.faint]}
           progressBackgroundColor={colors.surface}
         />
       }
@@ -360,12 +413,12 @@ function Bar({ value, max, tone }: { value: number; max: number; tone: 'accent' 
   const { colors } = useTheme();
   const pct = Math.max(2, Math.round((value / max) * 100));
   return (
-    <View className="h-2 overflow-hidden rounded-pill bg-surface-hover">
+    <View className="h-2 overflow-hidden rounded-pill" style={{ backgroundColor: colors.chartBar }}>
       <View
         style={{
           width: `${pct}%`,
           height: '100%',
-          backgroundColor: tone === 'accent' ? colors.accent : colors.faint,
+          backgroundColor: tone === 'accent' ? colors.accent : colors.chartMuted,
         }}
       />
     </View>

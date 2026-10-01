@@ -27,17 +27,19 @@ const BAND_TONE: Record<string, BadgeTone> = {
   CRITICAL: 'danger',
   NEW: 'neutral',
 };
-const BAND_COLOR: Record<string, string> = {
-  LOW: '#22C55E',
-  MEDIUM: '#F59E0B',
-  HIGH: '#FF4949',
-  CRITICAL: '#FF4949',
-  NEW: '#888888',
+// Risk tiers map onto the status tones; the key indexes `useTheme().colors`.
+const BAND_COLOR_KEY: Record<string, 'success' | 'warning' | 'danger' | 'faint'> = {
+  LOW: 'success',
+  MEDIUM: 'warning',
+  HIGH: 'danger',
+  CRITICAL: 'danger',
+  NEW: 'faint',
 };
 
 export function CustomerRiskScreen({ route, navigation }: Props) {
   const { id } = route.params;
   const { data, isLoading, isError, refetch } = useCustomerRisk(id);
+  const { colors } = useTheme();
 
   const r = (data ?? {}) as Record<string, unknown>;
   const band = str(pick(r, ['band']), 'NEW').toUpperCase();
@@ -114,7 +116,7 @@ export function CustomerRiskScreen({ route, navigation }: Props) {
                       trailing={
                         <Mono
                           className="text-callout font-semibold"
-                          style={{ color: late > 30 ? '#FF4949' : late > 0 ? '#F59E0B' : '#22C55E' }}
+                          style={{ color: late > 30 ? colors.danger : late > 0 ? colors.warning : colors.success }}
                         >
                           {formatCurrency(num(pick(o, ['amount'])), { maximumFractionDigits: 0 })}
                         </Mono>
@@ -151,13 +153,14 @@ function RiskBody({
 
 function RiskBadge({ band, riskPct }: { band: string; riskPct: number }) {
   const { colors } = useTheme();
-  const color = BAND_COLOR[band] ?? colors.muted;
+  const color = colors[BAND_COLOR_KEY[band] ?? 'muted'];
   const tone = BAND_TONE[band] ?? 'neutral';
+  const bandLabel = band.charAt(0) + band.slice(1).toLowerCase();
   return (
     <View className="mb-5 items-center rounded-card border border-line bg-surface py-6">
-      <Mono style={{ fontSize: 44, fontWeight: '700', color }}>{formatPercent(riskPct, 0)}</Mono>
+      <Mono className="text-figure font-semibold" style={{ color }}>{formatPercent(riskPct, 0)}</Mono>
       <View className="mt-2">
-        <Badge label={`${band} risk`} tone={tone} />
+        <Badge label={`${bandLabel} risk`} tone={tone} />
       </View>
     </View>
   );

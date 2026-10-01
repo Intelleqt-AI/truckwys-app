@@ -37,29 +37,26 @@ export type DomainEvent =
 // Home's dashboard plus the analytics that read the same underlying rows. Any
 // write that changes money or job state moves at least one of these.
 const DASHBOARD = ['overview', 'insights', 'activity', 'dashboard-cashflow'];
-const FINANCE = ['finance-reports', 'capital', 'capital-eligible', 'reports-lanes'];
+const FINANCE = ['finance-reports', 'invoice-aging', 'capital', 'capital-eligible', 'reports-lanes'];
 const RISK = ['risk-scores', 'customer-risk'];
 // Assignment pickers filter on availability, so anything that frees up or takes
 // a driver/vehicle changes them.
 const ASSIGN = ['drivers-available-for-assign', 'vehicles-available-for-assign'];
 
 const MAP: Record<DomainEvent, string[]> = {
-  // 'loads-lookup' only maps a quote to the load it converted to, so it only
-  // needs to move when a quote does — putting it on every 'load'/'copilot'
-  // event as well used to restart the (now-gated, still non-trivial) walk of
-  // the loads table on almost any write in the app.
-  quote: ['quotes', 'quote', 'customer-quotes', 'quote-model-stats', 'loads-lookup', ...DASHBOARD, ...FINANCE, ...RISK],
+  quote: ['quotes', 'quote', 'customer-quotes', 'quote-fuel-alert', 'ledger-quotes', ...DASHBOARD, ...FINANCE, ...RISK],
   // A load's status drives revenue recognition, fleet utilisation and the
-  // Home heatmap; delivering one can also auto-raise an invoice.
-  load: ['loads', 'load', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
-  invoice: ['invoices', 'invoice', 'invoice-payments', 'customer', ...DASHBOARD, ...FINANCE, ...RISK],
-  payment: ['invoices', 'invoice', 'invoice-payments', ...DASHBOARD, ...FINANCE, ...RISK],
-  expense: ['expenses', 'vehicle-loads', ...DASHBOARD, ...FINANCE],
-  vehicle: ['vehicles', 'vehicle', 'vehicle-loads', 'vehicle-types', 'drivers', ...ASSIGN, ...DASHBOARD],
+  // Home heatmap; delivering one can also auto-raise an invoice. A quote reports
+  // the load it was booked as (booked_load), so quotes move with loads too.
+  load: ['loads', 'load', 'ledger-loads', 'ledger-quotes', 'quotes', 'quote', 'customer-quotes', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
+  invoice: ['invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'customer', ...DASHBOARD, ...FINANCE, ...RISK],
+  payment: ['invoices', 'invoice', 'ledger-payments', 'ledger-invoices', 'invoice-payments', ...DASHBOARD, ...FINANCE, ...RISK],
+  expense: ['expenses', 'ledger-expenses', 'vehicle-loads', ...DASHBOARD, ...FINANCE],
+  vehicle: ['vehicles', 'vehicle', 'ledger-vehicles', 'vehicle-loads', 'vehicle-types', 'drivers', ...ASSIGN, ...DASHBOARD],
   // Drivers are Users too — AddDriverScreen POSTs to users/ as well.
   driver: ['drivers', 'driver', 'vehicles', 'vehicle', 'users', ...ASSIGN, ...DASHBOARD],
-  customer: ['customers', 'customer', 'customer-quotes', 'quotes', 'invoices', ...RISK, ...DASHBOARD],
-  advance: ['capital', 'capital-eligible', 'advance', 'invoices', 'invoice', ...DASHBOARD, ...FINANCE],
+  customer: ['customers', 'customer', 'ledger-customers', 'customer-quotes', 'quotes', 'invoices', ...RISK, ...DASHBOARD],
+  advance: ['capital', 'capital-eligible', 'advance', 'invoices', 'invoice', 'ledger-invoices', ...DASHBOARD, ...FINANCE],
   notification: ['notifications', 'notifications-unread'],
   user: ['users', 'me', 'drivers'],
   // The three security preferences, the device list and the activity feed all
@@ -97,6 +94,34 @@ const EVENT_PREFIX: [string, DomainEvent[]][] = [
   ['driver.', ['driver']],
   ['maintenance.', ['vehicle']],
 ];
+
+// `data.changed` topics (backend core/ws/data_changes.py) -> domain events. A
+// trip is a leg of a load and carries its expenses, so it refreshes both.
+const TOPIC_EVENTS: Record<string, DomainEvent[]> = {
+  invoice: ['invoice'],
+  payment: ['payment'],
+  expense: ['expense'],
+  quote: ['quote'],
+  load: ['load'],
+  trip: ['load', 'expense'],
+  vehicle: ['vehicle'],
+  driver: ['driver'],
+  customer: ['customer'],
+  advance: ['advance'],
+};
+
+/** Every topic the backend can push, for the refetch-everything-after-reconnect case. */
+export const ALL_DATA_TOPICS = Object.keys(TOPIC_EVENTS);
+
+/**
+ * Invalidate what a `data.changed` push touched. Unlike a named server event it
+ * does not touch the notification bell: nothing was added to it.
+ */
+export function invalidateForTopics(qc: QueryClient, topics: readonly string[]): void {
+  const events = new Set<DomainEvent>();
+  for (const t of topics) for (const e of TOPIC_EVENTS[t] ?? []) events.add(e);
+  if (events.size) invalidateFor(qc, ...events);
+}
 
 export function invalidateForServerEvent(qc: QueryClient, event: string): void {
   // Every server event also lands in the bell.

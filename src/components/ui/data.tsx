@@ -1,19 +1,13 @@
-import { Fragment, useEffect, type ReactNode } from 'react';
-import { View, Pressable, ActivityIndicator } from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
+import { Fragment, type ReactNode } from 'react';
+import { View, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Txt, Mono, Label } from './Text';
 import { Card } from './primitives';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues, motion } from '@/theme/tokens';
+import { motion } from '@/theme/tokens';
 
-// ── StatCard / KPI tile: mono caps label + big mono value + delta ──────────
+// ── StatCard / KPI tile: muted label + big tabular value + delta/note ──────
 /**
  * The root `Card` is `flex-1` (`flex: 1 1 0%`), so this MUST sit directly
  * inside a `flex-row` parent — that's where `flexBasis: 0` means "equal
@@ -44,12 +38,19 @@ export function StatCard({
   // component are unaffected. Home's bento pair is the only current user.
   compact?: boolean;
 }) {
+  const { colors } = useTheme();
   const deltaColor =
-    deltaTone === 'up' ? statusHues.success : deltaTone === 'down' ? statusHues.danger : undefined;
+    deltaTone === 'up' ? colors.success : deltaTone === 'down' ? colors.danger : undefined;
   return (
     <Card className={`flex-1 ${compact ? 'p-3' : 'p-4'}`}>
       <Label className="text-faint">{label}</Label>
+      {/* One line, shrunk to fit the tile: a long amount ("R 1 234 567") scales
+          down instead of ending in an ellipsis, which would hide the digits
+          that matter most. */}
       <Mono
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.55}
         className={`${compact ? 'mt-1.5' : 'mt-2'} text-fg tracking-display`}
         style={{ fontSize: compact ? 20 : 24, fontWeight: '600' }}
       >
@@ -57,11 +58,11 @@ export function StatCard({
       </Mono>
       <View className="mt-1 flex-row items-center gap-2">
         {delta && (
-          <Mono className="text-micro" style={deltaColor ? { color: deltaColor } : undefined}>
+          <Mono className="text-caption" style={deltaColor ? { color: deltaColor } : undefined}>
             {delta}
           </Mono>
         )}
-        {sub && <Mono className="text-micro text-faint">{sub}</Mono>}
+        {sub && <Mono className="text-caption text-faint">{sub}</Mono>}
       </View>
     </Card>
   );
@@ -146,8 +147,8 @@ export function Group({
               accessibilityRole="button"
               className="flex-row items-center gap-0.5"
             >
-              <Mono className="text-micro tracking-label uppercase text-accent">{action}</Mono>
-              <Icon name="chevronRight" size={12} color={colors.accent} />
+              <Mono className="text-sub font-medium text-link">{action}</Mono>
+              <Icon name="chevronRight" size={12} color={colors.link} />
             </Pressable>
           )}
         </View>
@@ -190,6 +191,9 @@ export function DetailRow({
   valueColor,
   boldValue,
   last,
+  hintColor,
+  onEdit,
+  editLabel,
 }: {
   label: string;
   /** Second line under the label — a rate basis, a reference, a breakdown. */
@@ -200,8 +204,15 @@ export function DetailRow({
   /** Bumps the value from font-medium to font-semibold, e.g. for a price. */
   boldValue?: boolean;
   last?: boolean;
+  /** Colour for the hint line, e.g. danger for "12 days late". */
+  hintColor?: string;
+  /** Shows a pencil beside the label that calls this (e.g. change a due date). */
+  onEdit?: () => void;
+  /** Accessibility label for the pencil, e.g. "Change due date". */
+  editLabel?: string;
 }) {
   const ValueCmp = mono ? Mono : Txt;
+  const { colors } = useTheme();
   return (
     <View
       className={`flex-row items-center justify-between gap-4 px-3.5 py-3 ${
@@ -209,11 +220,29 @@ export function DetailRow({
       }`}
     >
       <View className="shrink">
-        <Txt className="text-callout text-muted" numberOfLines={1} ellipsizeMode="tail">
-          {label}
-        </Txt>
+        <View className="flex-row items-center gap-1.5">
+          <Txt className="shrink text-callout text-muted" numberOfLines={1} ellipsizeMode="tail">
+            {label}
+          </Txt>
+          {onEdit && (
+            <TouchableOpacity
+              onPress={onEdit}
+              activeOpacity={0.6}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel={editLabel ?? `Edit ${label.toLowerCase()}`}
+            >
+              <Icon name="edit" size={14} color={colors.muted} />
+            </TouchableOpacity>
+          )}
+        </View>
         {hint && (
-          <Txt className="mt-0.5 text-micro text-faint" numberOfLines={1} ellipsizeMode="tail">
+          <Txt
+            className="mt-0.5 text-micro text-faint"
+            style={hintColor ? { color: hintColor } : undefined}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {hint}
           </Txt>
         )}
@@ -262,7 +291,7 @@ export type TimelineStep = {
   /** Prose second line instead of a mono timestamp — a driver name, an invoice number. */
   meta?: string;
   done?: boolean;
-  /** The in-progress step: a ring instead of a fill, plus a pulsing halo. */
+  /** The in-progress step: a ring instead of a fill (static — v3 has no pulse). */
   current?: boolean;
   color?: string;
 };
@@ -279,27 +308,8 @@ export function Timeline({ steps }: { steps: TimelineStep[] }) {
 
 function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
   const { colors } = useTheme();
-  const color = s.color ?? statusHues.success;
+  const color = s.color ?? colors.successDot;
   const ringColor = s.done || s.current ? color : colors.faint;
-
-  // The one allowed loop (see LiveDot) — scales a halo ring behind the marker
-  // while this step is the current one, then stops as soon as it isn't.
-  const pulse = useSharedValue(0);
-  useEffect(() => {
-    if (!s.current) {
-      pulse.value = 0;
-      return;
-    }
-    pulse.value = withRepeat(
-      withSequence(withTiming(1, { duration: 900 }), withTiming(0, { duration: 900 })),
-      -1,
-      false,
-    );
-  }, [pulse, s.current]);
-  const halo = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + pulse.value * 0.7 }],
-    opacity: (1 - pulse.value) * 0.6,
-  }));
 
   const ringStyle = useAnimatedStyle(() => ({
     borderColor: withTiming(ringColor, { duration: motion.smooth }),
@@ -309,21 +319,6 @@ function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
     <View className="flex-row gap-3.5" style={{ minHeight: last ? 28 : 44 }}>
       <View className="items-center">
         <View className="items-center justify-center" style={{ width: 22, height: 22 }}>
-          {s.current && (
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                {
-                  position: 'absolute',
-                  width: 22,
-                  height: 22,
-                  borderRadius: 22,
-                  backgroundColor: colors.pulse,
-                },
-                halo,
-              ]}
-            />
-          )}
           <Animated.View
             className="items-center justify-center"
             style={[
@@ -366,7 +361,7 @@ function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
             {s.label}
           </Txt>
           {s.current && (
-            <Mono className="text-nano uppercase tracking-label" style={{ color }}>
+            <Mono className="text-caption font-medium" style={{ color }}>
               Current
             </Mono>
           )}
@@ -380,9 +375,9 @@ function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
 
 // ── RoutePreview: schematic origin → destination strip (never a real map) ──
 // Rail geometry, derived from the type scale rather than guessed: the label line
-// box (text-micro's 14px lineHeight, kept even though fontSize is overridden to
-// 9) and the address line beneath it (text-callout's 20px + the 2px mt-0.5).
-const RAIL_LABEL_H = 14;
+// box (Label's text-caption 16px lineHeight) and the address line beneath it
+// (text-callout's 20px + the 2px mt-0.5).
+const RAIL_LABEL_H = 16;
 const RAIL_ADDRESS_H = 22;
 const MARKER_COL = 16;
 // Every block after the first (each stop, and Drop-off) opens with mt-5 (20px)
@@ -452,9 +447,11 @@ export function RoutePreview({
               <View style={{ height: RAIL_LABEL_H }} className="justify-center">
                 <View
                   className="items-center justify-center"
-                  style={{ width: 14, height: 14, borderRadius: 14, backgroundColor: statusHues.info }}
+                  style={{ width: 14, height: 14, borderRadius: 14, backgroundColor: colors.infoDot }}
                 >
-                  <Mono style={{ fontSize: 8, fontWeight: '700', color: '#fff' }}>{i + 1}</Mono>
+                  <Mono style={{ fontSize: 9, fontWeight: '600', color: colors.onAccent }}>
+                    {i + 1}
+                  </Mono>
                 </View>
               </View>
             </Fragment>
@@ -469,13 +466,13 @@ export function RoutePreview({
             }}
           />
           <View style={{ height: RAIL_LABEL_H }} className="justify-center">
-            <Icon name="pin" size={16} color={statusHues.success} />
+            <Icon name="pin" size={16} color={colors.successDot} />
           </View>
           <View style={{ height: RAIL_ADDRESS_H }} />
         </View>
         <View className="flex-1">
           <View>
-            <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
+            <Label className="text-faint" style={{ lineHeight: RAIL_LABEL_H }}>
               Pickup
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>
@@ -484,7 +481,7 @@ export function RoutePreview({
           </View>
           {(stops ?? []).map((s, i) => (
             <View key={i} className="mt-5">
-              <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
+              <Label className="text-faint" style={{ lineHeight: RAIL_LABEL_H }}>
                 Stop {i + 1}
               </Label>
               <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>
@@ -493,7 +490,7 @@ export function RoutePreview({
             </View>
           ))}
           <View className="mt-5">
-            <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
+            <Label className="text-faint" style={{ lineHeight: RAIL_LABEL_H }}>
               Drop-off
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>

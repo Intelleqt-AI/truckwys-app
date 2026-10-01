@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 import { Button, Icon, Txt, Mono } from '@/components/ui';
 import { formatCurrency } from '@/lib/formatters';
-import { status as statusHues } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
 
 export interface QuoteSentOverlayProps {
   visible: boolean;
@@ -32,6 +32,7 @@ export function QuoteSentOverlay({
   onViewQuote,
   onDone,
 }: QuoteSentOverlayProps) {
+  const { colors } = useTheme();
   // Draft-saving is routine — auto-dismiss. Sending emails a client; that's
   // a money event a human should close themselves, so it waits. Either
   // button tap changes `visible`/unmounts this, which clears the timer.
@@ -53,12 +54,12 @@ export function QuoteSentOverlay({
 
   return (
     <View
-      className="absolute inset-0 items-center justify-center bg-black/70 px-8"
+      className="absolute inset-0 items-center justify-center bg-backdrop px-8"
       accessibilityViewIsModal
     >
       <View className="w-full max-w-[300px] items-center rounded-panel border border-line bg-surface px-6 py-8">
         <View className="h-12 w-12 items-center justify-center rounded-pill bg-success-bg">
-          <Icon name="checkCircle" size={28} color={statusHues.success} />
+          <Icon name="checkCircle" size={28} color={colors.successDot} />
         </View>
         <Txt className="mt-4 text-center text-heading font-semibold text-fg">{title}</Txt>
         {total > 0 && (

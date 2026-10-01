@@ -21,7 +21,7 @@ const SECTIONS: MenuItem[][] = [
   [
     { icon: 'users', label: 'Customers', route: 'Customers', allow: canSeeInsights },
     { icon: 'sparkle', label: 'Insights', route: 'Insights', allow: canSeeInsights },
-    { icon: 'dollar', label: 'Fast Pay Capital', route: 'Capital', allow: canSeeFinanceFeatures },
+    { icon: 'dollar', label: 'Fast Pay (coming soon)', route: 'Capital', allow: canSeeFinanceFeatures },
   ],
   [
     { icon: 'clock', label: 'Activity', route: 'Activity' },
@@ -94,14 +94,14 @@ export function MoreScreen() {
           size={48}
         />
         <View className="flex-1">
-          <Txt className="text-lg font-medium" numberOfLines={1}>
+          <Txt className="text-heading font-semibold" numberOfLines={1}>
             {user?.name ?? user?.email ?? 'Operator'}
           </Txt>
           <Mono className="mt-0.5 text-caption text-muted" numberOfLines={1}>
             {user?.email}
           </Mono>
         </View>
-        {user?.role && <Label className="text-accent">{user.role}</Label>}
+        {user?.role && <Label className="text-muted">{user.role}</Label>}
       </View>
 
       {visibleSections.map((group, gi) => (
@@ -137,7 +137,7 @@ export function MoreScreen() {
           >
             <Icon name="sparkle" size={19} color={colors.muted} />
             <Txt className="flex-1 text-body text-fg">Preview onboarding</Txt>
-            <Mono className="text-micro uppercase tracking-wide text-faint">DEV</Mono>
+            <Mono className="text-micro text-faint">Dev</Mono>
             <Icon name="chevronRight" size={16} color={colors.faint} />
           </TouchableOpacity>
         </Group>
@@ -154,9 +154,9 @@ export function MoreScreen() {
         >
           <View className="w-[19px] items-center">
             {signingOut ? (
-              <ActivityIndicator size="small" color="#FF4949" />
+              <ActivityIndicator size="small" color={colors.dangerDot} />
             ) : (
-              <Icon name="logout" size={19} color="#FF4949" />
+              <Icon name="logout" size={19} color={colors.dangerDot} />
             )}
           </View>
           <Txt className="flex-1 text-body text-danger">

@@ -1,9 +1,18 @@
+import { useEffect } from 'react';
 import { Platform, View } from 'react-native';
-import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeInDown,
+  FadeOutDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { create } from 'zustand';
 import { Mono } from '@/components/ui/Text';
+import { useTheme } from '@/theme/ThemeProvider';
 
 // Global feedback. Native-feel policy: successes/info are SILENT visually —
 // the UI updates and a light success haptic confirms. Only ERRORS surface a
@@ -16,13 +25,14 @@ interface ToastState {
   push: (message: string) => void;
 }
 
+const TOAST_MS = 3500;
 let seq = 0;
 const useToastStore = create<ToastState>((set) => ({
   items: [],
   push: (message) => {
     const id = ++seq;
     set((s) => ({ items: [...s.items, { id, message }] }));
-    setTimeout(() => set((s) => ({ items: s.items.filter((i) => i.id !== id) })), 3500);
+    setTimeout(() => set((s) => ({ items: s.items.filter((i) => i.id !== id) })), TOAST_MS);
   },
 }));
 
@@ -54,14 +64,29 @@ export function ToastHost() {
   );
 }
 
+// Web v3 toast: overlay surface, 12px radius, 14/20 text, and a 2px progress bar
+// in the status dot colour that runs down over the toast's lifetime.
 function ToastRow({ item }: { item: ToastItem }) {
+  const { colors } = useTheme();
+  const remaining = useSharedValue(1);
+  useEffect(() => {
+    remaining.value = withTiming(0, { duration: TOAST_MS, easing: Easing.linear });
+  }, [remaining]);
+  const bar = useAnimatedStyle(() => ({ width: `${remaining.value * 100}%` }));
   return (
     <Animated.View
       entering={FadeInDown.duration(200)}
       exiting={FadeOutDown.duration(180)}
-      className="w-full rounded-control border border-danger bg-elevated px-4 py-3"
+      className="min-h-[48px] w-full justify-center overflow-hidden rounded-menu border border-line-active bg-elevated px-4 py-3"
+      style={{ boxShadow: colors.shadowPop }}
     >
-      <Mono className="text-caption text-danger">{item.message}</Mono>
+      <Mono className="text-callout text-fg">{item.message}</Mono>
+      <Animated.View
+        style={[
+          { position: 'absolute', left: 0, bottom: 0, height: 2, backgroundColor: colors.dangerDot },
+          bar,
+        ]}
+      />
     </Animated.View>
   );
 }

@@ -2,6 +2,8 @@
 // Moved out of CreateQuoteScreen.tsx verbatim (Phase 0 extraction) — no
 // behaviour change. Every comment below documents a real past bug; keep them.
 
+import { localDatePlusDays } from '@/lib/dates';
+
 export interface Loc {
   label: string;
   lat: number;
@@ -104,9 +106,7 @@ export function extractCode(s: string): string {
 }
 
 export function plusDays(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return localDatePlusDays(days);
 }
 
 export function startOfToday(): Date {

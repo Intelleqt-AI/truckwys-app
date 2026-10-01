@@ -1,11 +1,15 @@
-import { Text as RNText, type TextProps } from 'react-native';
-import { MONO_FONT } from '@/theme/tokens';
+import { Text as RNText, type TextProps, type TextStyle } from 'react-native';
 
-// Typography primitives. `Txt` is the sans base (colour defaults to fg). `Mono`
-// carries every number/ID/status. `Label` is the signature uppercase mono
-// eyebrow (tracked out). All accept NativeWind className for size/colour.
+// Typography primitives (web v3: system sans, weights 400/500/600, sentence case).
+// `Txt` is the base (colour defaults to fg). `Mono` carries every number/ID/status
+// — it keeps its name for the existing call sites, but is now the same sans face
+// with tabular numerals so figures line up like the web's `tabular-nums`. `Label`
+// is the small muted caption above a field/section. All accept NativeWind
+// className for size/colour.
 
 type Props = TextProps & { className?: string };
+
+const TABULAR: TextStyle = { fontVariant: ['tabular-nums'] };
 
 /**
  * Font size for TextInputs — deliberately WITHOUT a lineHeight.
@@ -33,20 +37,14 @@ export function Txt({ className = '', style, ...props }: Props) {
 }
 
 export function Mono({ className = '', style, ...props }: Props) {
-  return (
-    <RNText
-      className={`text-fg ${className}`}
-      style={[{ fontFamily: MONO_FONT }, style]}
-      {...props}
-    />
-  );
+  return <RNText className={`text-fg ${className}`} style={[TABULAR, style]} {...props} />;
 }
 
 export function Label({ className = '', style, ...props }: Props) {
   return (
     <RNText
-      className={`text-micro tracking-label text-faint uppercase ${className}`}
-      style={[{ fontFamily: MONO_FONT }, style]}
+      className={`text-caption font-medium text-faint ${className}`}
+      style={[TABULAR, style]}
       {...props}
     />
   );
@@ -67,7 +65,7 @@ export function Label({ className = '', style, ...props }: Props) {
 export function FieldLabel({ label, required }: { label?: string; required?: boolean }) {
   if (!label) return null;
   return (
-    <Label className="mb-1.5 text-muted">
+    <Label className="mb-1.5 text-sub text-muted">
       {label}
       {required ? <RNText className="text-danger"> *</RNText> : null}
     </Label>

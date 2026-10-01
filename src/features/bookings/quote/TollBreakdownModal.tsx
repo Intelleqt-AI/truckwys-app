@@ -22,13 +22,15 @@ function TollBreakdownModalImpl({
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={onClose}>
+      <Pressable className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
         <Pressable
           className="rounded-panel border border-line bg-elevated p-4"
           onPress={(e) => e.stopPropagation()}
         >
           <Label className="mb-3 text-muted">Toll plazas on this route</Label>
-          {costs.tollBreakdown.length === 0 ? (
+          {costs.tollsUnavailable ? (
+            <Txt className="text-callout text-warning">{costs.tollWarning}</Txt>
+          ) : costs.tollBreakdown.length === 0 ? (
             <Txt className="text-callout text-muted">No SANRAL plazas matched on this route.</Txt>
           ) : (
             <View>
@@ -57,6 +59,10 @@ function TollBreakdownModalImpl({
                   × 2 for round trip = {formatCurrency(costs.tollBreakdownOneWay * 2)}
                 </Mono>
               )}
+              <Txt className="mt-2 text-micro text-faint">
+                Tariffs exclude VAT, like the rest of the quote.
+                {costs.tollsEstimated ? ' This is an estimate, not a plaza match.' : ''}
+              </Txt>
             </View>
           )}
           <Button label="Close" variant="secondary" onPress={onClose} fullWidth className="mt-4" />

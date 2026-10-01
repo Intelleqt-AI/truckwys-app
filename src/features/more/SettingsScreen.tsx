@@ -30,7 +30,6 @@ import {
 import { ListSkeleton } from '@/components/feedback';
 import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
-import { status as statusHues } from '@/theme/tokens';
 import { useAuthStore } from '@/stores/authStore';
 import { useRole, canAccessSettingsSection, canSeeInsights, visibleTabs } from '@/lib/access';
 import { INDUSTRY_OPTIONS } from '@/lib/companyOptions';
@@ -250,9 +249,9 @@ function UploadButton({
   const { colors } = useTheme();
   if (uploading) {
     return (
-      <View className="min-h-[48px] flex-row items-center justify-center gap-2 rounded-control border border-line-active bg-surface px-4">
+      <View className="min-h-[44px] flex-row items-center justify-center gap-2 rounded-control border border-line-active bg-surface px-4">
         <ActivityIndicator size="small" color={colors.fg} />
-        <Mono className="text-micro uppercase tracking-wide text-fg">Uploading</Mono>
+        <Mono className="text-callout font-medium text-fg">Uploading</Mono>
       </View>
     );
   }
@@ -590,7 +589,7 @@ function VehicleTypesSection() {
                 setSelected(new Set());
               }}
             >
-              <Mono className="text-micro uppercase tracking-wide text-accent">
+              <Mono className="text-caption font-medium text-link">
                 {selectMode ? 'Done' : 'Select'}
               </Mono>
             </Pressable>
@@ -699,7 +698,7 @@ function VehicleTypesSection() {
                         <Icon
                           name="truck"
                           size={19}
-                          color={isActive ? colors.accent : colors.faint}
+                          color={isActive ? colors.fg : colors.faint}
                         />
                       </View>
                       <View className="flex-1">
@@ -735,7 +734,7 @@ function VehicleTypesSection() {
           </View>
 
           {!selectMode && (
-            <Mono className="-mt-1 text-center text-nano text-faint">
+            <Mono className="-mt-1 text-center text-micro text-faint">
               Swipe a row left to delete
             </Mono>
           )}
@@ -869,6 +868,7 @@ function NotificationsSection() {
 
 function SecuritySection() {
   const demo = useDemo();
+  const { colors } = useTheme();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
@@ -1024,7 +1024,7 @@ function SecuritySection() {
           onPress={() => setShowDelete(true)}
           className="min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover"
         >
-          <Icon name="x" size={18} color="#FF4949" />
+          <Icon name="x" size={18} color={colors.dangerDot} />
           <Txt className="flex-1 text-body text-danger">Delete account</Txt>
         </Pressable>
       </Group>
@@ -1035,7 +1035,7 @@ function SecuritySection() {
         <Modal visible transparent animationType="fade" onRequestClose={closeDelete}>
           <Pressable
             onPress={closeDelete}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
               <Pressable
@@ -1096,7 +1096,7 @@ function SecuritySection() {
               </View>
               {!s.current && (
                 <Pressable hitSlop={8} onPress={() => revoke(s.id)}>
-                  <Mono className="text-micro uppercase text-danger">Revoke</Mono>
+                  <Mono className="text-caption font-medium text-danger">Revoke</Mono>
                 </Pressable>
               )}
             </View>
@@ -1127,7 +1127,7 @@ function SecuritySection() {
             }
             className="border-t border-line-row px-4 py-3.5 active:bg-surface-hover"
           >
-            <Mono className="text-micro uppercase text-danger">
+            <Mono className="text-caption font-medium text-danger">
               {otherCount > 0 ? 'Log out other sessions' : 'Log out all sessions'}
             </Mono>
           </Pressable>
@@ -1143,7 +1143,7 @@ function SecuritySection() {
             >
               <View
                 className="h-2 w-2 rounded-pill"
-                style={{ backgroundColor: ACTIVITY_TONE[a.event] ?? statusHues.info }}
+                style={{ backgroundColor: colors[ACTIVITY_TONE[a.event] ?? 'infoDot'] }}
               />
               <View className="flex-1">
                 <Txt className="text-caption text-fg">
@@ -1206,12 +1206,12 @@ const ACTIVITY_LABEL: Record<string, string> = {
   revoked_others: 'Other sessions revoked',
   revoked_all: 'All sessions revoked',
 };
-const ACTIVITY_TONE: Record<string, string> = {
-  login: statusHues.success,
-  logout: statusHues.info,
-  revoked: statusHues.danger,
-  revoked_others: statusHues.danger,
-  revoked_all: statusHues.danger,
+const ACTIVITY_TONE: Record<string, 'successDot' | 'infoDot' | 'dangerDot'> = {
+  login: 'successDot',
+  logout: 'infoDot',
+  revoked: 'dangerDot',
+  revoked_others: 'dangerDot',
+  revoked_all: 'dangerDot',
 };
 
 const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC'].map((p) => ({
@@ -1268,6 +1268,17 @@ function CompanySection() {
   const [fuelZone, setFuelZone] = useState<'INLAND' | 'COASTAL'>('INLAND');
   const [livePrice, setLivePrice] = useState<Record<string, unknown> | null>(null);
   const [fetchingLive, setFetchingLive] = useState(false);
+  // Banking details, shown in a "How to pay" block on invoices (PDF, email and
+  // the online copy) once a bank name and account number are both filled in.
+  const [bankName, setBankName] = useState('');
+  const [bankHolder, setBankHolder] = useState('');
+  const [bankAccount, setBankAccount] = useState('');
+  const [bankBranch, setBankBranch] = useState('');
+  const [bankType, setBankType] = useState('none');
+  const [payRefHint, setPayRefHint] = useState('');
+  // An invoice is raised when a load is delivered. 'no' leaves it as a draft to
+  // check and send; 'yes' emails the customer straight away.
+  const [autoEmail, setAutoEmail] = useState('no');
 
   useEffect(() => {
     if (seeded || !data) return;
@@ -1303,6 +1314,13 @@ function CompanySection() {
     seedNum(['cross_border_crossings_per_year'], setCrossingsPerYear);
     setFuelZone(str(pick(data, ['fuel_zone'])) === 'COASTAL' ? 'COASTAL' : 'INLAND');
     setAllowCrossBorder(pick(data, ['allow_cross_border']) === false ? 'no' : 'yes');
+    setBankName(str(pick(data, ['bank_name'])));
+    setBankHolder(str(pick(data, ['bank_account_holder'])));
+    setBankAccount(str(pick(data, ['bank_account_number'])));
+    setBankBranch(str(pick(data, ['bank_branch_code'])));
+    setBankType(str(pick(data, ['bank_account_type']), 'none') || 'none');
+    setPayRefHint(str(pick(data, ['payment_reference_hint'])));
+    setAutoEmail(pick(data, ['auto_email_invoices']) === true ? 'yes' : 'no');
     const logo = str(pick(data, ['logo_url']));
     if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
     setSeeded(true);
@@ -1363,6 +1381,21 @@ function CompanySection() {
       if (n != null && !Number.isInteger(n)) return toast.error(`${label} must be a whole number`);
     }
 
+    // Banking details: spaces and hyphens are fine (the server strips them), but
+    // what is left must be digits. Blank clears the field. A bank name and an
+    // account number only make sense together.
+    const accountDigits = bankAccount.replace(/[\s-]/g, '');
+    if (accountDigits && !/^\d{6,20}$/.test(accountDigits)) {
+      return toast.error('Account number must be 6 to 20 digits');
+    }
+    const branchDigits = bankBranch.replace(/[\s-]/g, '');
+    if (branchDigits && !/^\d{4,10}$/.test(branchDigits)) {
+      return toast.error('Branch code must be 4 to 10 digits');
+    }
+    if (!!bankName.trim() !== !!accountDigits) {
+      return toast.error('Enter both a bank name and an account number, or leave both blank');
+    }
+
     // Company's rate/price columns are DecimalField(…, decimal_places=N)
     // with no server-side rounding — round to each column's own precision so
     // a value with more decimals than that (a still-focused field's blur
@@ -1417,6 +1450,14 @@ function CompanySection() {
         },
         contact: { phone: phone.trim(), email: email.trim(), support_email: supportEmail.trim() },
         allow_cross_border: allowCrossBorder === 'yes',
+        auto_email_invoices: autoEmail === 'yes',
+        // Blank is sent as null so a field can be cleared as well as set.
+        bank_name: bankName.trim() || null,
+        bank_account_holder: bankHolder.trim() || null,
+        bank_account_number: accountDigits || null,
+        bank_branch_code: branchDigits || null,
+        bank_account_type: bankType === 'none' ? null : bankType,
+        payment_reference_hint: payRefHint.trim() || null,
         // PositiveIntegerField, NOT NULL with a factory default of 24 — a
         // blank box falls back to that rather than clearing, same shape as
         // diesel below.
@@ -1521,11 +1562,18 @@ function CompanySection() {
   );
   const liveNote = (() => {
     if (!livePrice || pick(livePrice, ['success']) === false || liveDiesel <= 0) return '';
+    // The price is the 50ppm wholesale list price from a given day; say which
+    // day (effective_from, in SAST), falling back to the month it was fetched.
+    const effective = str(pick(livePrice, ['effective_from']));
     const updated = str(pick(livePrice, ['last_updated']));
+    const grade = str(pick(livePrice, ['diesel_grade']));
     const warning = str(pick(livePrice, ['stale_warning']));
     const zoneLabel = fuelZone === 'COASTAL' ? 'coastal' : 'inland';
-    const parts = [`Live national diesel ${formatCurrency(liveDiesel)}/L (${zoneLabel})`];
-    if (updated) parts.push(`updated ${formatDate(updated)}`);
+    const parts = [
+      `Live national diesel ${formatCurrency(liveDiesel)}/L (${[grade, zoneLabel].filter(Boolean).join(' ')})`,
+    ];
+    if (effective) parts.push(`effective ${formatDate(effective.slice(0, 10))}`);
+    else if (updated) parts.push(`updated ${formatDate(updated)}`);
     if (warning) parts.push(warning);
     return parts.join(' · ');
   })();
@@ -1653,6 +1701,84 @@ function CompanySection() {
         value={supportEmail}
         onChangeText={setSupportEmail}
       />
+
+      <Label className="mt-1 text-muted">Banking details</Label>
+      <Txt className="-mt-2 text-caption text-faint">
+        Shown in a &quot;How to pay&quot; section on the invoices you send (PDF, invoice email and
+        online invoice) once a bank name and account number are filled in. Until then, invoices ask
+        customers to contact you for banking details.
+      </Txt>
+      <TextField
+        label="Bank name"
+        placeholder="e.g. FNB"
+        maxLength={100}
+        value={bankName}
+        onChangeText={setBankName}
+      />
+      <TextField
+        label="Account holder"
+        placeholder={companyName || 'Registered account name'}
+        maxLength={200}
+        value={bankHolder}
+        onChangeText={setBankHolder}
+      />
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <TextField
+            label="Account number"
+            placeholder="Digits only"
+            keyboardType="number-pad"
+            maxLength={30}
+            value={bankAccount}
+            onChangeText={setBankAccount}
+          />
+        </View>
+        <View className="flex-1">
+          <TextField
+            label="Branch code"
+            placeholder="e.g. 250655"
+            keyboardType="number-pad"
+            maxLength={14}
+            value={bankBranch}
+            onChangeText={setBankBranch}
+          />
+        </View>
+      </View>
+      <SelectField
+        label="Account type"
+        options={[
+          { label: 'Not specified', value: 'none' },
+          { label: 'Cheque / current', value: 'CHEQUE' },
+          { label: 'Savings', value: 'SAVINGS' },
+          { label: 'Transmission', value: 'TRANSMISSION' },
+        ]}
+        value={bankType}
+        onSelect={setBankType}
+      />
+      <TextField
+        label="Payment reference wording (optional)"
+        placeholder="Please use the invoice number as your payment reference."
+        maxLength={200}
+        value={payRefHint}
+        onChangeText={setPayRefHint}
+      />
+      <Txt className="-mt-1 text-caption text-faint">Replaces the default wording on invoices.</Txt>
+
+      <Label className="mt-1 text-muted">Invoicing</Label>
+      <SelectField
+        label="Email invoices on delivery"
+        options={[
+          { label: 'No, keep as a draft', value: 'no' },
+          { label: 'Yes, email the customer', value: 'yes' },
+        ]}
+        value={autoEmail}
+        onSelect={setAutoEmail}
+      />
+      <Txt className="-mt-1 text-caption text-faint">
+        An invoice is raised automatically when a load is delivered. With No, it waits as a draft
+        for you to check and send. With Yes, it is emailed to the customer straight away and marked
+        sent. A customer with no email address always gets a draft.
+      </Txt>
 
       <Label className="mt-1 text-muted">Quote defaults</Label>
       <SelectField
@@ -1821,7 +1947,7 @@ function CompanySection() {
 // Web's six. CUSTOMER and PARTNER exist on the model but neither client
 // exposes them for staff invites.
 const ROLES = ['ADMIN', 'MANAGER', 'OPERATOR', 'DISPATCHER', 'VIEWER', 'DRIVER'].map((r) => ({
-  label: r,
+  label: r.charAt(0) + r.slice(1).toLowerCase(),
   value: r,
 }));
 
@@ -1915,7 +2041,7 @@ function UsersSection() {
               {/* The backend refuses a self role-change ("You cannot change
                   your own role"), so don't offer the control. */}
               {String(u.id) === String(meId) ? (
-                <Mono className="text-micro uppercase text-faint">You</Mono>
+                <Mono className="text-caption font-medium text-faint">You</Mono>
               ) : (
                 <>
                   <View style={{ width: 120 }}>
@@ -1975,15 +2101,11 @@ function useNextPaymentLabel(nextBillingAt: string): string {
   return label;
 }
 
-const CHARGE_TONE = (status: string) =>
-  status === 'complete'
-    ? statusHues.success
-    : status === 'pending'
-      ? statusHues.warning
-      : statusHues.danger;
-
 /** One charge row, shared by the preview and the full-history screen. */
 function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
+  const { colors } = useTheme();
+  const chargeTone = (status: string) =>
+    status === 'complete' ? colors.success : status === 'pending' ? colors.warning : colors.danger;
   return (
     <View className={`px-4 py-3 ${last ? '' : 'border-b border-line-row'}`}>
       <View className="flex-row items-center justify-between">
@@ -1996,7 +2118,7 @@ function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
         <Mono className="text-micro text-faint">
           {[c.createdAt ? formatDate(c.createdAt) : '', c.reference].filter(Boolean).join(' · ')}
         </Mono>
-        <Mono className="text-micro uppercase" style={{ color: CHARGE_TONE(c.status) }}>
+        <Mono className="text-micro capitalize" style={{ color: chargeTone(c.status) }}>
           {c.status}
         </Mono>
       </View>
@@ -2009,6 +2131,7 @@ function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
 // it's the same reason there's no sign-up here — so this shows everything the
 // web page shows but sends people there to actually change the plan.
 function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
+  const { colors } = useTheme();
   const { data } = useBillingStatus();
   const { data: history } = useBillingHistory();
   const d = data ?? {};
@@ -2041,7 +2164,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
     <View className="gap-4">
       {suspended && (
         <View className="flex-row items-start gap-2.5 rounded-control border border-danger bg-danger-bg p-3">
-          <Icon name="alert" size={17} color="#FF4949" />
+          <Icon name="alert" size={17} color={colors.dangerDot} />
           <Txt className="flex-1 text-sub text-muted">
             Your subscription is suspended. You can still view existing data and manage drivers and
             vehicles, but new quotes and invoices are blocked until payment is settled.
@@ -2050,7 +2173,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
       )}
       {!suspended && cancelling && (
         <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color="#F59E0B" />
+          <Icon name="alert" size={17} color={colors.warningDot} />
           <Txt className="flex-1 text-sub text-muted">
             Cancelling
             {subEnd ? ` — access continues until ${formatDate(subEnd)}` : ''}. Quoting and invoicing
@@ -2060,7 +2183,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
       )}
       {!suspended && !cancelling && graceDays > 0 && (
         <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color="#F59E0B" />
+          <Icon name="alert" size={17} color={colors.warningDot} />
           <Txt className="flex-1 text-sub text-muted">
             Payment is overdue — {graceDays} day{graceDays === 1 ? '' : 's'} of grace remaining
             {graceExpires ? ` (until ${formatDate(graceExpires)})` : ''}.
@@ -2077,7 +2200,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
                 label={str(pick(item, ['label']), 'Charge')}
                 hint={`Failed ${formatDate(str(pick(item, ['failed_at'])))}`}
                 value={formatCurrency(num(pick(item, ['amount'])))}
-                valueColor={statusHues.warning}
+                valueColor={colors.warning}
                 mono={false}
               />
             ))}
@@ -2166,7 +2289,7 @@ function IntegrationsSection() {
             <Txt className="text-callout text-fg">Xero</Txt>
             <Txt className="mt-0.5 text-caption text-faint">Accounting sync</Txt>
           </View>
-          <Mono className={`text-micro uppercase ${connected ? 'text-success' : 'text-faint'}`}>
+          <Mono className={`text-caption font-medium ${connected ? 'text-success' : 'text-faint'}`}>
             {connected ? 'Connected' : 'Not connected'}
           </Mono>
         </View>

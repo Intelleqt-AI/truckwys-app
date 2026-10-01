@@ -1,6 +1,7 @@
 import { num, str, pick, asArray } from '@/lib/api/list';
 import type { VehicleType } from '../api';
 import { FUEL_FALLBACK, FUEL_PRICE_FIELD_BY_TYPE, capacityTons } from './types';
+import { resolveDieselPrice, dieselBasisNote, liveDieselHint } from '@/lib/dieselPrice';
 
 /**
  * With no vehicle type picked there is no reference tonnage to scale fuel
@@ -64,6 +65,20 @@ export interface ComputeCostsInput {
   tollOverrideNum: number;
   driverNum: number;
   serviceCharge: number;
+  /** Response of GET fuel-prices/current/, for pricing diesel off the live zone price. */
+  liveFuel?: Record<string, unknown> | null;
+  /**
+   * A market fuel price applied from the price check (R/L). It replaces the
+   * company/live price for this fuel type, and the fuel line is then
+   * litres × price rounded once, which is how the backend rounds it.
+   */
+  aiFuelPrice?: number | null;
+  /**
+   * A market toll total applied from the price check, per ONE-WAY leg. Only
+   * passed while it still belongs to this route; ignored once the person types
+   * their own toll figure.
+   */
+  aiTollOneWay?: number | null;
 }
 
 export interface CostBreakdown {
@@ -81,8 +96,18 @@ export interface CostBreakdown {
   tollBreakdown: Record<string, unknown>[];
   /** The selected route reported an itemised toll of exactly zero — it
       genuinely has no plazas, as opposed to no route data having arrived
-      yet (in which case there's nothing to report either way). */
+      yet (in which case there's nothing to report either way). False whenever
+      the backend says it could not calculate tolls at all. */
   tollFree: boolean;
+  /** The backend could not calculate tolls (routing down, no plaza data, no
+      known toll corridor...). toll_cost_zar is then 0 but does NOT mean
+      toll-free: the user has to enter tolls by hand. */
+  tollsUnavailable: boolean;
+  /** The backend's own sentence for why, e.g. "Tolls are NOT included; add them
+      manually." Null when tolls are available. */
+  tollWarning: string | null;
+  /** The figure is an estimate rather than a toll-plaza geofence match. */
+  tollsEstimated: boolean;
   crossBorderCost: number;
   /** The three server bucket totals, one way — used as the breakdown modal's
       fallback rows on a route response cached before cross_border_breakdown
@@ -130,6 +155,22 @@ export interface CostBreakdown {
       only fuel gazetted per zone), else ''. Computed once here rather than in
       each display site so the fuel row and the modal can't disagree. */
   fuelZoneNote: string;
+  /** "Live diesel: R29,56/L (effective 2 Sep)" when the fleet's own price is in
+      use and a live price exists to compare it with; else null. */
+  fuelLiveHint: string | null;
+  /** Unrounded litres behind fuelCost (the price check sends the exact figure). */
+  fuelLitres: number;
+  /** The fuel type this quote is priced in (the selected truck's, else Diesel). */
+  fuelType: string;
+  /** Diesel's pricing zone; null for every other fuel type (only diesel is split). */
+  fuelZone: 'INLAND' | 'COASTAL' | null;
+  /** A market fuel price from the price check is what is being charged. */
+  fuelFromMarketCheck: boolean;
+  /** The price this quote would use without a market figure applied (live zone
+      price, the fleet's own, or the per-type default). */
+  fuelCompanyPrice: number;
+  /** A market toll figure from the price check is what is being charged. */
+  tollFromMarketCheck: boolean;
 }
 
 export function computeCosts({
@@ -145,6 +186,9 @@ export function computeCosts({
   tollOverrideNum,
   driverNum,
   serviceCharge,
+  liveFuel,
+  aiFuelPrice,
+  aiTollOneWay,
 }: ComputeCostsInput): CostBreakdown {
   const distance =
     num(pick(currentRoute, ['distance_km'])) || num(pick(routeData ?? {}, ['distance_km']));
@@ -186,23 +230,34 @@ export function computeCosts({
   // bases), but bit-for-bit parity with web is the point here — web is the
   // pricing source of truth, so this app must land on the exact same number.
   // If this gets fixed, it must happen on web first.
-  const fuelField =
-    FUEL_PRICE_FIELD_BY_TYPE[str(selectedVt?.fuel_type, 'Diesel')] ?? 'fuel_price_per_litre';
-  const fuelPrice =
+  const fuelType = str(selectedVt?.fuel_type, 'Diesel');
+  const fuelField = FUEL_PRICE_FIELD_BY_TYPE[fuelType] ?? 'fuel_price_per_litre';
+  // Diesel is priced off the live price for the company's zone, unless the fleet
+  // set its own (anything but the untouched 23.50 default): see lib/dieselPrice.
+  // Every other fuel type keeps the company's per-type default.
+  const isDieselPricing = fuelField === 'fuel_price_per_litre';
+  const diesel = resolveDieselPrice({ company, live: liveFuel });
+  const companyFuelPrice =
+    (isDieselPricing ? diesel.price : null) ||
     num(pick(company ?? {}, [fuelField])) ||
     num(pick(company ?? {}, ['fuel_price_per_litre'])) ||
     21.7;
-  const fuelCost = Math.round((chargeDistance * consumption * fuelPrice) / 100);
+  const fuelFromMarketCheck = aiFuelPrice != null && aiFuelPrice > 0;
+  const fuelPrice = fuelFromMarketCheck ? (aiFuelPrice as number) : companyFuelPrice;
+  const fuelLitres = (chargeDistance * consumption) / 100;
+  const fuelCost = fuelFromMarketCheck
+    ? Math.round(fuelLitres * fuelPrice)
+    : Math.round((chargeDistance * consumption * fuelPrice) / 100);
   // Diesel is gazetted at two prices, coastal and inland, ~R0.87/L apart —
   // say which one this figure is so it can be checked against a real
   // fuel-card statement. Only diesel has that split, so the note is omitted
   // for every other fuel type.
-  const fuelZoneNote =
-    fuelField === 'fuel_price_per_litre'
-      ? str(pick(company ?? {}, ['fuel_zone'])) === 'COASTAL'
-        ? ' · coastal'
-        : ' · inland'
+  const fuelZoneNote = fuelFromMarketCheck
+    ? ' · official price'
+    : isDieselPricing
+      ? dieselBasisNote(diesel)
       : '';
+  const fuelLiveHint = isDieselPricing && !fuelFromMarketCheck ? liveDieselHint(diesel) : null;
 
   // A route that matched no plazas reports toll_cost_zar: 0 and means it —
   // the backend has deliberately no "found 0 → estimate" fallback (e.g.
@@ -213,12 +268,35 @@ export function computeCosts({
   // When the route has no toll_cost_zar field at all (genuinely missing, not
   // an authoritative zero), estimate it the same way web does: distance ×
   // the company's default toll rate per km, falling back to a literal.
+  //
+  // Both toll_cost_zar and toll_breakdown[].tariff are VAT-exclusive (backend
+  // docs/backend-changes/2026-09-toll-class-vat.md), the same basis the quote is
+  // priced on. The exception to "0 means it" is tolls_unavailable: the backend
+  // then returns 0 with a warning that tolls are NOT included, so that zero is
+  // a gap to fill by hand, never a claim that the route is toll-free.
   const rawToll =
     pick(currentRoute, ['toll_cost_zar']) ?? pick(routeData ?? {}, ['toll_cost_zar']);
-  const tollFree = rawToll != null && num(rawToll) === 0;
+  const tollsUnavailable =
+    (pick(currentRoute, ['tolls_unavailable']) ?? pick(routeData ?? {}, ['tolls_unavailable'])) === true;
+  const tollWarningRaw = str(
+    pick(currentRoute, ['toll_warning']) ?? pick(routeData ?? {}, ['toll_warning']),
+  );
+  const tollWarning = tollsUnavailable
+    ? tollWarningRaw || 'Tolls could not be calculated for this route. Add them manually.'
+    : null;
+  const tollsEstimated =
+    (pick(currentRoute, ['tolls_estimated']) ?? pick(routeData ?? {}, ['tolls_estimated'])) === true;
+  const tollFree = rawToll != null && num(rawToll) === 0 && !tollsUnavailable;
   const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
   const routeTollOneWay = rawToll != null ? num(rawToll) : distance * tollRate;
-  const tollCost = tollEdited ? tollOverrideNum : Math.round(routeTollOneWay * legs);
+  // What the person typed always wins; then a market figure applied from the
+  // price check (kept to the cent, as the backend states it); then the route's.
+  const tollFromMarketCheck = !tollEdited && aiTollOneWay != null && aiTollOneWay >= 0;
+  const tollCost = tollEdited
+    ? tollOverrideNum
+    : tollFromMarketCheck
+      ? Math.round((aiTollOneWay as number) * legs * 100) / 100
+      : Math.round(routeTollOneWay * legs);
   const tollBreakdown = (
     asArray(pick(currentRoute, ['toll_breakdown'])).length
       ? asArray(pick(currentRoute, ['toll_breakdown']))
@@ -261,6 +339,9 @@ export function computeCosts({
     tollBreakdownOneWay: Math.round(routeTollOneWay),
     tollBreakdown,
     tollFree,
+    tollsUnavailable,
+    tollWarning,
+    tollsEstimated,
     crossBorderCost,
     borderFees,
     weighbridgeFees,
@@ -280,5 +361,12 @@ export function computeCosts({
     fuelBasisCapacityTons: refCapacityTons,
     fuelSensitivity: sensitivity,
     fuelZoneNote,
+    fuelLiveHint,
+    fuelLitres,
+    fuelType,
+    fuelZone: isDieselPricing ? diesel.zone : null,
+    fuelFromMarketCheck,
+    fuelCompanyPrice: companyFuelPrice,
+    tollFromMarketCheck,
   };
 }

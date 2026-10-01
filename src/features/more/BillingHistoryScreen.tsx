@@ -5,7 +5,7 @@ import { SheetScreen, Group, FilterChips, Txt, Mono, EmptyState } from '@/compon
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useBillingHistory, type BillingCharge } from './api';
 import { formatCurrency, formatDate } from '@/lib/formatters';
-import { status as statusHues } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'BillingHistory'>;
@@ -37,10 +37,10 @@ function matchesPeriod(iso: string, period: Period): boolean {
   return t.getFullYear() === now.getFullYear();
 }
 
-const tone = (status: string) =>
-  status === 'complete' ? statusHues.success : status === 'pending' ? statusHues.warning : statusHues.danger;
-
 function ChargeGroup({ title, rows }: { title: string; rows: BillingCharge[] }) {
+  const { colors } = useTheme();
+  const tone = (status: string) =>
+    status === 'complete' ? colors.success : status === 'pending' ? colors.warning : colors.danger;
   const total = rows.reduce((sum, r) => sum + r.amount, 0);
   return (
     <View className="mb-5">
@@ -68,7 +68,7 @@ function ChargeGroup({ title, rows }: { title: string; rows: BillingCharge[] }) 
                 <Mono className="text-micro text-faint">
                   {[c.createdAt ? formatDate(c.createdAt) : '', c.reference].filter(Boolean).join(' · ')}
                 </Mono>
-                <Mono className="text-micro uppercase" style={{ color: tone(c.status) }}>
+                <Mono className="text-micro capitalize" style={{ color: tone(c.status) }}>
                   {c.status}
                 </Mono>
               </View>

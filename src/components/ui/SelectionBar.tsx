@@ -3,7 +3,6 @@ import { View, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Mono } from './Text';
 import { Icon } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
 
 /**
  * The circular tick a row shows in selection mode — same shape the
@@ -104,7 +103,7 @@ export function SelectionActions({
           className="min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-line-active bg-surface px-2.5"
         >
           <Icon name="check" size={14} color={colors.fg} strokeWidth={2.2} />
-          <Mono className="text-nano uppercase tracking-wide text-fg">
+          <Mono className="text-caption font-medium text-fg">
             {allSelected ? 'Deselect all' : 'Select all'}
           </Mono>
         </TouchableOpacity>
@@ -116,16 +115,16 @@ export function SelectionActions({
         accessibilityRole="button"
         accessibilityLabel={`Delete ${count} ${label}`}
         accessibilityState={{ disabled: count === 0 || busy }}
-        className={`min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-danger bg-danger-bg px-2.5 ${
+        className={`min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-line-active bg-surface px-2.5 ${
           count === 0 ? 'opacity-40' : ''
         }`}
       >
         {busy ? (
-          <ActivityIndicator size="small" color={statusHues.danger} />
+          <ActivityIndicator size="small" color={colors.danger} />
         ) : (
           <>
-            <Icon name="trash" size={14} color={statusHues.danger} strokeWidth={2.2} />
-            <Mono className="text-nano uppercase tracking-wide text-danger">
+            <Icon name="trash" size={14} color={colors.danger} strokeWidth={2.2} />
+            <Mono className="text-caption font-medium text-danger">
               {count > 0 ? count : ''}
             </Mono>
           </>

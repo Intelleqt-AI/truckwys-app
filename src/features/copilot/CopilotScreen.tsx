@@ -497,17 +497,16 @@ export function CopilotScreen({ navigation }: Props) {
         </Animated.View>
       </KeyboardAvoidingView>
 
-      {historyOpen && (
-        <ConversationSheet
-          conversations={conversations ?? []}
-          loading={convosFetching}
-          activeId={conversationId}
-          onOpen={openConversation}
-          onDelete={(id) => void removeConversation(id)}
-          onNewChat={startNewChat}
-          onClose={() => setHistoryOpen(false)}
-        />
-      )}
+      <ConversationSheet
+        open={historyOpen}
+        conversations={conversations ?? []}
+        loading={convosFetching}
+        activeId={conversationId}
+        onOpen={openConversation}
+        onDelete={(id) => void removeConversation(id)}
+        onNewChat={startNewChat}
+        onClose={() => setHistoryOpen(false)}
+      />
     </View>
   );
 }

@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { QueryClientProvider } from '@tanstack/react-query';
 import * as SplashScreen from 'expo-splash-screen';
 import { ThemeProvider } from '@/theme/ThemeProvider';
@@ -59,7 +60,9 @@ export default function App() {
             <ThemeProvider>
               <ErrorBoundary>
                 <ThemedStatusBar />
-                <RootNavigator />
+                <BottomSheetModalProvider>
+                  <RootNavigator />
+                </BottomSheetModalProvider>
                 <ToastHost />
               </ErrorBoundary>
             </ThemeProvider>

@@ -504,7 +504,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     view: {
       label: 'View booking',
       icon: 'arrowRight' as IconName,
-      onPress: () => navigation.navigate('LoadDetail', { id: bookedLoad!.id }),
+      onPress: () =>
+        navigation.navigate('LoadDetail', { id: bookedLoad!.id, title: bookedLoad!.load_number }),
     },
     convert: {
       label: 'Convert to booking',

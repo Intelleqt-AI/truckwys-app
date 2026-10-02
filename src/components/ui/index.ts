@@ -35,6 +35,7 @@ export {
   Fab,
 } from './layout';
 export { InfoTip } from './InfoTip';
+export { AppSheet, type AppSheetProps } from './AppSheet';
 export { OverflowMenu, type OverflowAction } from './OverflowMenu';
 export {
   StatCard,

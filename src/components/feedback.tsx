@@ -24,19 +24,21 @@ export function Skeleton({
   className?: string;
 }) {
   const reduceMotion = useReducedMotion();
-  const o = useSharedValue(reduceMotion ? 0.7 : 0.4);
+  const o = useSharedValue(reduceMotion ? 0.8 : 0.55);
   useEffect(() => {
     // Reduce Motion: a still, mid-opacity block instead of the pulse.
     if (reduceMotion) {
-      o.value = 0.7;
+      o.value = 0.8;
       return;
     }
-    o.value = withRepeat(withTiming(0.9, { duration: 800 }), -1, true);
+    o.value = withRepeat(withTiming(1, { duration: 800 }), -1, true);
   }, [o, reduceMotion]);
   const style = useAnimatedStyle(() => ({ opacity: o.value }));
   return (
+    // bg-line-active, not bg-raised: raised is nearly the page background in both
+    // themes, so at the low point of the pulse the block all but vanished.
     <Animated.View
-      className={`bg-raised ${className}`}
+      className={`bg-line-active ${className}`}
       style={[{ width: width as number, height, borderRadius: radius }, style]}
     />
   );
@@ -63,16 +65,34 @@ export function ErrorState({ onRetry, message }: { onRetry: () => void; message?
 // render from, so it used to paint empty values ("DRAFT / R0") until the fetch
 // landed. Web shows a block skeleton and, for a 404, a not-found state; these are
 // the mobile equivalents. Content only — the caller keeps its own SheetScreen.
+// Each block is a bordered card with shimmer bars inside, like the real cards, so
+// the page has a visible outline even when a bar is at the dim end of its pulse.
+function SkeletonCard({ bars, className = '' }: { bars: number[]; className?: string }) {
+  return (
+    <View className={`gap-3 rounded-card border border-line bg-surface p-4 ${className}`}>
+      {bars.map((w, i) => (
+        <Skeleton key={i} width={`${w}%`} height={i === 0 ? 14 : 11} />
+      ))}
+    </View>
+  );
+}
+
 export function DetailSkeleton() {
   return (
     <View accessibilityLabel="Loading" accessibilityRole="progressbar">
       <View className="mb-5 flex-row gap-3">
-        <Skeleton width="48%" height={78} radius={radiusTokens.card} />
-        <Skeleton width="48%" height={78} radius={radiusTokens.card} />
+        <View className="flex-1 gap-3 rounded-card border border-line bg-surface p-4">
+          <Skeleton width="50%" height={11} />
+          <Skeleton width="75%" height={20} />
+        </View>
+        <View className="flex-1 gap-3 rounded-card border border-line bg-surface p-4">
+          <Skeleton width="50%" height={11} />
+          <Skeleton width="75%" height={20} />
+        </View>
       </View>
-      <Skeleton height={168} radius={radiusTokens.card} className="mb-5" />
-      <Skeleton height={132} radius={radiusTokens.card} className="mb-5" />
-      <Skeleton height={96} radius={radiusTokens.card} />
+      <SkeletonCard bars={[40, 90, 75, 85, 60]} className="mb-5" />
+      <SkeletonCard bars={[35, 80, 65, 70]} className="mb-5" />
+      <SkeletonCard bars={[45, 85, 55]} />
     </View>
   );
 }

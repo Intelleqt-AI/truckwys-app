@@ -42,7 +42,7 @@ import type { AppStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<AppStackParamList, 'LoadDetail'>;
 
 export function LoadDetailScreen({ route, navigation }: Props) {
-  const { id, preview } = route.params;
+  const { id, preview, title } = route.params;
   const { data, error, isError, isPending, refetch } = useLoad(id, preview);
   const { colors } = useTheme();
   const qc = useQueryClient();
@@ -68,7 +68,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   // say it's loading rather than rendering a zeroed "PENDING / Unassigned" load.
   if (isPending && !data) {
     return (
-      <SheetScreen title="Load" onBack={() => navigation.goBack()}>
+      <SheetScreen title={title ?? 'Load'} onBack={() => navigation.goBack()}>
         <DetailSkeleton />
       </SheetScreen>
     );

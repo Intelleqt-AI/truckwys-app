@@ -398,6 +398,13 @@ function ExpensesTab() {
             <OverflowMenu
               actions={actionsFor(item)}
               title={item.description || expenseCategoryLabel(item.category)}
+              subtitle={[
+                item.description ? expenseCategoryLabel(item.category) : '',
+                formatCurrency(item.amount),
+                item.date ? formatDate(item.date) : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
               accessibilityLabel={`Actions for ${item.description || expenseCategoryLabel(item.category)}`}
             />
           </View>

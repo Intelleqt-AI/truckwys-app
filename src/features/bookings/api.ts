@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import type { AllPages } from '@/lib/api/fetchAllPages';
 import { asArray, num, str, pick } from '@/lib/api/list';
@@ -85,12 +85,27 @@ export function useQuoteFuelAlert(id: string | number, enabled: boolean) {
   });
 }
 
+/**
+ * A load row some list already downloaded (Home's ledger, or the Orders/History
+ * pages), for a screen opened by id alone: the "View booking" link on a quote
+ * knows the load's id but carries no row. Undefined when no list has it yet.
+ */
+function cachedLoadRow(qc: QueryClient, id: string | number): Record<string, unknown> | undefined {
+  const same = (r: Record<string, unknown>) => String(pick(r, ['id', 'pk'])) === String(id);
+  const ledger = qc.getQueryData<AllPages<Record<string, unknown>>>(['ledger-loads'])?.rows;
+  const fromLedger = ledger?.find(same);
+  if (fromLedger) return fromLedger;
+  const pages = qc.getQueryData<InfiniteData<unknown>>(['loads'])?.pages;
+  return pages?.flatMap((p) => asArray<Record<string, unknown>>(p)).find(same);
+}
+
 export function useLoad(id: string | number, preview?: Record<string, unknown>) {
+  const qc = useQueryClient();
   return useQuery<Record<string, unknown>>({
     queryKey: ['load', id],
     queryFn: () => fetchData(`loads/${id}/`),
     // See useQuote — placeholderData so the real record is always fetched.
-    placeholderData: preview,
+    placeholderData: () => preview ?? cachedLoadRow(qc, id),
   });
 }
 

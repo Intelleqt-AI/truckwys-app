@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, TouchableOpacity, Platform } from 'react-native';
 import Animated, {
+  LinearTransition,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -31,6 +32,11 @@ const BAR_HEIGHT = 58; // minimum: the bar grows with Dynamic Type
 const HPAD = 3; // inner horizontal padding
 const V_INSET = 3; // highlight sits 3px inside the bar edge (near edge-to-edge)
 const HL_RADIUS = BAR_HEIGHT / 2 - V_INSET; // matches the bar's inner curve
+
+// The pill's position is committed as a plain `left` (not a shared-value
+// transform) so a native view rebuild (returning from a pushed screen, app
+// resume) can never snap it back to Home; the layout transition does the slide.
+const PILL_SPRING = LinearTransition.springify().damping(20).stiffness(200).mass(0.7);
 
 function Destination({
   focused,
@@ -116,15 +122,6 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
   // Full cell width: with HPAD=3 the pill sits 3px from the bar's left/right
   // edges at the end tabs, matching the 3px vertical inset (edge-to-edge look).
   const hlW = cellW;
-  const x = useSharedValue(0);
-
-  useEffect(() => {
-    if (!cellW) return;
-    const target = cellW * state.index + (cellW - hlW) / 2;
-    x.value = reduceMotion ? target : withSpring(target, { damping: 20, stiffness: 200, mass: 0.7 });
-  }, [state.index, cellW, hlW, x, reduceMotion]);
-
-  const highlight = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
@@ -144,18 +141,16 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
             {hlW > 0 && (
               <Animated.View
                 pointerEvents="none"
-                style={[
-                  {
-                    position: 'absolute',
-                    left: HPAD,
-                    top: V_INSET,
-                    bottom: V_INSET,
-                    width: hlW,
-                    borderRadius: HL_RADIUS,
-                    backgroundColor: highlightBg,
-                  },
-                  highlight,
-                ]}
+                layout={reduceMotion ? undefined : PILL_SPRING}
+                style={{
+                  position: 'absolute',
+                  left: HPAD + cellW * state.index,
+                  top: V_INSET,
+                  bottom: V_INSET,
+                  width: hlW,
+                  borderRadius: HL_RADIUS,
+                  backgroundColor: highlightBg,
+                }}
               />
             )}
             <View style={{ flex: 1, flexDirection: 'row' }}>

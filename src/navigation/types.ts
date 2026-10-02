@@ -19,7 +19,8 @@ export type TabParamList = {
 
 export type AppStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
-  LoadDetail: { id: Id; preview?: Record<string, unknown> };
+  /** `title` is the load number when the caller knows it, shown while the load loads. */
+  LoadDetail: { id: Id; preview?: Record<string, unknown>; title?: string };
   QuoteDetail: { id: Id; preview?: Record<string, unknown> };
   CreateQuote: { ai?: boolean; prefill?: Record<string, unknown>; quoteId?: Id } | undefined;
   VehicleDetail: { id: Id; preview?: Record<string, unknown> };

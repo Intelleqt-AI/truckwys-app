@@ -263,7 +263,7 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
       reference: quote.code,
       vehicleType: str(pick(quote.raw, ['vehicle_type'])) || undefined,
     });
-  const onViewBooking = () => bookedLoad && openLoad(bookedLoad.id);
+  const onViewBooking = () => bookedLoad && openLoad(bookedLoad.id, undefined, bookedLoad.load_number);
   return (
     <Card>
       <TouchableOpacity className="p-3.5" activeOpacity={0.7} onPress={onPress}>

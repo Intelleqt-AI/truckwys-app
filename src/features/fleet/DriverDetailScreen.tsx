@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   SheetScreen,
   StatCard,
+  KpiRow,
   StatusPill,
   SelectField,
   Group,
@@ -15,7 +16,7 @@ import {
   Mono,
   Txt,
 } from '@/components/ui';
-import { ErrorState } from '@/components/feedback';
+import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { useDriver, useDriverLoads, updateDriver, deleteDriver, DRIVER_STATUSES } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { num, str, pick, asArray } from '@/lib/api/list';
@@ -35,14 +36,30 @@ const isPast = (v: string) => (v ? new Date(v).getTime() < Date.now() : false);
 
 export function DriverDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
-  const { data, isError, refetch } = useDriver(id, preview);
+  const { data, error, isError, isPending, refetch } = useDriver(id, preview);
   const { data: loadsData } = useDriverLoads(id);
   const { openLoad } = useAppNavigation();
   const { colors } = useTheme();
   const qc = useQueryClient();
   const demo = useDemo();
 
+  // A 404 means the driver was deleted or moved, which retrying can't fix.
+  if (isError && !data && (error as { status?: number } | null)?.status === 404) {
+    return (
+      <SheetScreen title="Driver" onBack={() => navigation.goBack()}>
+        <NotFoundState what="Driver" onBack={() => navigation.goBack()} />
+      </SheetScreen>
+    );
+  }
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this driver." />;
+  // Opened cold (push, deep link) with no list-row preview: skeleton, not empty values.
+  if (isPending && !data) {
+    return (
+      <SheetScreen title="Driver" onBack={() => navigation.goBack()}>
+        <DetailSkeleton />
+      </SheetScreen>
+    );
+  }
   const d = (data ?? {}) as Record<string, unknown>;
   const userDetails = (pick(d, ['user_details']) ?? {}) as Record<string, unknown>;
   const name = resolveDriverName(d);
@@ -125,19 +142,13 @@ export function DriverDetailScreen({ route, navigation }: Props) {
         />
       </View>
 
-      <View className="mb-5 flex-row flex-wrap gap-3">
-        <View className="flex-row" style={{ width: '47.5%' }}>
+      <View className="mb-5">
+        <KpiRow>
           <StatCard label="Safety" value={`${num(pick(d, ['safety_score']))}/100`} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="On-time" value={formatPercent(num(pick(d, ['on_time_rate'])))} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Trips" value={String(num(pick(d, ['total_trips'])))} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Revenue" value={formatCurrencyCompact(num(pick(d, ['revenue_generated'])))} />
-        </View>
+        </KpiRow>
       </View>
 
       <Group label="Contact">
@@ -152,7 +163,7 @@ export function DriverDetailScreen({ route, navigation }: Props) {
         />
       </Group>
 
-      <Group label="Licence & compliance">
+      <Group label="Licence and compliance">
         <DetailRow label="Licence number" value={str(pick(d, ['license_number', 'license']), '—')} />
         <DetailRow label="Province" value={str(pick(d, ['license_state']), '—')} />
         <DetailRow
@@ -179,15 +190,15 @@ export function DriverDetailScreen({ route, navigation }: Props) {
         />
       </Group>
 
-      <Group label="Performance & safety">
+      <Group label="Performance and safety">
         <DetailRow label="Efficiency" value={`${num(pick(d, ['efficiency_score']))}/100`} />
         <DetailRow label="Trips this month" value={String(num(pick(d, ['trips_this_month'])))} />
         <DetailRow label="Total distance" value={`${formatNumber(num(pick(d, ['total_distance'])))} km`} />
         <DetailRow
-          label="Avg revenue / trip"
+          label="Average revenue per trip"
           value={formatCurrencyCompact(num(pick(d, ['avg_revenue_per_trip'])))}
         />
-        <DetailRow label="Margin / trip" value={formatCurrencyCompact(num(pick(d, ['margin_per_trip'])))} />
+        <DetailRow label="Margin per trip" value={formatCurrencyCompact(num(pick(d, ['margin_per_trip'])))} />
         <DetailRow label="Violations" value={String(num(pick(d, ['violation_count'])))} />
         <DetailRow label="Accidents" value={String(num(pick(d, ['accident_history'])))} last />
       </Group>

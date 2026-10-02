@@ -89,7 +89,7 @@ export function FindingsTab() {
           ) : (
             <>
               <SectionLabel>Ranked by value</SectionLabel>
-              <Txt className="-mt-1 mb-3 text-micro text-faint">
+              <Txt className="-mt-1 mb-3 text-caption text-faint">
                 Largest rand value first. Each finding needs at least R 1 000 and a clear trigger in
                 your records. Findings can share an invoice, so card values are not added together.
               </Txt>
@@ -121,7 +121,7 @@ export function FindingsTab() {
           )}
 
           {f.notes.map((n) => (
-            <Txt key={n} className="mt-2 text-micro text-faint">
+            <Txt key={n} className="mt-2 text-caption text-faint">
               {n}
             </Txt>
           ))}

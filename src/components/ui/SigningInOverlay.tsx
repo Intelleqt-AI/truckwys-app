@@ -1,5 +1,5 @@
 import { View, ActivityIndicator } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, useReducedMotion } from 'react-native-reanimated';
 import { Txt } from './Text';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -20,12 +20,13 @@ export interface SigningInOverlayProps {
  */
 export function SigningInOverlay({ visible }: SigningInOverlayProps) {
   const { colors } = useTheme();
+  const reduceMotion = useReducedMotion();
   if (!visible) return null;
 
   return (
     <Animated.View
-      entering={FadeIn.duration(150)}
-      exiting={FadeOut.duration(150)}
+      entering={reduceMotion ? undefined : FadeIn.duration(150)}
+      exiting={reduceMotion ? undefined : FadeOut.duration(150)}
       pointerEvents="auto"
       className="absolute inset-0 items-center justify-center bg-backdrop px-8"
     >

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Pressable, Modal, Platform } from 'react-native';
+import { View, TouchableOpacity, Modal, Platform } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,7 +7,7 @@ import { Txt, Mono, Label, FieldLabel } from './Text';
 import { Icon } from './icons';
 import { FieldMessage } from './forms';
 import { useTheme } from '@/theme/ThemeProvider';
-import { motion } from '@/theme/tokens';
+import { motion, TAP_MIN } from '@/theme/tokens';
 import { formatDate } from '@/lib/formatters';
 import { localDateISO } from '@/lib/dates';
 
@@ -72,31 +72,55 @@ export function DateField({
   return (
     <View>
       <FieldLabel label={label} required={required} />
-      <Pressable onPress={() => setOpen(true)}>
+      <TouchableOpacity
+        onPress={() => setOpen(true)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${label ?? 'Date'}, ${value ? formatDate(value) : 'not set'}`}
+        // The trigger groups its children for screen readers, which hides the
+        // inner clear button, so clearing is also offered as a custom action.
+        accessibilityActions={value ? [{ name: 'clear', label: 'Clear date' }] : undefined}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'clear') onChange('');
+        }}
+      >
         <Animated.View
-          className="min-h-[44px] flex-row items-center gap-2 rounded-control border bg-input px-3"
-          style={borderStyle}
+          style={[{ minHeight: TAP_MIN }, borderStyle]}
+          className="flex-row items-center gap-2 rounded-control border bg-input px-3"
         >
           <Icon name="calendar" size={17} color={colors.faint} />
           <Txt numberOfLines={1} className={`flex-1 text-body ${value ? 'text-fg' : 'text-faint'}`}>
             {value ? formatDate(value) : placeholder}
           </Txt>
           {value ? (
-            <Pressable hitSlop={10} onPress={() => onChange('')}>
+            <TouchableOpacity
+              hitSlop={16}
+              activeOpacity={0.6}
+              onPress={() => onChange('')}
+              accessibilityRole="button"
+              accessibilityLabel="Clear date"
+            >
               <Icon name="x" size={15} color={colors.faint} />
-            </Pressable>
+            </TouchableOpacity>
           ) : null}
         </Animated.View>
-      </Pressable>
+      </TouchableOpacity>
       <FieldMessage error={error} warning={warning} />
 
       {open && Platform.OS === 'ios' && (
         <Modal transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-          <Pressable className="flex-1 justify-end bg-backdrop" onPress={() => setOpen(false)}>
-            <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
+            accessible={false}
+            className="flex-1 justify-end bg-backdrop"
+            onPress={() => setOpen(false)}
+          >
+            {/* Inner touchable swallows taps so they don't reach the backdrop. */}
+            <TouchableOpacity
+              activeOpacity={1}
+              accessible={false}
               className="overflow-hidden rounded-t-panel border-t border-line bg-elevated"
               style={{ paddingBottom: insets.bottom + 8, boxShadow: colors.shadowPop }}
-              onPress={(e) => e.stopPropagation()}
             >
               <View className="flex-row items-center justify-between border-b border-line px-4 py-3">
                 <Label className="text-sub text-muted">{label ?? 'Date'}</Label>
@@ -107,15 +131,18 @@ export function DateField({
                     Idempotent: if they did scroll, onChange already wrote the
                     value and `current` re-derived from it, so this writes the
                     same string again. */}
-                <Pressable
-                  hitSlop={8}
+                <TouchableOpacity
+                  hitSlop={12}
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done"
                   onPress={() => {
                     onChange(toISODate(current));
                     setOpen(false);
                   }}
                 >
                   <Mono className="text-callout font-medium text-link">Done</Mono>
-                </Pressable>
+                </TouchableOpacity>
               </View>
               <DateTimePicker
                 value={current}
@@ -126,8 +153,8 @@ export function DateField({
                 minimumDate={minimumDate}
                 onChange={(_e: DateTimePickerEvent, d?: Date) => d && onChange(toISODate(d))}
               />
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
 

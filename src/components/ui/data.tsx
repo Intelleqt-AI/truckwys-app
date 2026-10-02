@@ -1,5 +1,5 @@
-import { Fragment, type ReactNode } from 'react';
-import { View, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { Children, Fragment, type ReactNode } from 'react';
+import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Txt, Mono, Label } from './Text';
 import { Card } from './primitives';
@@ -27,6 +27,11 @@ export function StatCard({
   delta,
   deltaTone = 'neutral',
   sub,
+  note,
+  tone,
+  emphasis = false,
+  onPress,
+  aside,
   compact = false,
 }: {
   label: string;
@@ -34,6 +39,18 @@ export function StatCard({
   delta?: string;
   deltaTone?: 'up' | 'down' | 'neutral';
   sub?: string;
+  /** Web's single note line under the figure; `tone` colours it, as on the web tile. */
+  note?: string;
+  tone?: KpiTone;
+  /**
+   * The page's one emphasis tile (web `--emphasis-fg`): a plain card, only the
+   * figure is drawn in accent. Use it once per screen.
+   */
+  emphasis?: boolean;
+  /** Makes the whole tile a button, e.g. a tile that applies a list filter. */
+  onPress?: () => void;
+  /** Trailing slot on the label row — an `InfoTip`. */
+  aside?: ReactNode;
   // Smaller padding/value size — opt-in so the 17+ other screens using this
   // component are unaffected. Home's bento pair is the only current user.
   compact?: boolean;
@@ -41,9 +58,15 @@ export function StatCard({
   const { colors } = useTheme();
   const deltaColor =
     deltaTone === 'up' ? colors.success : deltaTone === 'down' ? colors.danger : undefined;
-  return (
-    <Card className={`flex-1 ${compact ? 'p-3' : 'p-4'}`}>
-      <Label className="text-faint">{label}</Label>
+  const noteColor = tone ? colors[tone] : undefined;
+  const body = (
+    <>
+      <View className="flex-row items-center justify-between gap-1">
+        <Label className="shrink text-faint" numberOfLines={1}>
+          {label}
+        </Label>
+        {aside}
+      </View>
       {/* One line, shrunk to fit the tile: a long amount ("R 1 234 567") scales
           down instead of ending in an ellipsis, which would hide the digits
           that matter most. */}
@@ -51,7 +74,7 @@ export function StatCard({
         numberOfLines={1}
         adjustsFontSizeToFit
         minimumFontScale={0.55}
-        className={`${compact ? 'mt-1.5' : 'mt-2'} text-fg tracking-display`}
+        className={`${compact ? 'mt-1.5' : 'mt-2'} tracking-display ${emphasis ? 'text-accent' : 'text-fg'}`}
         style={{ fontSize: compact ? 20 : 24, fontWeight: '600' }}
       >
         {value}
@@ -63,8 +86,55 @@ export function StatCard({
           </Mono>
         )}
         {sub && <Mono className="text-caption text-faint">{sub}</Mono>}
+        {note && (
+          <Mono
+            className={`shrink text-caption ${noteColor ? '' : 'text-faint'}`}
+            style={noteColor ? { color: noteColor } : undefined}
+          >
+            {note}
+          </Mono>
+        )}
       </View>
-    </Card>
+    </>
+  );
+  const pad = compact ? 'p-3' : 'p-4';
+
+  if (!onPress) return <Card className={`flex-1 ${pad}`}>{body}</Card>;
+
+  // The Card's `flex-1` collapses its height inside a column wrapper (see the
+  // note above), so the pressable variant moves the flex to the wrapper and lets
+  // the Card `grow` to the row height instead.
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, ${value}`}
+      className="flex-1"
+    >
+      <Card className={`grow ${pad}`}>{body}</Card>
+    </TouchableOpacity>
+  );
+}
+
+export type KpiTone = 'success' | 'warning' | 'danger';
+export { StatCard as KpiTile };
+
+/**
+ * Two-column grid of `StatCard`/`KpiTile`s. An odd last tile spans the full row,
+ * as on the web's phone layout. Each cell is its own `flex-row` so the tile's
+ * `flex-1` still means "fill the width" (see the StatCard note).
+ */
+export function KpiRow({ children }: { children: ReactNode }) {
+  const cells = Children.toArray(children).filter(Boolean);
+  return (
+    <View className="flex-row flex-wrap gap-3">
+      {cells.map((c, i) => (
+        <View key={i} className="flex-row" style={{ flexBasis: '47%', flexGrow: 1 }}>
+          {c}
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -73,6 +143,7 @@ export function ListRow({
   title,
   subtitle,
   subtitleIcon,
+  detail,
   leading,
   trailing,
   onPress,
@@ -82,6 +153,8 @@ export function ListRow({
   title: string;
   subtitle?: string;
   subtitleIcon?: IconName;
+  /** A third line under the subtitle, for a row that says what it is doing. */
+  detail?: ReactNode;
   leading?: ReactNode;
   trailing?: ReactNode;
   onPress?: () => void;
@@ -92,12 +165,13 @@ export function ListRow({
 }) {
   const { colors } = useTheme();
   return (
-    <Pressable
+    <TouchableOpacity
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={!onPress}
+      activeOpacity={0.7}
       accessibilityRole={onPress ? 'button' : undefined}
-      className={`min-h-[56px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+      className={`min-h-[56px] flex-row items-center gap-3 px-4 py-3 ${
         last ? '' : 'border-b border-line-row'
       }`}
     >
@@ -114,9 +188,10 @@ export function ListRow({
             </Txt>
           </View>
         )}
+        {detail}
       </View>
       {trailing ?? (onPress && <Icon name="chevronRight" size={16} color={colors.faint} />)}
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -141,15 +216,16 @@ export function Group({
         <View className="mb-2.5 flex-row items-center justify-between">
           <Label>{label}</Label>
           {action && (
-            <Pressable
-              hitSlop={8}
+            <TouchableOpacity
+              hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
               onPress={onAction}
+              activeOpacity={0.6}
               accessibilityRole="button"
               className="flex-row items-center gap-0.5"
             >
               <Mono className="text-sub font-medium text-link">{action}</Mono>
               <Icon name="chevronRight" size={12} color={colors.link} />
-            </Pressable>
+            </TouchableOpacity>
           )}
         </View>
       )}

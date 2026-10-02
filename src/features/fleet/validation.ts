@@ -104,7 +104,7 @@ export function vehicleSchema({ originalVin }: { originalVin?: string } = {}) {
       .min(1, 'Capacity is required')
       .refine((v) => parseNum(v) != null, 'Enter a number, e.g. 30')
       .refine((v) => (parseNum(v) ?? 0) > 0, 'Capacity must be more than 0')
-      .refine((v) => (parseNum(v) ?? 0) <= 100, 'That looks too high — check the unit is tons'),
+      .refine((v) => (parseNum(v) ?? 0) <= 100, 'That looks too high. Check the unit is tons.'),
     mileage: numericOptionalField('Mileage'),
     status: z.string(),
     driver: z.string().optional(),
@@ -119,13 +119,13 @@ export type VehicleFormValues = z.infer<ReturnType<typeof vehicleSchema>>;
 // JSX order, not object-key order — onInvalid scrolls to whichever of these
 // comes first that also has an error.
 export const VEHICLE_FIELD_ORDER: (keyof VehicleFormValues)[] = [
-  'vin',
   'make',
   'model',
-  'year',
-  'plate',
   'type',
+  'plate',
   'capacity',
+  'vin',
+  'year',
   'mileage',
   'status',
   'driver',

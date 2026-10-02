@@ -71,6 +71,9 @@ export interface Load {
   pod_signature?: string | null;
   pod_received_by?: string | null;
   quote?: number | null;
+  /** The truck on the order (null until one is assigned). */
+  vehicle?: number | null;
+  driver_name?: string | null;
 }
 export interface Quote {
   id: number;

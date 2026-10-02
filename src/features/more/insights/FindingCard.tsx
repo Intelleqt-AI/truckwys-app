@@ -42,7 +42,7 @@ export function FindingCard({
     <Card className="mb-3 p-4">
       <View className="flex-row items-center gap-2">
         <Badge label={sev.label} tone={sev.tone} />
-        <Txt className="flex-1 text-micro text-faint" numberOfLines={1}>
+        <Txt className="flex-1 text-caption text-faint" numberOfLines={1}>
           {f.category} · {f.basis}
           {f.confidence !== 'high' ? `, ${f.confidence} confidence` : ''}
         </Txt>
@@ -79,10 +79,10 @@ export function FindingCard({
         <TouchableOpacity
           onPress={() => setEvidenceOpen((o) => !o)}
           activeOpacity={0.6}
-          hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 8 }}
           accessibilityRole="button"
           accessibilityState={{ expanded: evidenceOpen }}
-          className="flex-row items-center gap-1"
+          className="min-h-[36px] flex-row items-center gap-1"
         >
           <Mono className="text-caption font-medium text-link">
             {evidenceOpen ? 'Hide' : 'Show'} {plural(n, f.evidenceNoun[0], f.evidenceNoun[1])}
@@ -92,10 +92,10 @@ export function FindingCard({
         <TouchableOpacity
           onPress={() => setMethodOpen((o) => !o)}
           activeOpacity={0.6}
-          hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 8 }}
           accessibilityRole="button"
           accessibilityState={{ expanded: methodOpen }}
-          className="flex-row items-center gap-1"
+          className="min-h-[36px] flex-row items-center gap-1"
         >
           <Mono className="text-caption font-medium text-muted">How it is worked out</Mono>
           <Icon name={methodOpen ? 'chevronUp' : 'chevronDown'} size={12} color={colors.muted} />
@@ -125,7 +125,7 @@ export function FindingCard({
                 <Txt className="text-sub text-fg" numberOfLines={1}>
                   {r.label || r.ref}
                 </Txt>
-                <Txt className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                <Txt className="mt-0.5 text-caption text-faint" numberOfLines={1}>
                   {[r.label ? r.ref : '', r.note].filter(Boolean).join(' · ')}
                 </Txt>
               </View>
@@ -139,7 +139,7 @@ export function FindingCard({
               onPress={() => setAll((a) => !a)}
               activeOpacity={0.6}
               accessibilityRole="button"
-              className="min-h-[40px] items-center justify-center"
+              className="min-h-[44px] items-center justify-center"
             >
               <Mono className="text-caption font-medium text-link">
                 {all ? 'Show fewer' : `Show all ${n}`}

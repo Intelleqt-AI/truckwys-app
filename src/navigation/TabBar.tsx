@@ -1,18 +1,24 @@
 import { useEffect, useState } from 'react';
-import { View, Pressable, Platform } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { View, TouchableOpacity, Platform } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '@/components/ui/icons';
 import { Mono } from '@/components/ui/Text';
 import { Glass } from '@/components/ui/Glass';
 import { useTheme } from '@/theme/ThemeProvider';
+import { TAP_MIN } from '@/theme/tokens';
 
 // Slack-style bottom bar: one Liquid Glass pill docked near the bottom edge.
 // The active destination sits in a rounded highlight whose radius matches the
-// bar's inner curve and springs between cells; each item scales on tap.
+// bar's inner curve and springs between cells (instantly under Reduce Motion).
+// v3: no shadow and no fade, just the glass surface with a 1px `line` hairline.
 const TAB_ICON: Record<string, IconName> = {
   Home: 'home',
   Bookings: 'file',
@@ -21,10 +27,9 @@ const TAB_ICON: Record<string, IconName> = {
 };
 
 const H_MARGIN = 32; // narrower bar (larger side margins)
-const BAR_HEIGHT = 58;
+const BAR_HEIGHT = 58; // minimum: the bar grows with Dynamic Type
 const HPAD = 3; // inner horizontal padding
 const V_INSET = 3; // highlight sits 3px inside the bar edge (near edge-to-edge)
-const HL_H = BAR_HEIGHT - V_INSET * 2; // highlight height
 const HL_RADIUS = BAR_HEIGHT / 2 - V_INSET; // matches the bar's inner curve
 
 function Destination({
@@ -39,42 +44,44 @@ function Destination({
   onPress: () => void;
 }) {
   const { colors } = useTheme();
-  // Two decoupled shared values: focusScale is only touched in the effect,
-  // press only in handlers — never both (keeps the reanimated rule happy).
+  const reduceMotion = useReducedMotion();
   const focusScale = useSharedValue(focused ? 1 : 0.96);
-  const press = useSharedValue(1);
 
   // Active item springs up a touch; inactive rests slightly smaller.
   useEffect(() => {
-    focusScale.value = withSpring(focused ? 1 : 0.96, { damping: 15, stiffness: 200, mass: 0.6 });
-  }, [focused, focusScale]);
+    const target = focused ? 1 : 0.96;
+    focusScale.value = reduceMotion
+      ? target
+      : withSpring(target, { damping: 15, stiffness: 200, mass: 0.6 });
+  }, [focused, focusScale, reduceMotion]);
 
   const content = useAnimatedStyle(() => ({
-    transform: [{ scale: focusScale.value * press.value }],
+    transform: [{ scale: focusScale.value }],
   }));
 
   // v3: the active destination is ink-on-ink (navActive*), never accent blue.
-  const iconColor = focused ? colors.navActiveFg : colors.faint;
-  const labelColor = focused ? colors.navActiveFg : colors.faint;
+  // That pill is #0E1116 in light, so the icon/label must use navActiveFg (the
+  // text-primary token on that fill), not `fg`, which would vanish into it.
+  const iconColor = focused ? colors.navActiveFg : colors.muted;
+  const labelColor = focused ? colors.navActiveFg : colors.muted;
 
   return (
-    <Pressable
+    <TouchableOpacity
       onPress={onPress}
-      onPressIn={() => {
-        press.value = withSpring(0.9, { damping: 18, stiffness: 320, mass: 0.5 });
-      }}
-      onPressOut={() => {
-        press.value = withSpring(1, { damping: 15, stiffness: 200, mass: 0.6 });
-      }}
+      activeOpacity={0.7}
       accessibilityRole="button"
       accessibilityState={{ selected: focused }}
       accessibilityLabel={label}
-      style={{ flex: 1 }}
+      style={{ flex: 1, minHeight: TAP_MIN }}
     >
       <Animated.View
-        style={[{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 }, content]}
+        style={[
+          { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: TAP_MIN },
+          content,
+        ]}
       >
         <Icon name={icon} size={22} color={iconColor} strokeWidth={focused ? 2.2 : 1.8} />
+        {/* 11px is the spec'd tab label; no fixed height so it can scale. */}
         <Mono
           style={{
             fontSize: 11,
@@ -86,7 +93,7 @@ function Destination({
           {label}
         </Mono>
       </Animated.View>
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -100,21 +107,9 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
   // Standard iOS floating-bar position: docked just above the home
   // indicator / Android nav bar, with a consistent gap on top of the safe
-  // area so the bar never sits under the system nav area. A theme-aware
-  // shade (dark in dark mode / white in light) fades scrolling content out
-  // at the very bottom, behind the bar.
+  // area so the bar never sits under the system nav area.
   const barBottom = Math.max(insets.bottom, 8) + 4;
-  // Tall, multi-stop ramp so the fade is smooth with no visible top edge; the
-  // solid part sits at the very bottom, easing to transparent well above the bar.
-  const shadeH = barBottom + BAR_HEIGHT + 90;
-  // Page background as r,g,b so the fade lands exactly on the canvas colour.
-  const shadeRGB = [1, 3, 5].map((i) => parseInt(colors.bgDeep.slice(i, i + 2), 16)).join(',');
-  const shadeColors = [
-    `rgba(${shadeRGB},0)`,
-    `rgba(${shadeRGB},0.45)`,
-    `rgba(${shadeRGB},0.8)`,
-    `rgba(${shadeRGB},1)`,
-  ] as const;
+  const reduceMotion = useReducedMotion();
 
   const count = state.routes.length;
   const cellW = innerW ? innerW / count : 0;
@@ -125,25 +120,14 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
 
   useEffect(() => {
     if (!cellW) return;
-    x.value = withSpring(cellW * state.index + (cellW - hlW) / 2, {
-      damping: 20,
-      stiffness: 200,
-      mass: 0.7,
-    });
-  }, [state.index, cellW, hlW, x]);
+    const target = cellW * state.index + (cellW - hlW) / 2;
+    x.value = reduceMotion ? target : withSpring(target, { damping: 20, stiffness: 200, mass: 0.7 });
+  }, [state.index, cellW, hlW, x, reduceMotion]);
 
   const highlight = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
 
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
-      {/* Theme-aware bottom shade: content fades smoothly to the canvas colour
-          behind the bar (solid at the very bottom, easing up to transparent). */}
-      <LinearGradient
-        pointerEvents="none"
-        colors={shadeColors}
-        locations={[0, 0.5, 0.78, 1]}
-        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: shadeH }}
-      />
       <View
         pointerEvents="box-none"
         style={{ marginHorizontal: H_MARGIN, marginBottom: barBottom }}
@@ -151,7 +135,7 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
         <Glass
           radius={BAR_HEIGHT / 2}
           intensity={50}
-          style={{ height: BAR_HEIGHT, boxShadow: colors.shadowPop }}
+          style={{ minHeight: BAR_HEIGHT, borderWidth: 1, borderColor: colors.line }}
         >
           <View
             style={{ flex: 1, paddingHorizontal: HPAD }}
@@ -165,8 +149,8 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                     position: 'absolute',
                     left: HPAD,
                     top: V_INSET,
+                    bottom: V_INSET,
                     width: hlW,
-                    height: HL_H,
                     borderRadius: HL_RADIUS,
                     backgroundColor: highlightBg,
                   },

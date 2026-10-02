@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, TouchableOpacity } from 'react-native';
+import { View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,10 +9,12 @@ import {
   SwipeTabs,
   SearchField,
   FilterChips,
+  KpiRow,
   StatCard,
   StatusPill,
   ListRow,
   IconButton,
+  OverflowMenu,
   Icon,
   Avatar,
   Mono,
@@ -23,7 +25,10 @@ import {
   SelectionDot,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
+import { StaleDataNotice } from '@/features/home/StaleDataNotice';
 import { useVehicles, useDrivers, bulkDeleteVehicles } from './api';
+import { activeLoadByVehicle, doingNow, type DoingNow } from './doingNow';
+import { useLedger } from '@/lib/useLedger';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDemo } from '@/hooks/useDemo';
@@ -33,6 +38,7 @@ import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { TabParamList, FleetTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
+import { useAutoRefreshStale } from '@/hooks/useAutoRefreshStale';
 
 type Props = BottomTabScreenProps<TabParamList, 'Fleet'>;
 
@@ -53,6 +59,40 @@ const DRIVER_FILTERS = [
   { label: 'On leave', value: 'ON_LEAVE' },
   { label: 'Inactive', value: 'INACTIVE' },
 ];
+
+// Chip counts come from the full list (fetchAllRows), so they are real totals.
+function withCounts(options: { label: string; value: string }[], items: { status: string }[]) {
+  return options.map((o) => ({
+    ...o,
+    count: o.value === 'ALL' ? items.length : items.filter((i) => i.status === o.value).length,
+  }));
+}
+
+// The "Doing now" line under a truck: what its open order says it is doing.
+// Amber dot when the status and the orders disagree or the order was left open.
+function DoingNowLine({ info }: { info: DoingNow }) {
+  const { colors } = useTheme();
+  const warn = info.tone === 'warn';
+  return (
+    <View className="mt-1">
+      <View className="flex-row items-center gap-1.5">
+        {warn && (
+          <View
+            style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warningDot }}
+          />
+        )}
+        <Txt className="flex-1 text-caption text-fg" numberOfLines={1}>
+          {info.text}
+        </Txt>
+      </View>
+      {info.sub && (
+        <Txt className="text-caption text-muted" numberOfLines={1}>
+          {info.sub}
+        </Txt>
+      )}
+    </View>
+  );
+}
 
 export function FleetScreen({ route }: Props) {
   const [tab, setTab] = useState<FleetTab>(route.params?.tab ?? 'vehicles');
@@ -123,24 +163,22 @@ export function FleetScreen({ route }: Props) {
             title="Fleet"
             right={
               <View className="flex-row items-center gap-1">
-                {tab === 'vehicles' && vehicleTotal > 0 && (
-                  <TouchableOpacity
-                    hitSlop={8}
-                    activeOpacity={0.7}
-                    className="px-2"
-                    onPress={() => enter()}
-                  >
-                    <Mono className="text-sub font-medium text-link">Select</Mono>
-                  </TouchableOpacity>
-                )}
                 {tab === 'vehicles' && (
-                  <IconButton
-                    name="import"
-                    accessibilityLabel="Import vehicles"
-                    onPress={() => {
-                      if (demo.block()) return;
-                      openImport('vehicles');
-                    }}
+                  <OverflowMenu
+                    accessibilityLabel="Vehicle actions"
+                    actions={[
+                      ...(vehicleTotal > 0
+                        ? [{ label: 'Select vehicles', icon: 'check' as const, onPress: () => enter() }]
+                        : []),
+                      {
+                        label: 'Import vehicles',
+                        icon: 'import' as const,
+                        onPress: () => {
+                          if (demo.block()) return;
+                          openImport('vehicles');
+                        },
+                      },
+                    ]}
                   />
                 )}
                 <IconButton
@@ -183,13 +221,22 @@ function VehiclesTab({
   onListChange: (total: number, visibleIds: (string | number)[]) => void;
 }) {
   const { selectMode, selected, toggle, enter } = selection;
-  const { data, isLoading, isError, refetch } = useVehicles();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
+  const { data, isLoading, isError, refetch, dataUpdatedAt, isRefetchError, isFetching } = useVehicles();
+  // Every load, for "Doing now". Shares Home's cached ledger, and never blocks
+  // the list: while it loads or if it fails the rows simply have no such line.
+  const ledger = useLedger(['loads']);
+  const refetchAll = () => Promise.all([refetch(), ledger.refetch()]);
+  const { refreshing, onRefresh } = useManualRefresh(refetchAll);
+  const notice = useManualRefresh(refetchAll);
+  useAutoRefreshStale([['vehicles'], ['ledger-loads']], dataUpdatedAt);
   const { openVehicle, nav, openImport } = useAppNavigation();
   const { colors } = useTheme();
   const demo = useDemo();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('ALL');
+
+  const loads = ledger.data?.loads;
+  const loadByVehicle = useMemo(() => (loads ? activeLoadByVehicle(loads) : null), [loads]);
 
   const list = useMemo(
     () =>
@@ -213,27 +260,70 @@ function VehiclesTab({
     );
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load vehicles." />;
 
-  const ready = data.filter((v) => ['AVAILABLE', 'IN_USE'].includes(v.status)).length;
+  // Web's status tiles. Each is also the list filter, so the figure on a tile is
+  // the number of rows you land on when you tap it.
+  const inUse = data.filter((v) => v.status === 'IN_USE').length;
+  const available = data.filter((v) => v.status === 'AVAILABLE').length;
   const maint = data.filter((v) => v.status === 'MAINTENANCE').length;
+  const outOfService = data.filter((v) => v.status === 'OUT_OF_SERVICE').length;
+  const toggleFilter = (value: string) => setFilter((f) => (f === value ? 'ALL' : value));
 
   return (
     <FlashList
       data={list}
       keyExtractor={(v) => String(v.id)}
+      extraData={loadByVehicle}
       onRefresh={onRefresh}
       refreshing={refreshing}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
-          <View className="mb-3 flex-row gap-3">
-            <StatCard label="Total" value={String(data.length)} />
-            <StatCard label="Ready" value={String(ready)} />
-            <StatCard label="Service" value={String(maint)} />
+          {/* An automatic refresh in progress isn't news; only a manual one is shown. */}
+          {(notice.refreshing || !isFetching) && (
+            <StaleDataNotice
+              className="mb-3"
+              updatedAt={dataUpdatedAt}
+              refreshFailed={isRefetchError}
+              refreshing={notice.refreshing}
+              onRetry={notice.onRefresh}
+            />
+          )}
+          <View className="mb-3">
+            <KpiRow>
+              <StatCard
+                label="Marked in use"
+                value={String(inUse)}
+                note={`of ${data.length}`}
+                onPress={() => toggleFilter('IN_USE')}
+              />
+              <StatCard
+                label="Available"
+                value={String(available)}
+                note={available > 0 ? 'Free to take a load' : 'Every truck is busy'}
+                onPress={() => toggleFilter('AVAILABLE')}
+              />
+              <StatCard
+                label="In maintenance"
+                value={String(maint)}
+                note={
+                  outOfService > 0
+                    ? `${outOfService} out of service`
+                    : maint > 0
+                      ? 'In the workshop'
+                      : 'None in the workshop'
+                }
+                onPress={() => toggleFilter('MAINTENANCE')}
+              />
+            </KpiRow>
           </View>
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search vehicles…" />
           </View>
-          <FilterChips options={VEHICLE_FILTERS} value={filter} onChange={setFilter} />
+          <FilterChips
+            options={withCounts(VEHICLE_FILTERS, data)}
+            value={filter}
+            onChange={setFilter}
+          />
         </View>
       }
       ListEmptyComponent={
@@ -266,12 +356,12 @@ function VehiclesTab({
       }
       renderItem={({ item }) => {
         const isSelected = selectMode && selected.has(item.id);
+        const now = loadByVehicle ? doingNow(item, loadByVehicle.get(Number(item.id))) : null;
         return (
           <View
             className={`mb-2.5 overflow-hidden rounded-card border ${
-              isSelected ? 'border-accent' : 'border-line bg-surface'
+              isSelected ? 'border-line-strong bg-raised' : 'border-line bg-surface'
             }`}
-            style={isSelected ? { backgroundColor: colors.accentDim } : undefined}
           >
             <ListRow
               leading={
@@ -287,6 +377,7 @@ function VehiclesTab({
               title={item.name}
               subtitle={item.plate}
               subtitleIcon="idCard"
+              detail={now ? <DoingNowLine info={now} /> : undefined}
               trailing={
                 <View className="items-end gap-1">
                   {item.aiHealthScore != null && (
@@ -307,8 +398,10 @@ function VehiclesTab({
 }
 
 function DriversTab() {
-  const { data, isLoading, isError, refetch } = useDrivers();
+  const { data, isLoading, isError, refetch, dataUpdatedAt, isRefetchError, isFetching } = useDrivers();
   const { refreshing, onRefresh } = useManualRefresh(refetch);
+  const notice = useManualRefresh(refetch);
+  useAutoRefreshStale([['drivers']], dataUpdatedAt);
   const { openDriver } = useAppNavigation();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('ALL');
@@ -343,17 +436,31 @@ function DriversTab() {
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
+          {(notice.refreshing || !isFetching) && (
+            <StaleDataNotice
+              className="mb-3"
+              updatedAt={dataUpdatedAt}
+              refreshFailed={isRefetchError}
+              refreshing={notice.refreshing}
+              onRetry={notice.onRefresh}
+            />
+          )}
           <View className="mb-3 flex-row gap-3">
-            <StatCard label="Drivers" value={String(data.length)} />
+            <StatCard label="Drivers" value={String(data.length)} onPress={() => setFilter('ALL')} />
             <StatCard
               label="Active"
               value={String(data.filter((d) => d.status === 'ACTIVE').length)}
+              onPress={() => setFilter((f) => (f === 'ACTIVE' ? 'ALL' : 'ACTIVE'))}
             />
           </View>
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search drivers…" />
           </View>
-          <FilterChips options={DRIVER_FILTERS} value={filter} onChange={setFilter} />
+          <FilterChips
+            options={withCounts(DRIVER_FILTERS, data)}
+            value={filter}
+            onChange={setFilter}
+          />
         </View>
       }
       ListEmptyComponent={

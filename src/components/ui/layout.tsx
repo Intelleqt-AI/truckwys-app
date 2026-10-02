@@ -1,5 +1,11 @@
 import { type ReactNode } from 'react';
-import { View, ScrollView, Pressable, RefreshControl, type ScrollViewProps } from 'react-native';
+import {
+  View,
+  ScrollView,
+  TouchableOpacity,
+  RefreshControl,
+  type ScrollViewProps,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
@@ -65,31 +71,38 @@ export function Screen({
   );
 }
 
-// ── AppHeader: optional eyebrow + page title + optional live/trailing ──────
+// ── AppHeader: page title + optional one-line subtitle + live/trailing ─────
+// v3 has no eyebrow row. The title is `display` (24/30) rather than the web's
+// 28/34: the web itself drops to 24 on a phone when the head is crowded, and
+// ours always carries trailing icons.
 export function AppHeader({
-  eyebrow,
   title,
+  subtitle,
   right,
   live,
 }: {
-  eyebrow?: string;
   title: string;
+  /** One line, at most ~8 words, under the title (web page-head subtitle). */
+  subtitle?: string;
   right?: ReactNode;
   live?: boolean;
 }) {
   return (
-    // items-center, not items-end: the title block (with or without an
-    // eyebrow) and `right` rarely share a height — e.g. Home/Fleet/Finance
-    // pass no eyebrow, so the title's ~28px row was bottom-aligning against a
-    // 44px bell/avatar row, landing its visual centre ~8px lower than the
-    // icons'. Centring the row aligns them regardless of either side's height.
+    // items-center, not items-end: the title block and `right` rarely share a
+    // height — Home/Fleet/Finance's title row is ~30px against a 44px bell/avatar
+    // row, so bottom-aligning landed the title ~8px lower than the icons'
+    // visual centre. Centring the row aligns them regardless of either side.
     <View className="flex-row items-center justify-between gap-3 pb-3.5 pt-2">
       <View className="flex-1">
-        {eyebrow && <Label className="mb-1">{eyebrow}</Label>}
         <View className="flex-row items-center gap-2.5">
-          <Txt className="text-display font-semibold">{title}</Txt>
+          <Txt className="text-display font-semibold tracking-display">{title}</Txt>
           {live && <SubscriptionDot />}
         </View>
+        {subtitle && (
+          <Txt className="mt-0.5 text-callout text-faint" numberOfLines={1}>
+            {subtitle}
+          </Txt>
+        )}
       </View>
       {right}
     </View>
@@ -110,9 +123,14 @@ export function SectionLabel({
     <View className="mb-2.5 flex-row items-center justify-between">
       <Label className="text-sub">{children as string}</Label>
       {action && (
-        <Pressable hitSlop={8} onPress={onAction} accessibilityRole="button">
+        <TouchableOpacity
+          hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
+          onPress={onAction}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+        >
           <Mono className="text-sub font-medium text-link">{action}</Mono>
-        </Pressable>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -133,9 +151,10 @@ export function UnderlineTabs<T extends string>({
       {tabs.map((t) => {
         const active = t.value === value;
         return (
-          <Pressable
+          <TouchableOpacity
             key={t.value}
             onPress={() => onChange(t.value)}
+            activeOpacity={0.6}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
             className={`min-h-[44px] justify-center border-b-2 ${
@@ -145,7 +164,7 @@ export function UnderlineTabs<T extends string>({
             <Mono className={`text-callout ${active ? 'font-medium text-fg' : 'text-muted'}`}>
               {t.label}
             </Mono>
-          </Pressable>
+          </TouchableOpacity>
         );
       })}
     </View>
@@ -153,16 +172,18 @@ export function UnderlineTabs<T extends string>({
 }
 
 // ── FilterChips: horizontal scrolling filter row ───────────────────────────
+// v3: a selected filter is a neutral raised chip, never an ink or accent fill
+// (web Segmented / `.bk-chip`). `count` is the web's "Sent 3" figure; pass it only
+// when it is the real total, not the size of the page loaded so far.
 export function FilterChips<T extends string>({
   options,
   value,
   onChange,
 }: {
-  options: { label: string; value: T }[];
+  options: { label: string; value: T; count?: number }[];
   value: T;
   onChange: (v: T) => void;
 }) {
-  const { colors } = useTheme();
   return (
     <ScrollView
       horizontal
@@ -172,24 +193,30 @@ export function FilterChips<T extends string>({
       {options.map((o) => {
         const active = o.value === value;
         return (
-          <Pressable
+          <TouchableOpacity
             key={o.value}
             onPress={() => onChange(o.value)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 4, bottom: 4 }}
             accessibilityRole="button"
-
+            accessibilityLabel={o.count !== undefined ? `${o.label}, ${o.count}` : o.label}
             accessibilityState={{ selected: active }}
-            className={`min-h-[34px] justify-center rounded-pill border px-3.5 ${
-              active ? 'border-btn-primary bg-btn-primary' : 'border-line-active bg-transparent'
+            className={`min-h-[36px] flex-row items-center justify-center gap-1.5 rounded-control border px-3 ${
+              active ? 'border-line-strong bg-raised' : 'border-line bg-transparent'
             }`}
           >
             <Mono
               numberOfLines={1}
-              className={`text-caption font-medium ${active ? '' : 'text-muted'}`}
-              style={active ? { color: colors.btnPrimaryFg } : undefined}
+              className={`text-caption font-medium ${active ? 'text-fg' : 'text-muted'}`}
             >
               {o.label}
             </Mono>
-          </Pressable>
+            {o.count !== undefined && (
+              <Mono numberOfLines={1} className="text-caption text-faint">
+                {o.count}
+              </Mono>
+            )}
+          </TouchableOpacity>
         );
       })}
     </ScrollView>
@@ -211,15 +238,16 @@ export function Fab({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   return (
-    <Pressable
+    <TouchableOpacity
       onPress={onPress}
       onLongPress={onLongPress}
+      activeOpacity={0.85}
       accessibilityRole="button"
       accessibilityLabel="Create"
-      className="absolute right-4 h-14 w-14 items-center justify-center rounded-panel bg-btn-primary active:opacity-90"
+      className="absolute right-4 h-14 w-14 items-center justify-center rounded-panel bg-btn-primary"
       style={{ bottom: insets.bottom + 96, boxShadow: colors.shadowPop }}
     >
       <Icon name={icon} size={24} color={colors.btnPrimaryFg} strokeWidth={2.2} />
-    </Pressable>
+    </TouchableOpacity>
   );
 }

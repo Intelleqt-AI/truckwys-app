@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
+import { View, TouchableOpacity, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { Txt, Mono, Icon } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -37,7 +37,7 @@ function DayDivider({ label }: { label: string }) {
   return (
     <View className="my-2 flex-row items-center gap-3" accessibilityRole="header">
       <View className="h-px flex-1 bg-line-row" />
-      <Txt className="text-micro text-faint">{label}</Txt>
+      <Txt className="text-caption text-faint">{label}</Txt>
       <View className="h-px flex-1 bg-line-row" />
     </View>
   );
@@ -220,18 +220,20 @@ export function MessageList({
       />
 
       {awayFromBottom && (
-        <Pressable
+        <TouchableOpacity
           onPress={() => scrollToBottom(true)}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
           accessibilityLabel="Jump to latest"
-          className="absolute self-center rounded-pill border border-line bg-surface px-3 py-1.5 active:opacity-70"
+          className="absolute self-center rounded-pill border border-line bg-surface px-3 py-1.5"
           style={{ bottom: 12 }}
         >
           <View className="flex-row items-center gap-1.5">
             <Mono className="text-caption font-medium text-muted">Latest</Mono>
             <Icon name="chevronDown" size={13} color={colors.muted} />
           </View>
-        </Pressable>
+        </TouchableOpacity>
       )}
     </View>
   );

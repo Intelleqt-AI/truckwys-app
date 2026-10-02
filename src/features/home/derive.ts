@@ -222,7 +222,6 @@ export function summariseFleet(vehicles: Vehicle[]): FleetSummary {
 const WENT_OUT = new Set(['SENT', 'ACCEPTED', 'DECLINED', 'EXPIRED', 'IT', 'COMPLETED']);
 // Load statuses once a booked job is moving or done.
 const LOAD_MOVING = new Set(['IN_TRANSIT', 'DELIVERED', 'INVOICED']);
-const LOAD_DONE = new Set(['DELIVERED', 'INVOICED']);
 
 export interface FunnelStage {
   key: string;
@@ -251,18 +250,19 @@ export interface QuoteFunnel {
 }
 
 /**
- * How far quotes get. Same stages and counting as the web (charts.tsx
- * QuoteConversion + today.tsx usePipeline), on the shared stage rule
- * (lib/quoteStage.ts) so an expired quote is never a live Draft or Sent:
- *   Quoted       every quote
- *   Sent         went out (Sent, Accepted, Declined, Expired or booked); a draft,
- *                lapsed or not, did not
+ * Where quotes stand now, in the web's order (charts.tsx QuoteConversion +
+ * today.tsx usePipeline), on the shared stage rule (lib/quoteStage.ts) so an
+ * expired quote is never a live Draft or Sent:
+ *   Draft        live drafts
+ *   Sent         live Sent quotes still waiting for a reply
  *   Accepted     accepted or booked
  *   Booked       converted into a load (booked_load / converted, or legacy IT/COMPLETED)
  *   On the road  the booked load is In transit, Delivered or Invoiced; In-transit
  *                loads past their delivery date or open > 30 days are left out
  *                (lib/staleWork.ts) and said in the note
- *   Delivered    the booked load is Delivered or Invoiced
+ *   Declined     a Sent quote marked lost, or Declined
+ *   Expired      only listed when there is one; never counted as live work
+ * Win rate is accepted over every quote that went out.
  */
 export function computeFunnel(quotes: Quote[], loads: Load[], now: Date = new Date()): QuoteFunnel {
   const loadById = new Map(loads.map((l) => [String(l.id), l]));
@@ -270,7 +270,6 @@ export function computeFunnel(quotes: Quote[], loads: Load[], now: Date = new Da
   let accepted = 0;
   let booked = 0;
   let onRoad = 0;
-  let delivered = 0;
   let staleInTransit = 0;
   let awaiting = 0;
   let drafts = 0;
@@ -295,7 +294,6 @@ export function computeFunnel(quotes: Quote[], loads: Load[], now: Date = new Da
       if (loadSt === 'IN_TRANSIT' && full && staleWork(full, now)) staleInTransit += 1;
       else onRoad += 1;
     }
-    if (LOAD_DONE.has(loadSt) || st === 'COMPLETED') delivered += 1;
 
     if (!isBooked) {
       if (stage === 'SENT') awaiting += 1;
@@ -307,8 +305,8 @@ export function computeFunnel(quotes: Quote[], loads: Load[], now: Date = new Da
 
   return {
     stages: [
-      { key: 'quoted', label: 'Quoted', count: quotes.length },
-      { key: 'sent', label: 'Sent', count: sent },
+      { key: 'draft', label: 'Draft', count: drafts },
+      { key: 'sent', label: 'Sent', count: awaiting },
       { key: 'accepted', label: 'Accepted', count: accepted },
       { key: 'booked', label: 'Booked', count: booked },
       {
@@ -321,7 +319,8 @@ export function computeFunnel(quotes: Quote[], loads: Load[], now: Date = new Da
             ? `${staleInTransit} in transit past ${staleInTransit === 1 ? 'its' : 'their'} delivery date, left open`
             : undefined,
       },
-      { key: 'delivered', label: 'Delivered', count: delivered },
+      { key: 'declined', label: 'Declined', count: declined },
+      ...(expired > 0 ? [{ key: 'expired', label: 'Expired', count: expired }] : []),
     ],
     awaiting,
     drafts,

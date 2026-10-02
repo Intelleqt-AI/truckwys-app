@@ -162,7 +162,7 @@ export const motion = {
   smooth: 200,
   slow: 300,
   // Entrance reveal + per-module stagger step for the Home screen's
-  // mount-once reveal (see useCountUp, Sparkline's draw-on, Home's modules).
+  // mount-once reveal (see useCountUp, RevenueCostBars' grow-in, Home's modules).
   reveal: 380,
   stagger: 55,
 } as const;

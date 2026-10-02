@@ -8,6 +8,13 @@ import { MapPin, NumberedMapPin } from './MapPin';
 import type { PickTarget } from './types';
 import { useTheme } from '@/theme/ThemeProvider';
 
+// `#RRGGBB` theme token to `rgba(r,g,b,a)`. NativeWind's `/70` opacity modifier is
+// a no-op on a CSS-variable colour, so a translucent backing is set explicitly.
+const withAlpha = (hex: string, alpha: number) => {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+};
+
 /** A stop on the map: carries its id (so the one being picked can be excluded
     from the render) and its true 1-based position in the form's stop list
     (not its index in this, possibly-filtered, array — see mapStops in
@@ -98,10 +105,10 @@ function MapCanvasImpl({
           bottomInset={bottomInset}
         />
         <View
-          className="bg-bg-deep/85 absolute self-center rounded-pill border border-line px-2.5 py-1"
-          style={{ bottom: bottomInset + 28 }}
+          className="absolute self-center rounded-pill border border-line px-2.5 py-1"
+          style={{ bottom: bottomInset + 28, backgroundColor: withAlpha(colors.bgDeep, 0.85) }}
         >
-          <Mono className="text-micro text-faint">
+          <Mono className="text-caption text-faint">
             {IS_EXPO_GO
               ? 'Static map · pin picking needs a dev build'
               : Platform.OS === 'android' && !MAPTILER_KEY
@@ -360,7 +367,7 @@ function InteractiveMap({
         {delivery && !hideDelivery && (
           <Marker
             coordinate={toLatLng(delivery)}
-            title="Drop-off"
+            title="Delivery"
             centerOffset={pinCenterOffset(34)}
             tracksViewChanges={deliveryTracking}
           >
@@ -552,8 +559,11 @@ function InteractiveMapLibre({
       </MapLibreView>
 
       {/* MapTiler's ToS and OSM's ODbL both require attribution. */}
-      <View className="bg-bg-deep/85 absolute self-end" style={{ bottom: bottomInset }}>
-        <Mono className="text-[6px] text-faint">© MapTiler © OpenStreetMap</Mono>
+      <View
+        className="absolute self-end px-1.5 py-0.5"
+        style={{ bottom: bottomInset, backgroundColor: withAlpha(colors.bgDeep, 0.85) }}
+      >
+        <Mono className="text-caption text-faint">© MapTiler © OpenStreetMap</Mono>
       </View>
     </View>
   );

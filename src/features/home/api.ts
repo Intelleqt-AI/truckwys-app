@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
-import { focusManager, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
+import { STALE_MS, useAutoRefreshStale } from '@/hooks/useAutoRefreshStale';
 import type { AllPages } from '@/lib/api/fetchAllPages';
 import type { Customer, Expense, Invoice, Load, Payment, Quote, Vehicle } from '@/lib/ledger';
 import { useLedger, type Ledger, type SourceName } from '@/lib/useLedger';
@@ -159,34 +159,11 @@ export function useHomeFreshness() {
   return { updatedAt: Number(updatedAt), refreshFailed: failed === '1', fetching: fetching === '1' };
 }
 
-/** How long Home's figures count as current; matches the ledgers' staleTime. */
-export const STALE_MS = 5 * 60_000;
+export { STALE_MS };
 
-/**
- * Keeps Home's figures current on their own: when the oldest one turns stale
- * while Home is on screen, and when the user returns to Home with stale figures.
- * Only stale, mounted queries refetch, quietly (no spinner). Without this nothing
- * fires when staleTime runs out, so the "may be out of date" notice showed and the
- * user had to tap "Refresh now".
- */
+/** Keeps Home's figures current on their own (see useAutoRefreshStale). */
 export function useAutoRefreshHome(updatedAt: number) {
-  const qc = useQueryClient();
-  useFocusEffect(
-    useCallback(() => {
-      const refresh = () => {
-        if (!focusManager.isFocused()) return;
-        HOME_KEYS.forEach((queryKey) => void qc.refetchQueries({ queryKey, type: 'active', stale: true }));
-      };
-      if (!updatedAt) return;
-      const wait = updatedAt + STALE_MS - Date.now();
-      if (wait <= 0) {
-        refresh();
-        return;
-      }
-      const id = setTimeout(refresh, wait + 500);
-      return () => clearTimeout(id);
-    }, [qc, updatedAt]),
-  );
+  useAutoRefreshStale(HOME_KEYS, updatedAt);
 }
 
 /** Refetches every query Home shows, once each (pull-to-refresh and "Refresh now"). */

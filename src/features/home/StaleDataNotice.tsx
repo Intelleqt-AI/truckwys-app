@@ -21,9 +21,11 @@ function formatTime(ms: number): string {
 
 /**
  * Silent while the figures on screen are current. Shows only when they may be out
- * of date, so it never competes with the data itself. Home refreshes stale figures
- * on its own (useAutoRefreshHome), so this is a fallback for when that can't
- * happen: offline, or a refresh that failed. Port of the web's
+ * of date, so it never competes with the data itself. Any screen that shows it must
+ * pair it with useAutoRefreshStale (hooks/useAutoRefreshStale.ts), which refreshes
+ * stale figures on its own, so this is a fallback for when that can't happen:
+ * offline, or a refresh that failed. Without the pairing the notice just appears
+ * five minutes after every load. Port of the web's
  * StaleDataNotice; reusable on any screen that reads from the query cache.
  *
  *   fresh (loaded in the last `staleAfterMs`, no failed refresh)   nothing
@@ -40,6 +42,7 @@ export function StaleDataNotice({
   refreshing = false,
   onRetry,
   staleAfterMs = 5 * 60_000,
+  className = '',
 }: {
   updatedAt: number;
   /** The most recent refresh failed while older data is still on screen. */
@@ -49,6 +52,8 @@ export function StaleDataNotice({
   onRetry?: () => void;
   /** Data older than this is treated as stale even without an error. */
   staleAfterMs?: number;
+  /** Extra classes on the root, e.g. a bottom margin that only exists while shown. */
+  className?: string;
 }) {
   const { colors } = useTheme();
   const [now, setNow] = useState(() => Date.now());
@@ -71,7 +76,7 @@ export function StaleDataNotice({
     <View
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
-      className="flex-row items-center gap-2.5 rounded-control border border-warning bg-warning-bg p-3"
+      className={`flex-row items-center gap-2.5 rounded-control border border-line-active bg-warning-bg p-3 ${className}`}
     >
       <Icon name="alert" size={17} color={colors.warningDot} />
       <Txt className="flex-1 text-sub text-muted">
@@ -82,9 +87,11 @@ export function StaleDataNotice({
           onPress={onRetry}
           disabled={refreshing}
           activeOpacity={0.7}
-          hitSlop={8}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
-          className={`min-h-[32px] justify-center px-1 ${refreshing ? 'opacity-50' : ''}`}
+          accessibilityLabel={refreshing ? 'Refreshing' : refreshFailed ? 'Try again' : 'Refresh now'}
+          accessibilityState={{ disabled: refreshing }}
+          className={`min-h-[28px] justify-center px-1 ${refreshing ? 'opacity-50' : ''}`}
         >
           <Mono className="text-caption font-medium text-link">
             {refreshing ? 'Refreshing…' : refreshFailed ? 'Try again' : 'Refresh now'}

@@ -7,11 +7,15 @@ import {
   AppHeader,
   SectionLabel,
   StatCard,
+  KpiRow,
+  InfoTip,
+  Card,
   ListRow,
   Button,
   Avatar,
   Icon,
   IconButton,
+  Label,
   Mono,
   Txt,
   StatusPill,
@@ -40,18 +44,25 @@ import { useUnreadCount } from '@/features/more/api';
 import { CommandBar, type CommandCell } from './CommandBar';
 import { HeroRevenue } from './HeroRevenue';
 import { NeedsYouCard } from './NeedsYouCard';
+import { OwedTile } from './OwedTile';
 import { QuoteFunnelCard } from './QuoteFunnelCard';
 import { StaleDataNotice } from './StaleDataNotice';
 import { UtilisationCard } from './UtilisationCard';
-import { HeaderClock } from './HeaderClock';
 import { buildNeeds, type NeedsRow, type NeedsTarget } from './signals';
-import { SECTION_REVEAL, ROW_REVEAL } from './motion';
+import { useReveal } from './motion';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { canSeeInsights, useRole, visibleTabs } from '@/lib/access';
 import { CAPITAL_LAUNCHED } from '@/lib/features';
+import { laneOf, type Load } from '@/lib/ledger';
 import { quoteStage } from '@/lib/quoteStage';
 import { useTheme } from '@/theme/ThemeProvider';
-import { formatCurrency, formatDate, formatNumber, formatPercent } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatDate,
+  formatNumber,
+  formatOperationalDate,
+  formatPercent,
+} from '@/lib/formatters';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 import { useGracePeriod, useSubscription } from '@/hooks/useSubscription';
 import { SubscriptionDetailModal } from '@/features/more/SubscriptionDetailModal';
@@ -125,6 +136,7 @@ export function HomeScreen() {
   const { data: unread } = useUnreadCount();
   const user = useAuthStore((s) => s.user);
   const { colors } = useTheme();
+  const reveal = useReveal();
   const role = useRole();
   const tabs = visibleTabs(role);
   const hasFleet = tabs.includes('Fleet');
@@ -160,15 +172,20 @@ export function HomeScreen() {
   // ── Money tiles ───────────────────────────────────────────────────────────
   const m = money.money;
   const receivedPartial = money.partial.length > 0;
-  const owedDelta =
+  // The owed tile's note: how much of it is past due, or that none is.
+  const owedNote =
     m && m.owed > 0.005
       ? m.pastDue >= m.owed - 0.005
         ? 'All past due'
         : m.pastDue > 0
           ? `${wholeRand(m.pastDue)} past due`
-          : undefined
-      : undefined;
-  const owedSub = m ? (m.owed <= 0.005 ? 'Nothing outstanding' : owedDelta ? undefined : 'None past due') : undefined;
+          : 'None past due'
+      : m
+        ? 'Nothing outstanding'
+        : undefined;
+  const owedNoteTone: 'success' | 'danger' | undefined =
+    m && m.owed > 0.005 ? (m.pastDue > 0 ? 'danger' : 'success') : undefined;
+  const partialNote = receivedPartial ? ` Figures use the ${money.partial.join(', ')} that loaded.` : '';
   const afterPending = m ? m.revenueExcl - m.costs - m.pending : 0;
   const marginChange =
     m && m.margin != null && m.marginPrior != null ? Math.round((m.margin - m.marginPrior) * 10) / 10 : null;
@@ -230,7 +247,7 @@ export function HomeScreen() {
                   name="bell"
                   size={23}
                   color={colors.fg}
-                  accessibilityLabel="Notifications"
+                  accessibilityLabel={unread && unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
                   onPress={openNotifications}
                 />
                 {!!unread && unread > 0 && (
@@ -246,7 +263,7 @@ export function HomeScreen() {
               </View>
               <TouchableOpacity
                 accessibilityRole="button"
-                accessibilityLabel="Profile, settings & more"
+                accessibilityLabel="Profile, settings and more"
                 hitSlop={8}
                 activeOpacity={0.7}
                 onPress={openMore}
@@ -263,13 +280,10 @@ export function HomeScreen() {
           }
         />
 
-        {/* Date on one line, ticking HH:mm:ss SAST on the next, under the
-            title rather than above it as an eyebrow — date+seconds+timezone
-            together don't fit one line, and the screen's own name should be
-            the first thing read, not a timestamp. Always South Africa's
-            time, like web's live clock — never the device's own timezone. */}
+        {/* Today's date under the title, like web's Home header. Always South
+            Africa's date — never the device's own timezone. No live clock. */}
         <View className="-mt-2 mb-5">
-          <HeaderClock />
+          <Label>{formatOperationalDate(new Date())}</Label>
         </View>
 
         {subscription.visible && (
@@ -297,13 +311,32 @@ export function HomeScreen() {
           </View>
         )}
 
-        {/* Command bar — active loads and fleet ready */}
-        <Animated.View entering={SECTION_REVEAL[0]}>
+        {/* Command bar: active loads and fleet ready */}
+        <Animated.View entering={reveal.section(0)}>
           <CommandBar activeLoads={activeLoadsCell} fleetReady={fleetReadyCell} />
         </Animated.View>
 
-        {/* Hero — revenue received, last 12 months, + the revenue-vs-costs line */}
-        <Animated.View entering={SECTION_REVEAL[1]}>
+        {/* Needs you, first as on the web: overdue invoices, loads left open, idle
+            trucks, other signals */}
+        <Animated.View entering={reveal.section(1)}>
+          {signals.isError && !signals.data ? (
+            <SectionError message="Couldn't load what needs you." onRetry={() => void signals.refetch()} />
+          ) : needsLoading ? (
+            <View className="mb-5">
+              <Skeleton height={120} radius={12} />
+            </View>
+          ) : (
+            <NeedsYouCard
+              rows={needsRows}
+              canOpen={(row) => !!row.target && canOpenTarget(row.target)}
+              onOpen={openTarget}
+              notes={needsNotes}
+            />
+          )}
+        </Animated.View>
+
+        {/* Hero: revenue received, last 12 months, + the revenue-vs-costs line */}
+        <Animated.View entering={reveal.section(2)}>
           {m ? (
             <View className="mb-5">
               <HeroRevenue
@@ -321,22 +354,28 @@ export function HomeScreen() {
           )}
         </Animated.View>
 
-        {/* Bento pair — owed to you / net margin */}
-        <Animated.View entering={SECTION_REVEAL[2]}>
+        {/* Bento pair: owed to you (the page's one emphasis tile) / net margin */}
+        <Animated.View entering={reveal.section(3)}>
           {m ? (
             <View className="mb-5">
-              <View className="flex-row gap-3">
-                <StatCard
-                  compact
-                  label="Owed to you, incl. VAT"
+              <KpiRow>
+                <OwedTile
                   value={wholeRand(m.owed)}
-                  delta={owedDelta}
-                  deltaTone="down"
-                  sub={owedSub}
+                  owed={m.owed}
+                  pastDue={m.pastDue}
+                  note={owedNote}
+                  noteTone={owedNoteTone}
+                  tip={`Owed is the open balance on sent invoices, including VAT.${partialNote}`}
                 />
                 <StatCard
                   compact
-                  label="Net margin, last 12 months"
+                  label="Net margin, 12 months"
+                  aside={
+                    <InfoTip
+                      text={`Margin is revenue received less approved expenses, excl. VAT, cash basis. Compared with the 12 months before.${partialNote}`}
+                      label="About net margin"
+                    />
+                  }
                   value={m.margin == null ? 'n/a' : formatPercent(m.margin)}
                   delta={
                     marginNote == null && marginChange != null
@@ -346,39 +385,15 @@ export function HomeScreen() {
                   deltaTone={(marginChange ?? 0) >= 0 ? 'up' : 'down'}
                   sub={marginNote}
                 />
-              </View>
-              <Txt className="mt-2 text-micro text-faint">
-                Owed is the open balance on sent invoices. Margin is revenue received less approved
-                expenses, excl. VAT, cash basis.
-                {receivedPartial ? ` Figures use the ${money.partial.join(', ')} that loaded.` : ''}
-              </Txt>
+              </KpiRow>
             </View>
           ) : money.error ? null : (
             <BentoSkeleton />
           )}
         </Animated.View>
 
-        {/* Needs you — overdue invoices, loads left open, idle trucks, other signals */}
-        <Animated.View entering={SECTION_REVEAL[3]}>
-          {signals.isError && !signals.data ? (
-            <SectionError message="Couldn't load what needs you." onRetry={() => void signals.refetch()} />
-          ) : needsLoading ? (
-            <View className="mb-5">
-              <Skeleton height={120} radius={12} />
-            </View>
-          ) : (
-            <NeedsYouCard
-              rows={needsRows}
-              canOpen={(row) => !!row.target && canOpenTarget(row.target)}
-              onOpen={openTarget}
-              onAskCopilot={canSeeInsights(role) ? () => nav.navigate('Copilot') : undefined}
-              notes={needsNotes}
-            />
-          )}
-        </Animated.View>
-
         {/* Loads booked, last 28 days */}
-        <Animated.View entering={SECTION_REVEAL[4]}>
+        <Animated.View entering={reveal.section(4)}>
           {loads.summary && fleet.summary ? (
             <UtilisationCard
               booked28={loads.summary.booked28}
@@ -403,8 +418,8 @@ export function HomeScreen() {
           )}
         </Animated.View>
 
-        {/* Quote pipeline — how far quotes get */}
-        <Animated.View entering={SECTION_REVEAL[5]}>
+        {/* Quote pipeline: where quotes stand */}
+        <Animated.View entering={reveal.section(5)}>
           {quotes.funnel ? (
             <QuoteFunnelCard
               funnel={quotes.funnel}
@@ -422,7 +437,7 @@ export function HomeScreen() {
         </Animated.View>
 
         {/* Recent quotes */}
-        <Animated.View entering={SECTION_REVEAL[6]}>
+        <Animated.View entering={reveal.section(6)}>
           <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'quotes' })}>
             Recent quotes
           </SectionLabel>
@@ -433,16 +448,16 @@ export function HomeScreen() {
               <ListSkeleton rows={3} />
             </View>
           ) : (
-            <View className="mb-5 overflow-hidden rounded-card border border-line bg-surface">
+            <Card className="mb-5">
               {quotes.recent.length === 0 ? (
                 <Txt className="p-4 text-center text-caption text-faint">No quotes yet</Txt>
               ) : (
                 quotes.recent.map((q, i) => (
-                  <Animated.View key={q.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                  <Animated.View key={q.id} entering={reveal.row(i)}>
                     <ListRow
                       leading={<Avatar name={q.customer} size={38} />}
-                      title={q.customer}
-                      subtitle={[q.origin, ...q.stopLabels, q.destination].join(' → ')}
+                      title={q.code}
+                      subtitle={q.customer}
                       trailing={
                         <View className="items-end gap-1">
                           <Mono className="text-callout font-semibold text-fg">
@@ -461,12 +476,12 @@ export function HomeScreen() {
                   </Animated.View>
                 ))
               )}
-            </View>
+            </Card>
           )}
         </Animated.View>
 
         {/* Recent bookings */}
-        <Animated.View entering={SECTION_REVEAL[7]}>
+        <Animated.View entering={reveal.section(7)}>
           <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'orders' })}>
             Recent bookings
           </SectionLabel>
@@ -477,31 +492,26 @@ export function HomeScreen() {
               <ListSkeleton rows={3} />
             </View>
           ) : (
-            <View className="mb-5 overflow-hidden rounded-card border border-line bg-surface">
+            <Card className="mb-5">
               {loads.recent.length === 0 ? (
                 <Txt className="p-4 text-center text-caption text-faint">No bookings yet</Txt>
               ) : (
                 loads.recent.map((l, i) => (
-                  <Animated.View key={l.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                  <Animated.View key={l.id} entering={reveal.row(i)}>
                     <ListRow
                       leading={<Icon name="truck" size={22} color={colors.muted} />}
                       title={l.loadNumber}
-                      subtitle={l.customer}
-                      trailing={
-                        <View className="items-end gap-1">
-                          <Mono className="text-caption text-muted">
-                            {l.pickupState} → {l.deliveryState}
-                          </Mono>
-                          <StatusPill status={l.status} />
-                        </View>
-                      }
+                      // City names from the load's own city fields; the province codes
+                      // normalizeLoad reads first are not shown.
+                      subtitle={[l.customer, laneOf(l.raw as unknown as Load)].filter(Boolean).join(' · ')}
+                      trailing={<StatusPill status={l.status} />}
                       onPress={() => openLoad(l.id, l.raw)}
                       last={i === loads.recent.length - 1}
                     />
                   </Animated.View>
                 ))
               )}
-            </View>
+            </Card>
           )}
         </Animated.View>
 
@@ -509,7 +519,7 @@ export function HomeScreen() {
             quote as the primary. Finance shortcuts only exist when the role
             actually has that tab: navigating to a screen the navigator never
             registered is a no-op. */}
-        <Animated.View entering={SECTION_REVEAL[8]}>
+        <Animated.View entering={reveal.section(8)}>
           <SectionLabel>Quick actions</SectionLabel>
           <View className="gap-2.5">
             {hasFinance && (
@@ -517,7 +527,7 @@ export function HomeScreen() {
                 <View className="flex-1">
                   <Button
                     label="Add expense"
-                    icon="dollar"
+                    icon="banknote"
                     variant="secondary"
                     onPress={() => nav.navigate('AddExpense')}
                     fullWidth

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import {
   KeyboardAwareScrollView,
@@ -160,13 +160,16 @@ export function LoginScreen({ navigation }: Props) {
         </Animated.View>
 
         <Animated.View entering={FadeInDown.delay(240).duration(400)}>
-          <Pressable
+          <TouchableOpacity
             onPress={() => navigation.navigate('ForgotPassword')}
-            hitSlop={10}
+            activeOpacity={0.6}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Forgot password"
             className="mb-1 mt-2.5 self-end"
           >
             <Txt className="text-sub text-link">Forgot password?</Txt>
-          </Pressable>
+          </TouchableOpacity>
         </Animated.View>
 
         {!!serverError && (
@@ -216,11 +219,13 @@ export function LoginScreen({ navigation }: Props) {
                 the earlier App Store 3.1.1-driven "point at marketing" default.) */}
           <View className="flex-row flex-wrap items-center justify-center">
             <Txt className="text-sub text-muted">New to Truckwys? Create your account at </Txt>
-            <Pressable
+            <TouchableOpacity
               onPress={() => void WebBrowser.openBrowserAsync(WEB_APP_URL)}
-              hitSlop={6}
+              activeOpacity={0.6}
+              hitSlop={12}
               className="flex-row items-center gap-1"
               accessibilityRole="link"
+              accessibilityLabel="truckwys.com"
             >
               <Mono
                 className="text-sub text-link"
@@ -229,23 +234,32 @@ export function LoginScreen({ navigation }: Props) {
                 truckwys.com
               </Mono>
               <Icon name="externalLink" size={12} color={colors.link} strokeWidth={2} />
-            </Pressable>
+            </TouchableOpacity>
             <Txt className="text-sub text-muted">, then sign in here.</Txt>
           </View>
 
           {/* Reachable without an account, so the policy is available even to
                 someone who can't sign in (App Store Review 5.1.1). */}
           <View className="mb-2 mt-6 flex-row items-center justify-center gap-3">
-            <Pressable
+            <TouchableOpacity
               onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_POLICY_URL)}
-              hitSlop={10}
+              activeOpacity={0.6}
+              hitSlop={12}
+              accessibilityRole="link"
+              accessibilityLabel="Privacy policy"
             >
-              <Txt className="text-caption text-faint">Privacy Policy</Txt>
-            </Pressable>
+              <Txt className="text-caption text-faint">Privacy policy</Txt>
+            </TouchableOpacity>
             <Txt className="text-caption text-faint">·</Txt>
-            <Pressable onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)} hitSlop={10}>
-              <Txt className="text-caption text-faint">Terms of Service</Txt>
-            </Pressable>
+            <TouchableOpacity
+              onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)}
+              activeOpacity={0.6}
+              hitSlop={12}
+              accessibilityRole="link"
+              accessibilityLabel="Terms of service"
+            >
+              <Txt className="text-caption text-faint">Terms of service</Txt>
+            </TouchableOpacity>
           </View>
         </Animated.View>
       </KeyboardAwareScrollView>

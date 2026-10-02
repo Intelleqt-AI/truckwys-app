@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Share, Alert, Modal, Pressable } from 'react-native';
+import { View, Share, Alert, Modal, TouchableOpacity } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -17,11 +17,13 @@ import {
   Badge,
   Banner,
   Button,
-  Icon,
+  OverflowMenu,
+  type OverflowAction,
+  type IconName,
   Txt,
   Mono,
 } from '@/components/ui';
-import { ErrorState } from '@/components/feedback';
+import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { RouteMap } from '@/components/RouteMap';
 import {
   useQuote,
@@ -89,7 +91,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const subscription = useSubscription();
   const demo = useDemo();
   const { id, preview } = route.params;
-  const { data, isError, refetch } = useQuote(id, preview);
+  const { data, error, isError, isPending, refetch } = useQuote(id, preview);
   const q = (data ?? {}) as Record<string, unknown>;
   const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
   // Diesel moving since a quote was priced matters while it can still change.
@@ -118,7 +120,24 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const [rejectionReason, setRejectionReason] = useState('');
   const [customReason, setCustomReason] = useState('');
 
+  // A 404 means the quote was deleted or moved, which retrying can't fix.
+  if (isError && !data && (error as { status?: number } | null)?.status === 404) {
+    return (
+      <SheetScreen title="Quote" onBack={() => navigation.goBack()}>
+        <NotFoundState what="Quote" onBack={() => navigation.goBack()} />
+      </SheetScreen>
+    );
+  }
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this quote." />;
+  // Opened cold (push, deep link) there is no list row to render from: show a
+  // skeleton rather than a zeroed "DRAFT / R0" quote.
+  if (isPending && !data) {
+    return (
+      <SheetScreen title="Quote" onBack={() => navigation.goBack()}>
+        <DetailSkeleton />
+      </SheetScreen>
+    );
+  }
 
   const total = num(pick(q, ['total_amount', 'price']));
   const marginPct = num(pick(q, ['margin_percentage', 'margin_percent', 'margin']));
@@ -448,7 +467,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   };
 
   const share = async () => {
-    if (!shareUrl) return toast.info('No share link yet — send the quote first');
+    if (!shareUrl) return toast.info('No share link yet. Send the quote first');
     await Share.share({
       message: `Truckwys quote ${str(pick(q, ['quote_number']), '')}: ${shareUrl}`,
     });
@@ -464,107 +483,104 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       },
     ]);
 
+  // One state-driven primary action; everything else sits in the overflow menu.
+  // Booked: the booking owns the job. Accepted and not booked: convert it. A
+  // live Draft or Sent quote: send it (Edit leads instead when it is expired or
+  // priced before a diesel rise). Anything else falls back to Edit.
+  const primaryKind: 'view' | 'convert' | 'send' | 'edit' = booked
+    ? 'view'
+    : canConvert
+      ? 'convert'
+      : openStatus && !needsEdit
+        ? 'send'
+        : 'edit';
+  const primary: {
+    label: string;
+    icon: IconName;
+    onPress: () => void;
+    loading?: boolean;
+    disabled?: boolean;
+  } = {
+    view: {
+      label: 'View booking',
+      icon: 'arrowRight' as IconName,
+      onPress: () => navigation.navigate('LoadDetail', { id: bookedLoad!.id }),
+    },
+    convert: {
+      label: 'Convert to booking',
+      icon: 'arrowRight' as IconName,
+      disabled: subscription.blocked,
+      onPress: () =>
+        nav.openAssign({
+          mode: 'convert',
+          quoteId: id,
+          reference: str(pick(q, ['quote_number'])),
+          vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
+          popCallerOnSuccess: true,
+        }),
+    },
+    send: {
+      label: status === 'SENT' ? 'Resend' : 'Send',
+      icon: 'send' as IconName,
+      loading: sendBusy,
+      onPress: () => setSendOpen(true),
+    },
+    edit: { label: 'Edit quote', icon: 'edit' as IconName, onPress: editQuote },
+  }[primaryKind];
+
+  const menuActions: OverflowAction[] = [];
+  if (!booked && primaryKind !== 'edit') {
+    menuActions.push({ label: 'Edit quote', icon: 'edit', onPress: editQuote });
+  }
+  if (!booked && !loadStateOnly && primaryKind !== 'send') {
+    menuActions.push({
+      label: status === 'SENT' ? 'Resend' : 'Send',
+      icon: 'send',
+      disabled: sendBusy,
+      onPress: () => setSendOpen(true),
+    });
+  }
+  if (canRecordOutcome) {
+    menuActions.push(
+      {
+        label: 'Mark accepted',
+        icon: 'checkCircle',
+        onPress: () => setOutcomeType('accepted'),
+      },
+      { label: 'Mark rejected', icon: 'x', onPress: () => setOutcomeType('rejected') },
+    );
+  }
+  menuActions.push({
+    label: 'Download PDF',
+    icon: 'download',
+    disabled: downloadBusy,
+    hint: 'Preparing the PDF',
+    onPress: download,
+  });
+  if (!booked) {
+    menuActions.push({
+      label: 'Delete quote',
+      icon: 'x',
+      destructive: true,
+      disabled: deleteBusy,
+      hint: 'Deleting',
+      onPress: confirmDelete,
+    });
+  }
+
   const footer = (
-    <View className="gap-2.5">
-      {booked ? (
-        // Once booked there is nothing left to send, edit or convert: the
-        // booking owns the job from here.
+    <View className="flex-row items-center gap-2.5">
+      <View className="flex-1">
         <Button
-          label="View booking"
-          icon="arrowRight"
-          onPress={() => navigation.navigate('LoadDetail', { id: bookedLoad!.id })}
+          label={primary.label}
+          icon={primary.icon}
+          loading={primary.loading}
+          disabled={primary.disabled}
+          onPress={primary.onPress}
           fullWidth
         />
-      ) : (
-        <>
-          <View className="flex-row gap-2.5">
-            <View className="flex-1">
-              <Button
-                label="Edit quote"
-                icon="edit"
-                variant={needsEdit ? 'primary' : 'secondary'}
-                onPress={editQuote}
-                fullWidth
-              />
-            </View>
-            {!loadStateOnly && (
-              <View className="flex-1">
-                <Button
-                  label={status === 'SENT' ? 'Resend' : 'Send'}
-                  icon="send"
-                  variant={needsEdit ? 'secondary' : 'primary'}
-                  loading={sendBusy}
-                  onPress={() => setSendOpen(true)}
-                  fullWidth
-                />
-              </View>
-            )}
-          </View>
-          {canRecordOutcome && (
-            <View className="flex-row gap-2.5">
-              <View className="flex-1">
-                <Button
-                  label="Mark accepted"
-                  icon="checkCircle"
-                  variant="secondary"
-                  onPress={() => setOutcomeType('accepted')}
-                  fullWidth
-                />
-              </View>
-              <View className="flex-1">
-                <Button
-                  label="Mark rejected"
-                  icon="x"
-                  variant="secondary"
-                  onPress={() => setOutcomeType('rejected')}
-                  fullWidth
-                />
-              </View>
-            </View>
-          )}
-          {canConvert && (
-            <Button
-              label="Convert to booking"
-              icon="arrowRight"
-              disabled={subscription.blocked}
-              onPress={() =>
-                nav.openAssign({
-                  mode: 'convert',
-                  quoteId: id,
-                  reference: str(pick(q, ['quote_number'])),
-                  vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
-                  popCallerOnSuccess: true,
-                })
-              }
-              fullWidth
-            />
-          )}
-        </>
-      )}
-      <View className="flex-row gap-2.5">
-        <View className="flex-1">
-          <Button
-            label="Download PDF"
-            icon="download"
-            variant="secondary"
-            loading={downloadBusy}
-            onPress={download}
-            fullWidth
-          />
-        </View>
-        {!booked && (
-          <View className="flex-1">
-            <Button
-              label="Delete"
-              variant="danger"
-              icon="x"
-              loading={deleteBusy}
-              onPress={confirmDelete}
-              fullWidth
-            />
-          </View>
-        )}
       </View>
+      <OverflowMenu actions={menuActions} accessibilityLabel="More quote actions" />
     </View>
   );
 
@@ -580,11 +596,12 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     >
       <View className="mb-4 flex-row flex-wrap items-center gap-2.5">
         <StatusPill status={shownStatus} />
-        {/* {outcome === 'accepted' && <Badge label="✓ Won" tone="success" />} */}
-        {/* {outcome === 'rejected' && <Badge label="✗ Lost" tone="danger" />} */}
+        {/* The recorded answer, when the status doesn't already say it (web QuoteDetail). */}
+        {outcome === 'accepted' && status !== 'ACCEPTED' && !booked && <StatusPill status="WON" />}
+        {outcome === 'rejected' && status !== 'DECLINED' && <StatusPill status="LOST" />}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
         {marginPct > 0 && costsItemised && (
-          <Mono className="text-micro text-faint">Margin {formatPercent(marginPct)}</Mono>
+          <Mono className="text-caption text-faint">Margin {formatPercent(marginPct)}</Mono>
         )}
       </View>
 
@@ -637,12 +654,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       </View>
 
       {marginPct > 0 && marginPct < 12 && costsItemised && (
-        <View className="mb-5 flex-row items-center gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color={colors.warningDot} />
-          <Txt className="flex-1 text-sub text-muted">
-            Margin <Mono className="text-warning">{formatPercent(marginPct)}</Mono> is below your
-            pricing guardrail — review before sending.
-          </Txt>
+        <View className="mb-5">
+          <Banner
+            tone="warning"
+            message={`Margin ${formatPercent(marginPct)} is below your pricing guardrail. Review before sending.`}
+          />
         </View>
       )}
 
@@ -707,10 +723,10 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           )}
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
-              {roundTrip ? 'Total · both legs' : 'Total'}
+              {roundTrip ? 'Total, both legs' : 'Total'}
               {marginPct && costsItemised ? ` · ${marginPct}% margin` : ''}
             </Txt>
-            <Mono className="text-heading font-semibold text-accent">{formatCurrency(total)}</Mono>
+            <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
         </Group>
       )}
@@ -762,12 +778,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
       {sendOpen && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setSendOpen(false)}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={() => setSendOpen(false)}
             className="flex-1 items-center justify-center bg-backdrop px-6"
           >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => {}}
               className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Send quote</Txt>
@@ -790,8 +808,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
               </View>
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
 
@@ -810,13 +828,15 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
       {outcomeType && (
         <Modal visible transparent animationType="fade" onRequestClose={closeOutcome}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={closeOutcome}
             className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
-              <Pressable
-                onPress={(e) => e.stopPropagation()}
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => {}}
                 className="rounded-panel border border-line bg-surface p-5"
               >
                 <Txt className="text-heading font-semibold text-fg">
@@ -885,9 +905,9 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
                     />
                   </View>
                 </View>
-              </Pressable>
+              </TouchableOpacity>
             </KeyboardAvoidingView>
-          </Pressable>
+          </TouchableOpacity>
         </Modal>
       )}
     </SheetScreen>

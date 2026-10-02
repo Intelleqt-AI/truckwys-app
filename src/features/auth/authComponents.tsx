@@ -32,6 +32,7 @@ import {
   Logo,
   Icon,
   IconButton,
+  Banner,
   KeyboardDoneBar,
   INPUT_TEXT,
   type IconName,
@@ -280,18 +281,19 @@ export function SignInField({
           inputAccessoryViewID={rest.inputAccessoryViewID ?? accessoryID}
         />
         {secure && (
-          <Pressable
-            hitSlop={10}
+          <TouchableOpacity
+            hitSlop={14}
+            activeOpacity={0.6}
             onPress={() => setHidden((h) => !h)}
             accessibilityRole="button"
             accessibilityLabel={hidden ? 'Show password' : 'Hide password'}
           >
             <Icon name={hidden ? 'eye' : 'eyeOff'} size={18} color={colors.faint} />
-          </Pressable>
+          </TouchableOpacity>
         )}
       </Animated.View>
       <KeyboardDoneBar nativeID={accessoryID} />
-      {error ? <Mono className="mt-1.5 text-micro text-danger">{error}</Mono> : null}
+      {error ? <Mono className="mt-1.5 text-caption text-danger">{error}</Mono> : null}
     </View>
   );
 }
@@ -396,15 +398,10 @@ export function DemoLink({
 
 // ── InlineError: persistent card for a server/API failure ──────────────────
 export function InlineError({ message }: { message?: string | null }) {
-  const { colors } = useTheme();
   if (!message) return null;
   return (
-    <Animated.View
-      entering={FadeInDown.duration(220)}
-      className="flex-row items-center gap-2 rounded-card border border-danger bg-danger-bg px-3 py-2.5"
-    >
-      <Icon name="alert" size={16} color={colors.dangerDot} />
-      <Txt className="flex-1 text-sub text-danger">{message}</Txt>
+    <Animated.View entering={FadeInDown.duration(220)}>
+      <Banner tone="danger" message={message} />
     </Animated.View>
   );
 }

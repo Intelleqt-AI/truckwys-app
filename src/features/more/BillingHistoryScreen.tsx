@@ -10,7 +10,7 @@ import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'BillingHistory'>;
 
-// Every charge to the card on file, split by what it was for — the monthly plan
+// Every charge to the card on file, split by what it was for: the monthly plan
 // and the per-delivery platform fee. Mirrors the web billing-history page.
 
 const PERIODS = ['All time', 'Today', 'This week', 'This month', 'This year'] as const;
@@ -47,7 +47,7 @@ function ChargeGroup({ title, rows }: { title: string; rows: BillingCharge[] }) 
       <View className="mb-2 flex-row items-end justify-between">
         <Txt className="text-callout font-medium text-fg">{title}</Txt>
         {rows.length > 0 && (
-          <Mono className="text-micro text-faint">
+          <Mono className="text-caption text-faint">
             {rows.length} charge{rows.length === 1 ? '' : 's'} · {formatCurrency(total)}
           </Mono>
         )}
@@ -65,10 +65,10 @@ function ChargeGroup({ title, rows }: { title: string; rows: BillingCharge[] }) 
                 <Mono className="text-caption text-fg">{formatCurrency(c.amount)}</Mono>
               </View>
               <View className="mt-1 flex-row items-center gap-2">
-                <Mono className="text-micro text-faint">
+                <Mono className="text-caption text-faint">
                   {[c.createdAt ? formatDate(c.createdAt) : '', c.reference].filter(Boolean).join(' · ')}
                 </Mono>
-                <Mono className="text-micro capitalize" style={{ color: tone(c.status) }}>
+                <Mono className="text-caption capitalize" style={{ color: tone(c.status) }}>
                   {c.status}
                 </Mono>
               </View>
@@ -93,7 +93,6 @@ export function BillingHistoryScreen({ navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow="Billing"
       title="Billing history"
       onBack={() => navigation.goBack()}
       onRefresh={refetch}
@@ -111,7 +110,7 @@ export function BillingHistoryScreen({ navigation }: Props) {
       ) : (
         <View>
           <Txt className="mb-4 text-sub text-muted">
-            Every charge to your card on file — the monthly plan and the per-delivery platform fee.
+            Every charge to your card on file: the monthly plan and the per-delivery platform fee.
           </Txt>
           <View className="mb-5">
             <FilterChips

@@ -273,7 +273,6 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
   return (
     <View className="flex-1">
       <SheetScreen
-        // eyebrow={editing ? 'Edit' : 'New vehicle type'}
         title={editing ? 'Edit vehicle type' : 'Add vehicle type'}
         variant="modal"
         onBack={() => navigation.goBack()}
@@ -290,7 +289,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
         <Animated.View className="gap-5" style={shakeStyle}>
           {isShared && (
             <Txt className="text-caption text-faint">
-              TruckWys platform default — saving creates your own copy, used only by your
+              TruckWys platform default. Saving creates your own copy, used only by your
               company.
             </Txt>
           )}
@@ -351,7 +350,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                   name="fuel_type"
                   anchors={anchors}
                   label="Fuel type"
-                  icon="dollar"
+                  icon="fuel"
                   options={FUEL_TYPE_OPTIONS}
                 />
               </View>

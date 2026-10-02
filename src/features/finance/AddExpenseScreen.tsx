@@ -317,7 +317,6 @@ export function AddExpenseScreen({ route, navigation }: Props) {
   return (
     <View className="flex-1">
       <SheetScreen
-        eyebrow={editing ? 'Edit' : 'New expense'}
         title={editing ? 'Edit expense' : 'Add expense'}
         variant="modal"
         onBack={() => navigation.goBack()}
@@ -337,7 +336,7 @@ export function AddExpenseScreen({ route, navigation }: Props) {
             name="category"
             anchors={anchors}
             label="Category"
-            icon="dollar"
+            icon="banknote"
             required
             options={EXPENSE_CATEGORIES}
             onSelectExtra={(v) => {

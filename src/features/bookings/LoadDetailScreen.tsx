@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Alert, Modal, Pressable, Image } from 'react-native';
+import { View, Alert, Modal, TouchableOpacity, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
@@ -20,10 +20,11 @@ import {
   Mono,
   Label,
   Banner,
+  Card,
 } from '@/components/ui';
-import { ErrorState } from '@/components/feedback';
+import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { RouteMap } from '@/components/RouteMap';
-import { useLoad, updateLoadStatus, uploadLoadPod } from './api';
+import { useLoad, updateLoadStatus, uploadLoadPod, seedLoad } from './api';
 import { assignedIds } from './AssignDriverVehicleScreen';
 import { useSubscription } from '@/hooks/useSubscription';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL, stepIndexFor } from './constants';
@@ -42,7 +43,7 @@ type Props = NativeStackScreenProps<AppStackParamList, 'LoadDetail'>;
 
 export function LoadDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
-  const { data, isError, refetch } = useLoad(id, preview);
+  const { data, error, isError, isPending, refetch } = useLoad(id, preview);
   const { colors } = useTheme();
   const qc = useQueryClient();
   const subscription = useSubscription();
@@ -54,8 +55,25 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const [deliverBusy, setDeliverBusy] = useState(false);
   const [uploadDeliverBusy, setUploadDeliverBusy] = useState(false);
 
+  // A 404 means the load was deleted or moved, which retrying can't fix.
+  if (isError && !data && (error as { status?: number } | null)?.status === 404) {
+    return (
+      <SheetScreen title="Load" onBack={() => navigation.goBack()}>
+        <NotFoundState what="Load" onBack={() => navigation.goBack()} />
+      </SheetScreen>
+    );
+  }
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this booking." />;
-  const l = (data ?? {}) as Record<string, unknown>;
+  // Nothing cached and no list-row preview (e.g. opened from a notification):
+  // say it's loading rather than rendering a zeroed "PENDING / Unassigned" load.
+  if (isPending && !data) {
+    return (
+      <SheetScreen title="Load" onBack={() => navigation.goBack()}>
+        <DetailSkeleton />
+      </SheetScreen>
+    );
+  }
+  const l =(data ?? {}) as Record<string, unknown>;
 
   const status = str(pick(l, ['status']), 'PENDING').toUpperCase();
   const idx = stepIndexFor(status);
@@ -183,7 +201,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
     setBusy(true);
     try {
-      await updateLoadStatus(id, next);
+      seedLoad(qc, await updateLoadStatus(id, next), id);
       refresh();
       toast.success();
     } catch (e) {
@@ -235,7 +253,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     try {
       const name = asset.fileName ?? `pod-${id}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
-      await uploadLoadPod(id, { uri: asset.uri, name, type });
+      // seedLoad ignores the response unless it is a load record.
+      seedLoad(qc, await uploadLoadPod(id, { uri: asset.uri, name, type }), id);
       // A POD is what makes an invoice Fast Pay-eligible, so this moves the
       // capital lists too ('load' covers them).
       refresh();
@@ -250,7 +269,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const skipAndDeliver = async () => {
     setDeliverBusy(true);
     try {
-      await updateLoadStatus(id, 'DELIVERED');
+      seedLoad(qc, await updateLoadStatus(id, 'DELIVERED'), id);
       refresh();
       setShowDeliverModal(false);
       toast.success();
@@ -269,7 +288,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     try {
       const name = asset.fileName ?? `pod-${id}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
-      await uploadLoadPod(id, { uri: asset.uri, name, type });
+      seedLoad(qc, await uploadLoadPod(id, { uri: asset.uri, name, type }), id);
       // Backend flips IN_TRANSIT -> DELIVERED as a side effect of this call.
       refresh();
       setShowDeliverModal(false);
@@ -283,7 +302,6 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow="Load detail"
       title={str(pick(l, ['load_number', 'reference']), 'Load')}
       onBack={() => navigation.goBack()}
       footer={
@@ -293,7 +311,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           <View className="gap-2.5">
             {invoiced && invoiceId && (
               <Button
-                label="See invoice"
+                label="View invoice"
                 icon="receipt"
                 variant="secondary"
                 onPress={() => nav.openInvoice(invoiceId)}
@@ -372,7 +390,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Route */}
       <SectionLabel>Route</SectionLabel>
-      <View className="mb-5 rounded-card border border-line bg-surface p-4">
+      <Card className="mb-5 p-4">
         <View className="flex-row gap-3">
           <View className="items-center pt-1">
             <View style={{ width: 10, height: 10, borderRadius: 10, backgroundColor: colors.accent }} />
@@ -425,7 +443,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
             </Txt>
           </View>
         </View>
-      </View>
+      </Card>
 
       {hasRouteCoords && (
         <View className="mb-5">
@@ -448,7 +466,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           value={formatCurrency(rate)}
         />
         <DetailRow label="Fuel surcharge" value={formatCurrency(fuelSurcharge)} />
-        <DetailRow label="Additional" value={formatCurrency(additional)} />
+        <DetailRow label="Additional charges" value={formatCurrency(additional)} />
         {Math.abs(notItemised) > 0.5 && (
           <DetailRow
             label="Not itemised"
@@ -462,7 +480,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         )}
         <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
           <Txt className="text-callout font-semibold text-fg">Total</Txt>
-          <Mono className="text-heading font-semibold text-accent">{formatCurrency(total)}</Mono>
+          <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
         </View>
       </Group>
 
@@ -523,21 +541,23 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {showDeliverModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowDeliverModal(false)}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={() => setShowDeliverModal(false)}
             className="flex-1 items-center justify-center bg-backdrop px-6"
           >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => {}}
               className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
-              <Txt className="text-heading font-semibold text-fg">Mark as delivered</Txt>
+              <Txt className="text-heading font-semibold text-fg">Proof of delivery</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">
-                Attach a proof of delivery now, or skip it — you can still add one later from Upload POD.
+                Attach a proof of delivery now, or skip it. You can still add one later from Upload POD.
               </Txt>
               <View className="gap-2.5">
                 <Button
-                  label="Upload POD & set delivered"
+                  label="Upload POD and mark delivered"
                   icon="download"
                   loading={uploadDeliverBusy}
                   disabled={deliverBusy}
@@ -545,7 +565,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
                 <Button
-                  label="Skip & set delivered"
+                  label="Skip and mark delivered"
                   variant="secondary"
                   loading={deliverBusy}
                   disabled={uploadDeliverBusy}
@@ -560,19 +580,21 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
               </View>
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
 
       {showPodPreview && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowPodPreview(false)}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={() => setShowPodPreview(false)}
             className="flex-1 items-center justify-center bg-backdrop px-6"
           >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => {}}
               className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Proof of delivery</Txt>
@@ -598,7 +620,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                 )
               ) : (
                 <Txt className="mb-4 text-sub text-muted">
-                  No document file was attached — only a receipt name is on record.
+                  No document file was attached. Only a receipt name is on record.
                 </Txt>
               )}
               <View className="gap-2.5">
@@ -618,8 +640,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
               </View>
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
     </SheetScreen>

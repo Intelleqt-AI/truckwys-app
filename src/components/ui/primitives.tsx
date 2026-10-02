@@ -2,11 +2,9 @@ import { useState, type ReactNode } from 'react';
 import {
   View,
   Text as RNText,
-  Pressable,
   TouchableOpacity,
   ActivityIndicator,
   type ViewProps,
-  type PressableProps,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
@@ -14,7 +12,6 @@ import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
-import { formatConfidence } from '@/lib/formatters';
 
 // ── Card: surface fill, hairline border, 12px radius, no shadow ────────────
 // `overflow-hidden` clips anything painted flush to the edges (pressed-row
@@ -95,6 +92,8 @@ export function Button({
       accessibilityRole="button"
       accessibilityState={{ disabled: inactive }}
       disabled={inactive}
+      // The 32pt `sm` button keeps its drawn size but gets a 44pt hit area (web R7).
+      hitSlop={size === 'sm' ? { top: 6, bottom: 6, left: 4, right: 4 } : undefined}
       onPress={onPress}
       onPressIn={() => setPressed(true)}
       onPressOut={() => setPressed(false)}
@@ -135,18 +134,19 @@ export function IconButton({
   size?: number;
   accessibilityLabel: string;
   className?: string;
-} & Pick<PressableProps, 'onPress'>) {
+}) {
   const { colors } = useTheme();
   return (
-    <Pressable
+    <TouchableOpacity
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       hitSlop={8}
+      activeOpacity={0.7}
       onPress={onPress}
-      className={`h-11 w-11 items-center justify-center rounded-pill active:opacity-70 ${className}`}
+      className={`h-11 w-11 items-center justify-center rounded-pill ${className}`}
     >
       <Icon name={name} size={size} color={color ?? colors.muted} />
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -184,7 +184,9 @@ export function Badge({
       className="flex-row items-center self-start"
       style={{
         gap: 6,
-        height: 22,
+        // minHeight, not height: the label scales with the system font size, and
+        // a fixed 22 would clip it at the larger accessibility sizes.
+        minHeight: 22,
         paddingLeft: chip ? 8 : dot ? 7 : 8,
         paddingRight: 8,
         borderWidth: chip ? 0 : 1,
@@ -319,6 +321,9 @@ const STATUS_MAP: Record<string, { tone: BadgeTone; label: string }> = {
   INVOICED: { tone: 'success', label: 'Invoiced' },
   COMPLETED: { tone: 'success', label: 'Completed' },
   CANCELLED: { tone: 'neutral', label: 'Cancelled' },
+  CANCELED: { tone: 'neutral', label: 'Cancelled' },
+  COMPLETE: { tone: 'success', label: 'Completed' },
+  IN_MAINTENANCE: { tone: 'warning', label: 'Maintenance' },
   // Quote
   DRAFT: { tone: 'neutral', label: 'Draft' },
   SENT: { tone: 'info', label: 'Sent' },
@@ -380,36 +385,6 @@ export function StatusPill({
     label: sentenceCase(status ?? ''),
   };
   return <Badge label={label ?? cfg.label} tone={cfg.tone} dot={dot} />;
-}
-
-// ── PipelineBadge: quote stage as a dot + words ────────────────────────────
-// v3 has no per-stage hues; stages fold onto the status tones.
-const STAGE_TONE: Record<string, BadgeTone> = {
-  draft: 'neutral',
-  sent: 'info',
-  accepted: 'success',
-  in_transit: 'info',
-  transit: 'info',
-  completed: 'success',
-};
-export function PipelineBadge({ stage }: { stage: string }) {
-  const key = stage.toLowerCase().replace(/[\s-]/g, '_');
-  return <Badge label={sentenceCase(stage)} tone={STAGE_TONE[key] ?? 'neutral'} dot />;
-}
-
-// ── ConfidenceTag: high/medium/low from a 0..1 score ───────────────────────
-export function ConfidenceTag({ value }: { value: number }) {
-  const { colors } = useTheme();
-  const level = value >= 0.8 ? 'high' : value >= 0.6 ? 'medium' : 'low';
-  const hue = level === 'high' ? colors.success : level === 'medium' ? colors.warning : colors.danger;
-  return (
-    <View className="flex-row items-center gap-1">
-      <Icon name="gauge" size={12} color={hue} strokeWidth={2} />
-      <Mono className="text-micro" style={{ color: hue }}>
-        {formatConfidence(value)}
-      </Mono>
-    </View>
-  );
 }
 
 // ── PressScale: spring scale-down on press, the house tap feel ────────────

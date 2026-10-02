@@ -14,54 +14,41 @@ const ICON: Record<NeedsRow['kind'], IconName> = {
 // ── NeedsYouCard: the things that want a decision today (overdue invoices, loads
 // left open, idle trucks, the backend's other signals). Rows are built in
 // signals.ts buildNeeds; this only draws them. A row opens where its action goes
-// (`onOpen`), and shows no action when the role cannot reach that screen.
+// (`onOpen`), and shows no action when the role cannot reach that screen. Renders
+// nothing when there is nothing to show; a list that failed to build still shows
+// its retry notes, so a failure never reads as "all clear".
 export function NeedsYouCard({
   rows,
   canOpen,
   onOpen,
-  onAskCopilot,
   notes,
 }: {
   rows: NeedsRow[];
   /** Whether this role can reach a row's destination. */
   canOpen: (row: NeedsRow) => boolean;
   onOpen: (row: NeedsRow) => void;
-  /** Shown in the empty state when the role can use Copilot. */
-  onAskCopilot?: () => void;
   /** Parts of the list that could not be built, each with a retry. */
   notes?: { text: string; onRetry: () => void }[];
 }) {
   const { colors } = useTheme();
   const shown = rows.slice(0, MAX_ROWS);
 
+  if (shown.length === 0 && !notes?.length) return null;
+
   return (
     <View className="mb-5">
       <View className="mb-2.5 flex-row items-center justify-between">
         <Mono className="text-sub font-medium text-faint">Needs you</Mono>
         {rows.length > 0 && (
-          <Mono className="text-micro text-muted">
+          <Mono className="text-caption text-muted">
             {rows.length > MAX_ROWS ? `${MAX_ROWS} of ${rows.length}` : rows.length}
           </Mono>
         )}
       </View>
       <Card>
         {shown.length === 0 ? (
-          <View className="items-center gap-3 p-4">
-            <Txt className="text-center text-caption text-faint">
-              {notes && notes.length > 0
-                ? 'Nothing to show from what loaded.'
-                : 'Nothing needs you right now.'}
-            </Txt>
-            {onAskCopilot && (!notes || notes.length === 0) && (
-              <TouchableOpacity
-                onPress={onAskCopilot}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                className="min-h-[40px] justify-center rounded-control border border-line-active px-4"
-              >
-                <Mono className="text-caption font-medium text-fg">Ask Copilot</Mono>
-              </TouchableOpacity>
-            )}
+          <View className="items-center p-4">
+            <Txt className="text-center text-caption text-faint">Nothing to show from what loaded.</Txt>
           </View>
         ) : (
           shown.map((row, i) => {
@@ -89,8 +76,8 @@ export function NeedsYouCard({
                   )}
                 </View>
                 {actionable && row.actionLabel && (
-                  <View className="min-h-[32px] justify-center rounded-control border border-line-active px-2.5">
-                    <Mono className="text-micro font-medium text-fg">{row.actionLabel}</Mono>
+                  <View className="min-h-[36px] justify-center rounded-control border border-line-active px-2.5">
+                    <Mono className="text-caption font-medium text-fg">{row.actionLabel}</Mono>
                   </View>
                 )}
               </View>

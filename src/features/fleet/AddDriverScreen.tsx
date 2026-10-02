@@ -48,7 +48,10 @@ const PROVINCES = ['GP', 'WC', 'KZN', 'EC', 'MP', 'LP', 'NW', 'FS', 'NC'].map((v
   label: v,
   value: v,
 }));
-const STATUSES = DRIVER_STATUSES.map((v) => ({ label: v.replace(/_/g, ' '), value: v }));
+const STATUSES = DRIVER_STATUSES.map((v) => ({
+  label: v.charAt(0) + v.slice(1).toLowerCase().replace(/_/g, ' '),
+  value: v,
+}));
 
 function fromDriverRecord(d: Record<string, unknown>, assignedVehicleId: string): DriverFormValues {
   const userDetails = (pick(d, ['user_details']) ?? {}) as Record<string, unknown>;
@@ -101,7 +104,7 @@ async function createDriverUser(v: DriverFormValues) {
       const isUsernameClash = !!(data && typeof data === 'object' && 'username' in data);
       if (!isUsernameClash) throw e;
       if (attempt === 5) {
-        throw new Error('A driver with this name already exists — add a middle initial');
+        throw new Error('A driver with this name already exists. Add a middle initial.');
       }
       // else loop again with the next numbered suffix
     }
@@ -235,7 +238,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
 
   const vehicleOptions = useMemo(
     () => [
-      { label: '— No vehicle —', value: '' },
+      { label: 'No vehicle', value: '' },
       ...(vehicles ?? []).map((v) => ({ label: `${v.name} · ${v.plate}`, value: String(v.id) })),
     ],
     [vehicles],
@@ -353,7 +356,6 @@ export function AddDriverScreen({ route, navigation }: Props) {
   return (
     <View className="flex-1">
       <SheetScreen
-        eyebrow={editing ? 'Edit' : 'New driver'}
         title={editing ? 'Edit driver' : 'Add driver'}
         variant="modal"
         onBack={() => navigation.goBack()}

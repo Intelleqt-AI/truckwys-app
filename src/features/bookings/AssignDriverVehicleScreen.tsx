@@ -5,7 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { fetchData } from '@/lib/api/client';
 import { SheetScreen, SelectField, Button, Txt, Mono, type Option } from '@/components/ui';
 import { asArray, str, pick } from '@/lib/api/list';
-import { assignLoadDriver, convertQuoteToLoad, updateLoadStatus } from './api';
+import { assignLoadDriver, convertQuoteToLoad, seedLoad, updateLoadStatus } from './api';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -78,8 +78,8 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
 
   // Reassigning: driver stays optional (relabeled away from "unassign"),
   // vehicle becomes mandatory — no clear entry for it at all.
-  const driverClearLabel = reassigning ? '— No driver —' : '— Assign later —';
-  const vehicleClearLabel = reassigning ? undefined : '— Assign later —';
+  const driverClearLabel = reassigning ? 'No driver' : 'Assign later';
+  const vehicleClearLabel = reassigning ? undefined : 'Assign later';
 
   const driverOptions: Option[] = useMemo(() => {
     const rows = asArray<DriverOption>(driversRaw);
@@ -126,13 +126,21 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
     try {
       if (mode === 'reassign') {
         if (loadId == null) throw new Error('Missing load');
-        await assignLoadDriver(loadId, driverId ? Number(driverId) : null, vehicleId ? Number(vehicleId) : null);
+        const assigned = await assignLoadDriver(
+          loadId,
+          driverId ? Number(driverId) : null,
+          vehicleId ? Number(vehicleId) : null,
+        );
+        // Both endpoints return the full updated load, so write it straight into
+        // the detail cache: the screen underneath shows the new driver/vehicle
+        // the moment this sheet closes, not after a refetch.
+        seedLoad(qc, assigned, loadId);
         // assign_driver only auto-promotes PENDING -> ASSIGNED; from any other
         // status (e.g. LOADING) it leaves status untouched, so finish the move
         // explicitly when this was opened from the status dropdown. Vehicle is
         // required to get here at all, so this always reflects a real assignment.
         if (activateOnAssign && vehicleId) {
-          await updateLoadStatus(loadId, 'ASSIGNED');
+          seedLoad(qc, await updateLoadStatus(loadId, 'ASSIGNED'), loadId);
         }
         invalidateFor(qc, 'load');
         toast.success('Assigned');
@@ -140,11 +148,15 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
       } else {
         if (quoteId == null) throw new Error('Missing quote');
         const created = await convertQuoteToLoad(quoteId, { driver_id: driverId, vehicle_id: vehicleId });
+        const newLoadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
+        // The response is the complete new load. Seed the detail cache before
+        // navigating so LoadDetail opens populated instead of blank until its
+        // own GET gets through the invalidation refetch wave below.
+        seedLoad(qc, created, newLoadId as string | number | undefined);
         // A load's status drives revenue/fleet utilisation; a converted quote
         // also stops showing as convertible.
         invalidateFor(qc, 'quote', 'load');
         toast.success(vehicleId ? 'Converted and assigned' : 'Converted to booking');
-        const newLoadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
         navigation.pop(popCallerOnSuccess ? 2 : 1);
         if (newLoadId != null) {
           navigation.navigate('LoadDetail', { id: newLoadId as string | number });
@@ -194,8 +206,8 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
           warning={
             noVehicles
               ? vehicleType
-                ? `No available ${vehicleType} vehicles — check the Fleet tab.`
-                : 'No available vehicles — check the Fleet tab.'
+                ? `No available ${vehicleType} vehicles. Check the Fleet tab.`
+                : 'No available vehicles. Check the Fleet tab.'
               : undefined
           }
         />
@@ -206,11 +218,11 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
           options={noDrivers ? [] : driverOptions}
           value={driverId}
           onSelect={setDriverId}
-          warning={noDrivers ? 'No available drivers — check the Fleet tab.' : undefined}
+          warning={noDrivers ? 'No available drivers. Check the Fleet tab.' : undefined}
         />
 
         {!reassigning && !!driverId && !vehicleId && (
-          <Mono className="text-micro text-warning">
+          <Mono className="text-caption text-warning">
             Select a vehicle to assign a driver, or clear driver to assign later.
           </Mono>
         )}

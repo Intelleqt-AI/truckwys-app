@@ -8,8 +8,6 @@ export {
   Avatar,
   LiveDot,
   StatusPill,
-  PipelineBadge,
-  ConfidenceTag,
   PressScale,
   toneForStatus,
   type Tone,
@@ -25,8 +23,8 @@ export {
 } from './forms';
 export { SelectField, type Option } from './SelectField';
 export { DateField } from './DateField';
-export { Sparkline } from './Sparkline';
-export { Glass, GlassSolid } from './Glass';
+export { RevenueCostBars, CostsSwatch, type RevenueCostMonth } from './RevenueCostBars';
+export { Glass } from './Glass';
 export { SwipeTabs } from './SwipeTabs';
 export {
   Screen,
@@ -36,8 +34,13 @@ export {
   FilterChips,
   Fab,
 } from './layout';
+export { InfoTip } from './InfoTip';
+export { OverflowMenu, type OverflowAction } from './OverflowMenu';
 export {
   StatCard,
+  KpiTile,
+  KpiRow,
+  type KpiTone,
   ListRow,
   Group,
   DetailRow,

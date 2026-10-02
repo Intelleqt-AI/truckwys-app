@@ -4,7 +4,7 @@ import Animated from 'react-native-reanimated';
 import { Group, Mono, Label, Txt } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { formatNumber } from '@/lib/formatters';
-import { HEAT_REVEAL } from './motion';
+import { useReveal } from './motion';
 
 const COLS = 7;
 const ROWS = 4;
@@ -32,6 +32,7 @@ export function UtilisationCard({
   totalVehicles: number;
 }) {
   const { colors } = useTheme();
+  const reveal = useReveal();
   // v is 0..3 (derive.ts); spread across the 6-step theme ramp, 0 = empty cell.
   const heatColor = useCallback(
     (v: number) => colors.heat[[0, 2, 3, 5][v] ?? 0] ?? colors.line,
@@ -56,7 +57,7 @@ export function UtilisationCard({
               {formatNumber(activeLoads)}
             </Mono>
             {notClosed > 0 && (
-              <Mono className="text-micro text-warning">{`+${formatNumber(notClosed)} not closed`}</Mono>
+              <Mono className="text-caption text-warning">{`+${formatNumber(notClosed)} not closed`}</Mono>
             )}
           </View>
         </View>
@@ -65,7 +66,7 @@ export function UtilisationCard({
             {heat.slice(row * COLS, row * COLS + COLS).map((v, col) => (
               <Animated.View
                 key={col}
-                entering={HEAT_REVEAL[(row + col) % HEAT_REVEAL.length]}
+                entering={reveal.heat(row + col)}
                 className="flex-1 rounded-xs"
                 // A fixed height, not aspectRatio: 1 — square cells across 7
                 // narrow columns made each row ~45-50px tall (4 rows ≈

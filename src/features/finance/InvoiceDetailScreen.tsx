@@ -1,11 +1,23 @@
 import { useState } from 'react';
-import { View, Share, Modal, Pressable } from 'react-native';
+import { View, Share, Modal, StyleSheet, TouchableOpacity } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, StatCard, StatusPill, Group, DetailRow, Button, Txt, Mono, Banner } from '@/components/ui';
+import {
+  SheetScreen,
+  StatCard,
+  StatusPill,
+  Group,
+  DetailRow,
+  Button,
+  Txt,
+  Mono,
+  Banner,
+  OverflowMenu,
+  type OverflowAction,
+} from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
-import { ErrorState } from '@/components/feedback';
+import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import {
   useInvoice,
   useInvoicePayments,
@@ -23,11 +35,10 @@ import { InvoiceSendPreview, type InvoiceMessageKind } from './InvoiceSendPrevie
 import { num, str, pick } from '@/lib/api/list';
 import { invoiceShareUrl } from '@/lib/legal';
 import { openWhatsApp } from '@/lib/whatsapp';
-import { formatCurrency, formatDate } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
 import { saDaysBetween } from '@/lib/dates';
 import { canEditDueDate, canSendReminder, isInvoiceOverdue } from '@/lib/invoiceStatus';
 import { toast } from '@/lib/toast';
-import { CAPITAL_LAUNCHED, CAPITAL_COMING_SOON } from '@/lib/features';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
 
@@ -46,7 +57,7 @@ const CAN_EDIT = ['DRAFT'];
 
 export function InvoiceDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
-  const { data, isError, refetch } = useInvoice(id, preview);
+  const { data, isError, isPending, error, refetch } = useInvoice(id, preview);
   const { data: payments } = useInvoicePayments(id);
   const qc = useQueryClient();
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -63,7 +74,25 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const [dueError, setDueError] = useState<string | null>(null);
   const { colors } = useTheme();
 
-  if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this invoice." />;
+  // A deleted or moved invoice is a 404, which is not worth retrying.
+  if (isError && !data) {
+    return (error as { status?: number } | null)?.status === 404 ? (
+      <SheetScreen title="Invoice" onBack={() => navigation.goBack()}>
+        <NotFoundState what="Invoice" onBack={() => navigation.goBack()} />
+      </SheetScreen>
+    ) : (
+      <ErrorState onRetry={refetch} message="Couldn't load this invoice." />
+    );
+  }
+  // Opened cold (a push deep link) there is no preview to show yet; a skeleton
+  // beats a "DRAFT / R0" frame that then snaps to the real values.
+  if (!data && isPending) {
+    return (
+      <SheetScreen title="Invoice" onBack={() => navigation.goBack()}>
+        <DetailSkeleton />
+      </SheetScreen>
+    );
+  }
   const inv = (data ?? {}) as Record<string, unknown>;
 
   const total = num(pick(inv, ['total', 'total_amount']));
@@ -83,6 +112,26 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const daysLate = overdue && daysPastDue != null && daysPastDue > 0 ? daysPastDue : null;
   const draftPastDue = status === 'DRAFT' && daysPastDue != null && daysPastDue > 0;
   const canRemind = canSendReminder(inv);
+
+  // The VAT rate comes from the invoice (stored as 0.15 or 15). Without one it is
+  // worked out from the VAT and subtotal, and with neither the label stays plain.
+  const subtotal = num(pick(inv, ['subtotal']));
+  const vatAmount = num(pick(inv, ['vat_amount', 'vat', 'tax_amount', 'tax']));
+  const rawRate = pick(inv, ['tax_rate', 'vat_rate']);
+  const ratePct =
+    rawRate != null && rawRate !== ''
+      ? num(rawRate) > 0 && num(rawRate) <= 1
+        ? num(rawRate) * 100
+        : num(rawRate)
+      : subtotal > 0 && vatAmount > 0
+        ? (vatAmount / subtotal) * 100
+        : null;
+  const vatLabel =
+    ratePct != null && ratePct > 0
+      ? `VAT (${formatPercent(ratePct, Math.abs(ratePct - Math.round(ratePct)) < 0.05 ? 0 : 1)})`
+      : 'VAT';
+  // Itemised charges, when the payload carries them.
+  const lineItems = (Array.isArray(inv.line_items) ? inv.line_items : []) as Record<string, unknown>[];
 
   // 'invoice' covers the detail + list + the Home dashboard and finance
   // reports; the shared map can't forget one the way hand-rolled lists did.
@@ -216,9 +265,50 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     );
   };
 
+  // One primary action for the state the invoice is in; everything else sits in
+  // the overflow menu. Overdue first (chase it), then send/resend, then record a
+  // payment, and a PDF when nothing else applies (paid, cancelled).
+  type Primary = 'remind' | 'send' | 'pay' | 'pdf';
+  const primary: Primary = canRemind
+    ? 'remind'
+    : CAN_SEND.includes(status)
+      ? 'send'
+      : CAN_PAY.includes(status)
+        ? 'pay'
+        : 'pdf';
+  const doRemind = () => setSendPreview({ kind: 'reminder', then: 'email' });
+  const doSend = () => setSendOpen(true);
+  const doPay = () => setPayOpen(true);
+  const doMarkPaid = () => run(setPayBusy, () => markInvoicePaid(id), 'Marked paid');
+  const sendLabel = status === 'DRAFT' ? 'Send invoice' : 'Resend';
+
+  const primaryButton = {
+    remind: { label: 'Send reminder', icon: 'bell', busy: sendBusy, onPress: doRemind },
+    send: { label: sendLabel, icon: 'send', busy: sendBusy, onPress: doSend },
+    pay: { label: 'Record payment', icon: 'banknote', busy: payBusy, onPress: doPay },
+    pdf: { label: 'Download PDF', icon: 'download', busy: pdfBusy, onPress: openPdf },
+  }[primary] as { label: string; icon: 'bell' | 'send' | 'banknote' | 'download'; busy: boolean; onPress: () => void };
+
+  const moreActions: OverflowAction[] = [
+    ...(primary !== 'send' && CAN_SEND.includes(status)
+      ? [{ label: sendLabel, icon: 'send' as const, onPress: doSend }]
+      : []),
+    ...(primary !== 'remind' && canRemind
+      ? [{ label: 'Send reminder', icon: 'bell' as const, onPress: doRemind }]
+      : []),
+    ...(primary !== 'pay' && CAN_PAY.includes(status)
+      ? [{ label: 'Record payment', icon: 'banknote' as const, onPress: doPay }]
+      : []),
+    ...(CAN_PAY.includes(status)
+      ? [{ label: 'Mark as paid', icon: 'check' as const, onPress: doMarkPaid }]
+      : []),
+    ...(primary !== 'pdf'
+      ? [{ label: 'Download PDF', icon: 'download' as const, onPress: openPdf }]
+      : []),
+  ];
+
   return (
     <SheetScreen
-      eyebrow="Invoice"
       title={str(pick(inv, ['invoice_number', 'number']), 'Invoice')}
       onBack={() => navigation.goBack()}
       // A draft has no business being shared — it isn't finalised, and its
@@ -241,47 +331,17 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
             : undefined
       }
       footer={
-        <View className="gap-2.5">
-          <View className="flex-row gap-2.5">
-            <View className="flex-1">
-              <Button label="PDF" icon="download" variant="secondary" loading={pdfBusy} onPress={openPdf} fullWidth />
-            </View>
-            {CAN_SEND.includes(status) && (
-              <View className="flex-1">
-                <Button
-                  label={status === 'VIEWED' ? 'Resend' : 'Send'}
-                  icon="send"
-                  loading={sendBusy}
-                  onPress={() => setSendOpen(true)}
-                  fullWidth
-                />
-              </View>
-            )}
+        <View className="flex-row items-center gap-2.5">
+          <View className="flex-1">
+            <Button
+              label={primaryButton.label}
+              icon={primaryButton.icon}
+              loading={primaryButton.busy}
+              onPress={primaryButton.onPress}
+              fullWidth
+            />
           </View>
-          <View className="flex-row gap-2.5">
-            {canRemind && (
-              <View className="flex-1">
-                <Button label="Reminder" icon="bell" variant="secondary" onPress={() => setSendPreview({ kind: 'reminder', then: 'email' })} fullWidth />
-              </View>
-            )}
-            {CAN_PAY.includes(status) && (
-              <View className="flex-1">
-                <Button label="Record payment" icon="dollar" loading={payBusy} onPress={() => setPayOpen(true)} fullWidth />
-              </View>
-            )}
-          </View>
-          {CAN_PAY.includes(status) && (
-            <Button label="Mark as paid" variant="secondary" onPress={() => run(setPayBusy, () => markInvoicePaid(id), 'Marked paid')} fullWidth />
-          )}
-          {/* Fast Pay has no funding partner yet: the action stays visible so
-              people know it is coming, but it does nothing until
-              CAPITAL_LAUNCHED is flipped (lib/features.ts). */}
-          {!CAPITAL_LAUNCHED && CAN_PAY.includes(status) && (
-            <View>
-              <Button label="Request Fast Pay (coming soon)" icon="dollar" variant="secondary" disabled fullWidth />
-              <Txt className="mt-1.5 text-micro text-faint">{CAPITAL_COMING_SOON}</Txt>
-            </View>
-          )}
+          <OverflowMenu actions={moreActions} />
         </View>
       }
     >
@@ -307,7 +367,12 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
 
       <View className="mb-5 flex-row gap-3">
         <StatCard label="Total" value={formatCurrency(total, { maximumFractionDigits: 0 })} />
-        <StatCard label="Balance" value={formatCurrency(balance, { maximumFractionDigits: 0 })} />
+        <StatCard
+          label="Balance"
+          value={formatCurrency(balance, { maximumFractionDigits: 0 })}
+          note={daysLate ? `${daysLate} ${daysLate === 1 ? 'day' : 'days'} late` : undefined}
+          tone={daysLate ? 'danger' : undefined}
+        />
       </View>
 
       <Group label="Details">
@@ -331,19 +396,37 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
         <DetailRow label="Paid" value={formatCurrency(paid)} last />
       </Group>
 
+      {lineItems.length > 0 && (
+        <Group label="Charges">
+          {lineItems.map((item, i) => {
+            const qty = num(pick(item, ['quantity'])) || 1;
+            const unit = num(pick(item, ['unit_price', 'price']));
+            return (
+              <DetailRow
+                key={String(pick(item, ['id']) ?? i)}
+                label={str(pick(item, ['description', 'item_description']), 'Charge')}
+                hint={`${qty} x ${formatCurrency(unit)}`}
+                value={formatCurrency(qty * unit)}
+                last={i === lineItems.length - 1}
+              />
+            );
+          })}
+        </Group>
+      )}
+
       <Group label="Amounts">
-        <DetailRow label="Subtotal" value={formatCurrency(num(pick(inv, ['subtotal'])))} />
-        <DetailRow label="VAT (15%)" value={formatCurrency(num(pick(inv, ['vat', 'tax', 'vat_amount'])))} />
+        <DetailRow label="Subtotal" value={formatCurrency(subtotal)} />
+        <DetailRow label={vatLabel} value={formatCurrency(vatAmount)} />
         <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
           <Txt className="text-callout font-semibold text-fg">Total</Txt>
-          <Mono className="text-heading font-semibold text-accent">
+          <Mono className="text-heading font-semibold text-fg">
             {formatCurrency(total)}
           </Mono>
         </View>
       </Group>
 
       {payments && payments.length > 0 && (
-        <Group label="Payment history">
+        <Group label="Payments">
           {payments.map((p, i) => (
             <DetailRow
               key={p.id}
@@ -388,14 +471,15 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
 
       {sendOpen && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setSendOpen(false)}>
-          <Pressable
-            onPress={() => setSendOpen(false)}
-            className="flex-1 items-center justify-center bg-backdrop px-6"
-          >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
-              className="w-full max-w-[420px] rounded-panel border border-line bg-elevated p-5"
-            >
+          <View className="flex-1 items-center justify-center bg-backdrop px-6">
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setSendOpen(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              style={StyleSheet.absoluteFill}
+            />
+            <View className="w-full max-w-[420px] rounded-panel border border-line bg-elevated p-5">
               <Txt className="text-heading font-semibold text-fg">Send invoice</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">
                 {str(pick(inv, ['customer_name', 'customer']), 'the customer')}
@@ -416,8 +500,8 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
               </View>
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
       )}
     </SheetScreen>

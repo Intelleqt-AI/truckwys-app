@@ -9,7 +9,7 @@ import {
 } from 'react';
 import {
   View,
-  Pressable,
+  TouchableOpacity,
   Platform,
   Keyboard,
   useWindowDimensions,
@@ -108,7 +108,7 @@ import { TruckSuggestionChips } from './quote/TruckSuggestionChips';
 import { suggestTrucks } from './quote/suggestions';
 import { PriceCheckCard, type GuardInfo } from './quote/priceCheck/PriceCheckCard';
 import { usePriceCheck } from './quote/priceCheck/usePriceCheck';
-import { moneyWhole, type Review, type ItemKey } from './quote/priceCheck/types';
+import { moneyWhole, type Choice, type Review, type ItemKey } from './quote/priceCheck/types';
 import { QuoteSendPreview, type QuotePreviewData } from './QuoteSendPreview';
 import { CostBreakdownCard } from './quote/CostBreakdownCard';
 import { CostOverrides } from './quote/CostOverrides';
@@ -345,6 +345,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // (below) reads this so dismissing the confirmation overlay doesn't itself
   // trigger a "discard this quote?" prompt.
   const completedRef = useRef(false);
+  // Synchronous twin of `busy`: setBusy only lands on the next render, so a fast
+  // second tap (or the unsaved-changes Alert's Save draft) could start a second
+  // save() before the footer buttons disable.
+  const savingRef = useRef(false);
   const savedId = useRef<string | number | null>(null);
   const routeReq = useRef(0);
   const aiReq = useRef(0);
@@ -771,7 +775,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!vehicleCapacityTons || weightTons == null || weightTons <= vehicleCapacityTons)
       return '';
     if (weightTons <= vehicleCapacityTons * OVERLOAD_TOLERANCE) {
-      return `${weightTons}t exceeds the ${vehicleType}'s rated capacity of ${vehicleCapacityTons}t. Even within the legal 5% tolerance this is an overload — pick a larger vehicle or reduce the weight.`;
+      return `${weightTons}t exceeds the ${vehicleType}'s rated capacity of ${vehicleCapacityTons}t. Even within the legal 5% tolerance this is an overload. Pick a larger vehicle or reduce the weight.`;
     }
     return `${weightTons}t is well beyond the ${vehicleType}'s ${vehicleCapacityTons}t capacity. This needs an abnormal-load permit (route approval, possibly escorts) and can't be priced through a standard quote.`;
   }, [vehicleCapacityTons, weightTons, vehicleType]);
@@ -1034,7 +1038,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     guardExplain ||
     guardWarn ||
     guardFix ||
-    'Margin is below your guardrail — review before sending.';
+    'Margin is below your guardrail. Review before sending.';
   // The suggestion is the actionable half ("increase price by ~R… to reach …%"),
   // and it was being dropped whenever an explanation existed.
   const guardHint = guardFix && guardFix !== guardMsg ? guardFix : null;
@@ -1148,7 +1152,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       const res = await aiVoiceQuote({ uri, name: 'quote.m4a', type: 'audio/m4a' });
       const text = str(pick(res, ['text', 'transcription'])).trim();
       if (!text) {
-        toast.error("Didn't catch that — try again");
+        toast.error("Didn't catch that. Try again");
         return;
       }
       nlBarRef.current?.setText(text);
@@ -1204,7 +1208,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     marketAvgRate: num(pick(benchmark ?? {}, ['market_avg_rate'])),
     billingBlocked: subscription.blocked,
     quoteId: savedId.current ?? editId ?? null,
-    appliedKey: aiApplied?.key ?? null,
   });
 
   const aiInputsNow = (): AiInputs => ({
@@ -1304,7 +1307,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // Restores each field only if it still holds what Apply wrote: anything
   // changed since (e.g. a new vehicle's rate) is the person's and is kept.
-  const undoMarket = () => {
+  // Returns whether it had to keep a field the person changed since.
+  const restoreMarket = (): boolean => {
     const snap = preAiRef.current;
     let keptSome = false;
     if (snap) {
@@ -1329,11 +1333,30 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
     preAiRef.current = null;
     setAiApplied(null);
+    return keptSome;
+  };
+
+  const undoMarket = () => {
+    const keptSome = restoreMarket();
     toast.info(
       keptSome
         ? 'Undid the market figures. Fields you changed since were kept.'
         : 'Back to your own figures',
     );
+  };
+
+  // A tap on one item's Mine / Market switch in the price check: the quote moves
+  // to that combination straight away. Back on all "mine" is a restore, so the
+  // fields get exactly what they held before the first Apply.
+  const chooseMarket = (t: ItemKey, c: Choice) => {
+    const review = pc.review;
+    if (!review) return;
+    const key = pc.keyWith(t, c);
+    if (!key.includes('=ai')) {
+      if (preAiRef.current) restoreMarket();
+      return;
+    }
+    applyMarket(review, key);
   };
 
   // serviceCharge is only ever written by this / the market price check's Apply
@@ -1587,7 +1610,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // draft-specific relaxation for pickup_location/delivery_location).
     if (!customerId) return 'Select a client';
     if (!pickup?.lat || !delivery?.lat)
-      return 'Set a collection point and drop-off first';
+      return 'Set a collection point and delivery first';
     if (routeBlockedMessage) return routeBlockedMessage;
     if (weightBlockedMessage) return weightBlockedMessage;
     // Unlike weightInvalid (an unparseable weight quietly sends as 0 and only
@@ -1595,7 +1618,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // save too — Quote.weight is NOT NULL, so it's always in the payload —
     // and would fail there with the backend's digit-count error. Block both.
     if (weightTooLarge) {
-      return "That's an unusually large weight — check the unit is tons";
+      return "That's an unusually large weight. Check the unit is tons";
     }
     // Quote.base_rate/total_amount are both DecimalField(max_digits=10,
     // decimal_places=2). Rate/km × distance, or a typed driver/toll override,
@@ -1603,7 +1626,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // of them at once rather than bounding each input separately.
     const QUOTE_MONEY_MAX = decimalMax(10, 2);
     if (costs.baseCost > QUOTE_MONEY_MAX || costs.total > QUOTE_MONEY_MAX) {
-      return "That price is too large — check the rate and overrides";
+      return "That price is too large. Check the rate and overrides";
     }
     // A negative driver/toll override isn't just an "unexplained discount"
     // (applyRecommended's own comment on serviceCharge) — it can also drag
@@ -1616,7 +1639,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // already-created quote (savedId.current set) doesn't hit this again.
     if (demo.quotaExceeded && !savedId.current) return DEMO_QUOTA_MESSAGE;
     if (send) {
-      if (!ready) return 'Add a pickup and drop-off';
+      if (!ready) return 'Add a pickup and delivery';
       const missing: string[] = [];
       if (weightInvalid) return 'Weight is not a number';
       if (!(weightKg > 0)) missing.push('weight');
@@ -1634,8 +1657,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // Also gets validation toasts below out from behind the keyboard, where
     // they were otherwise invisible.
     void dismissKeyboard();
+    if (savingRef.current) return;
     const blocker = precheck(send);
     if (blocker) return toast.error(blocker);
+    savingRef.current = true;
     setBusy(send ? 'send' : 'draft');
     try {
       // send_to_customer makes the draft-to-sent transition itself, and that is
@@ -1686,6 +1711,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not save quote');
     } finally {
+      savingRef.current = false;
       setBusy(null);
       setSendPreviewOpen(false);
     }
@@ -1750,12 +1776,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     message: "You've started this quote. Leaving now loses it.",
     buttons: [
       { text: 'Keep editing', style: 'cancel' },
-      { text: 'Save draft', onPress: () => saveRef.current(false) },
+      { text: 'Save as draft', onPress: () => saveRef.current(false) },
       { text: 'Discard', style: 'destructive', dispatch: true },
     ],
   });
 
   const onSaveDraft = useCallback(() => {
+    if (savingRef.current) return;
     setSubmitAttempted('draft');
     const blocking = issuesRef.current.filter((i) => i.blocks === 'both');
     if (blocking.length) {
@@ -1771,6 +1798,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   }, [jumpTo]);
 
   const onSend = useCallback(() => {
+    if (savingRef.current) return;
     setSubmitAttempted('send');
     const blocking = issuesRef.current.filter((i) => i.blocks === 'both' || i.blocks === 'send');
     if (blocking.length) {
@@ -1800,16 +1828,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const priceOffer = useMemo<FooterOffer | null>(() => {
     if (!ready || costs.total <= 0 || weightBlockedMessage || routeBlockedMessage) return null;
     const o = pc.offer;
+    // Market figures already in the quote (all or some): the way back comes first.
+    if (aiApplied) return { kind: 'applied', onPress: undoMarket };
     if (o?.needsApply) {
       const delta = o.price - costs.total;
       const sign = delta > 0 ? '+' : '−';
       return {
         kind: 'apply',
-        label: `Apply ${moneyWhole(o.price)} (${sign}${moneyWhole(Math.abs(delta))})`,
+        label: `Use market ${moneyWhole(o.price)} (${sign}${moneyWhole(Math.abs(delta))})`,
         onPress: () => applyMarket(o.review, o.key),
       };
     }
-    if (aiApplied) return { kind: 'applied', onPress: undoMarket };
     if (o) return { kind: 'same' };
     if (pc.unavailable) return null;
     return { kind: 'prompt', onPress: () => jumpTo('price') };
@@ -1869,7 +1898,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (routeBlockedMessage) {
       return {
         tone: 'danger',
-        message: 'Route not allowed — tap to review',
+        message: 'Route not allowed. Tap to review',
         onPress: () => jumpTo('route'),
       };
     }
@@ -1878,7 +1907,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         tone: 'danger',
         // Short — this strip crops on longer messages (see QuoteFooterActions).
         // The full explanation is in the Price section's danger card + toast.
-        message: 'Overloaded — tap to review',
+        message: 'Overloaded. Tap to review',
         onPress: () => jumpTo('load'),
       };
     }
@@ -1923,8 +1952,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             calculating={routeBusy || aiBusy}
             strip={footerStrip}
             busy={busy}
-            saveDisabled={subscription.blocked || !!weightBlockedMessage}
-            sendDisabled={subscription.blocked || !!routeBlockedMessage || !!weightBlockedMessage}
+            // Each button also yields to the *other* action's save; its own
+            // `loading` already disables it without the grey disabled fill.
+            saveDisabled={busy === 'send' || subscription.blocked || !!weightBlockedMessage}
+            sendDisabled={
+              busy === 'draft' ||
+              subscription.blocked ||
+              !!routeBlockedMessage ||
+              !!weightBlockedMessage
+            }
             onSaveDraft={onSaveDraft}
             onSend={onSend}
           />
@@ -2016,15 +2052,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         className="absolute left-0 right-0 flex-row items-center px-4"
         style={{ top: insets.top + 6 }}
       >
-        <Pressable
+        <TouchableOpacity
           onPress={() => navigation.goBack()}
-          hitSlop={12}
+          activeOpacity={0.6}
+          hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Back"
-          className="h-10 w-10 items-center justify-center rounded-pill bg-backdrop active:opacity-60"
+          className="h-11 w-11 items-center justify-center rounded-pill bg-backdrop"
         >
           <Icon name="chevronLeft" size={24} color="#FFFFFF" strokeWidth={2.4} />
-        </Pressable>
+        </TouchableOpacity>
       </View>
 
       <BottomSheet
@@ -2066,10 +2103,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         >
           <View className="gap-6">
             {subscription.notice && (
-              <View className="flex-row items-start gap-2.5 rounded-control border border-danger bg-danger-bg p-3">
-                <Icon name="alert" size={17} color={colors.dangerDot} />
-                <Txt className="flex-1 text-sub text-muted">{subscription.notice}</Txt>
-              </View>
+              <Banner tone="danger" message={subscription.notice} />
             )}
             {/* AI voice / natural-language quick fill — stays outside the
             sections below and always at the top; it's the fast path and the
@@ -2110,7 +2144,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 error={showIssue('pickup', false)}
               />
 
-              {/* Stops between Collection and Drop-off, in visit order — mirrors the
+              {/* Stops between Collection and Delivery, in visit order — mirrors the
               physical route rather than sitting off to the side of it. */}
               {stops.map((stop, i) => (
                 <StopLocationRow
@@ -2136,7 +2170,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               )}
 
               <LocationField
-                label="Drop-off"
+                label="Delivery"
                 value={delivery}
                 onChange={setDelivery}
                 placeholder="Search destination"
@@ -2148,15 +2182,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               rest of the form is filled in. The real enforcement happens once
               /route/calculate/ runs — see routeBlockedMessage below. */}
               {!allowCrossBorder && (isForeignCc(pickup?.cc) || isForeignCc(delivery?.cc)) && (
-                <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-                  <Icon name="alert" size={17} color={colors.warningDot} />
-                  <Txt className="flex-1 text-sub text-muted">
-                    This location is outside South Africa, but your company isn&apos;t set up for
-                    cross-border routes (Settings → Company details). This quote will be refused
-                    once calculated — pick a domestic location or ask an admin to enable
-                    cross-border routes.
-                  </Txt>
-                </View>
+                <Banner
+                  tone="warning"
+                  message="This location is outside South Africa, but your company isn't set up for cross-border routes (Settings → Company details). This quote will be refused once calculated. Pick a domestic location or ask an admin to enable cross-border routes."
+                />
               )}
 
               <View>
@@ -2174,9 +2203,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               {/* Route refused by company policy — replaces the route preview,
               same as web. */}
               {ready && routeBlockedMessage && (
-                <View className="mt-5 rounded-control border border-danger bg-danger-bg p-4">
-                  <Txt className="text-callout font-semibold text-danger">Route not allowed</Txt>
-                  <Txt className="mt-1.5 text-sub text-muted">{routeBlockedMessage}</Txt>
+                <View className="mt-5">
+                  <Banner tone="danger" message={`Route not allowed. ${routeBlockedMessage}`} />
                 </View>
               )}
 
@@ -2212,7 +2240,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               {/* R/km lives in the overrides section under Price, next to the other
               cost levers — it isn't repeated here. */}
               <TextField
-                label="Weight (tons)"
+                label="Weight (t)"
                 required
                 placeholder="e.g. 20"
                 keyboardType="decimal-pad"
@@ -2249,7 +2277,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               />
             </QuoteSection>
 
-            <QuoteSection id="schedule" label="Schedule & terms" onLayout={registerSectionY}>
+            <QuoteSection id="schedule" label="Schedule and terms" onLayout={registerSectionY}>
               <DateField
                 label="Pickup date"
                 required
@@ -2293,12 +2321,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               ) : /* A load past the selected vehicle's capacity replaces the whole
               cost breakdown — same as web, there's no legitimate price to show. */
               ready && !routeBlockedMessage && weightBlockedMessage ? (
-                <View className="rounded-control border border-danger bg-danger-bg p-4">
-                  <Txt className="text-callout font-semibold text-danger">
-                    Overloaded for this vehicle
-                  </Txt>
-                  <Txt className="mt-1.5 text-sub text-muted">{weightBlockedMessage}</Txt>
-                </View>
+                <Banner
+                  tone="danger"
+                  message={`Overloaded for this vehicle. ${weightBlockedMessage}`}
+                />
               ) : ready && !routeBlockedMessage && costs.total > 0 ? (
                 <>
                   <PriceCheckCard
@@ -2306,6 +2332,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     benchmarkAvg={num(pick(benchmark ?? {}, ['market_avg_rate']))}
                     benchmarkRecommendation={str(pick(benchmark ?? {}, ['recommendation'])) || null}
                     guard={guardInfo}
+                    onChoose={chooseMarket}
                     routeError={ready && !routeBusy && !routeData}
                     onOpenFuelSettings={() => navigation.navigate('Settings', { section: 'company' })}
                   />

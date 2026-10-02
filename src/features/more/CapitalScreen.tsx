@@ -1,6 +1,6 @@
 import { View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, SectionLabel, StatCard, Button, Badge, Txt, Mono, EmptyState } from '@/components/ui';
+import { SheetScreen, SectionLabel, StatCard, Button, Badge, Card, Txt, Mono, EmptyState } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useInvoiceAging } from '@/features/finance/api';
 import { useCapitalEligible, INVOICE_CHECKS, checksFor } from '@/features/finance/fastpay';
@@ -49,11 +49,7 @@ export function CapitalScreen({ navigation }: Props) {
   const eligible = useCapitalEligible();
 
   return (
-    <SheetScreen
-      eyebrow="Working capital"
-      title="Fast Pay"
-      onBack={() => navigation.goBack()}
-    >
+    <SheetScreen title="Fast Pay" onBack={() => navigation.goBack()}>
       <View className="mb-4 items-start gap-2">
         <Badge label="Coming soon" tone="neutral" />
         <Txt className="text-sub text-muted">Get paid for delivered loads before customers pay.</Txt>
@@ -76,7 +72,7 @@ export function CapitalScreen({ navigation }: Props) {
       )}
 
       <SectionLabel>How Fast Pay will work</SectionLabel>
-      <View className="mb-5 gap-3 rounded-card border border-line bg-surface p-4">
+      <Card className="mb-5 gap-3 p-4">
         {STEPS.map((step, i) => (
           <View key={step.title} className="flex-row gap-3">
             <Mono className="w-5 text-callout font-semibold text-muted">{i + 1}</Mono>
@@ -87,8 +83,8 @@ export function CapitalScreen({ navigation }: Props) {
           </View>
         ))}
         <Button label="Request early payment" disabled fullWidth />
-        <Txt className="text-micro text-faint">{CAPITAL_COMING_SOON}</Txt>
-      </View>
+        <Txt className="text-caption text-faint">{CAPITAL_COMING_SOON}</Txt>
+      </Card>
     </SheetScreen>
   );
 }
@@ -101,7 +97,7 @@ function WaitingOnCustomers({ aging }: { aging: NonNullable<ReturnType<typeof us
   if (count === 0 || total <= 0) {
     return (
       <EmptyState
-        icon="dollar"
+        icon="banknote"
         title="Nothing is waiting"
         body="Every invoice you have sent is paid, so there is nothing Fast Pay would advance today."
       />
@@ -133,7 +129,7 @@ function WaitingOnCustomers({ aging }: { aging: NonNullable<ReturnType<typeof us
       {dso != null && (
         <Txt className="mb-3 text-sub text-muted">Customers take about {Math.round(num(dso))} days to pay.</Txt>
       )}
-      <View className="overflow-hidden rounded-card border border-line bg-surface">
+      <Card>
         {rows.map((r, i) => (
           <View
             key={r.key}
@@ -147,7 +143,7 @@ function WaitingOnCustomers({ aging }: { aging: NonNullable<ReturnType<typeof us
             </Mono>
           </View>
         ))}
-      </View>
+      </Card>
     </View>
   );
 }
@@ -161,13 +157,13 @@ function InvoiceChecks({ data }: { data: ReturnType<typeof useCapitalEligible>['
 
   if (checked === 0) {
     return (
-      <View className="mb-5 rounded-card border border-line bg-surface p-4">
+      <Card className="mb-5 p-4">
         <Txt className="text-sub text-muted">
           Invoice checks switch on when Fast Pay goes live. Each open invoice will be checked for proof of
           delivery, an age of 90 days or less, and no open dispute. Keeping the signed proof of delivery on
           every booking is the one thing you can do now.
         </Txt>
-      </View>
+      </Card>
     );
   }
 
@@ -182,9 +178,9 @@ function InvoiceChecks({ data }: { data: ReturnType<typeof useCapitalEligible>['
 
   if (rows.length === 0) {
     return (
-      <View className="mb-5 rounded-card border border-line bg-surface p-4">
+      <Card className="mb-5 p-4">
         <Txt className="text-sub text-muted">None of the {plural(checked, 'checked invoice')} fail an invoice check.</Txt>
-      </View>
+      </Card>
     );
   }
 
@@ -194,7 +190,7 @@ function InvoiceChecks({ data }: { data: ReturnType<typeof useCapitalEligible>['
         {checked - blocked} of {plural(checked, 'checked invoice')} {checked - blocked === 1 ? 'passes' : 'pass'}{' '}
         every check.
       </Txt>
-      <View className="overflow-hidden rounded-card border border-line bg-surface">
+      <Card>
         {rows.map((r, i) => (
           <View
             key={r.key}
@@ -208,7 +204,7 @@ function InvoiceChecks({ data }: { data: ReturnType<typeof useCapitalEligible>['
             </Mono>
           </View>
         ))}
-      </View>
+      </Card>
     </View>
   );
 }

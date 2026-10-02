@@ -1,5 +1,5 @@
-import { View, Pressable } from 'react-native';
-import { TextField, Button, Icon, Label, Txt } from '@/components/ui';
+import { View, TouchableOpacity } from 'react-native';
+import { TextField, Button, Card, Icon, Label, Txt } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 
 // "Describe it" — type a job in plain language, or tap the mic.
@@ -28,7 +28,7 @@ export function VoiceQuoteBar({
   const { colors } = useTheme();
 
   return (
-    <View className="rounded-card border border-line bg-surface p-3">
+    <Card className="p-3">
       <View className="mb-2 flex-row items-center gap-1.5">
         <Icon name="sparkle" size={14} color={colors.muted} />
         <Label className="text-muted">Describe it</Label>
@@ -42,14 +42,15 @@ export function VoiceQuoteBar({
       />
       {note ? <Txt className="mt-1.5 text-caption text-muted">{note}</Txt> : null}
       <View className="mt-2 flex-row items-stretch gap-2.5">
-        <Pressable
+        <TouchableOpacity
           onPress={onRecord}
+          activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel="Record voice"
-          className="w-14 items-center justify-center rounded-control border border-line-active bg-surface active:opacity-70"
+          className="w-14 items-center justify-center rounded-control border border-line-active bg-surface"
         >
           <Icon name="mic" size={20} color={colors.fg} />
-        </Pressable>
+        </TouchableOpacity>
         <View className="flex-1">
           <Button
             label="Fill from description"
@@ -62,6 +63,6 @@ export function VoiceQuoteBar({
           />
         </View>
       </View>
-    </View>
+    </Card>
   );
 }

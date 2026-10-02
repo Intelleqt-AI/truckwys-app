@@ -1,6 +1,6 @@
 import { View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, Txt, Mono, EmptyState, Icon } from '@/components/ui';
+import { SheetScreen, Card, Txt, Mono, EmptyState, Icon } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useActivity } from './api';
 import { formatRelativeTime } from '@/lib/formatters';
@@ -14,7 +14,7 @@ export function ActivityScreen({ navigation }: Props) {
   const { colors } = useTheme();
 
   return (
-    <SheetScreen eyebrow="Audit" title="Activity" onBack={() => navigation.goBack()}>
+    <SheetScreen title="Activity" onBack={() => navigation.goBack()}>
       {isLoading ? (
         <ListSkeleton />
       ) : isError ? (
@@ -22,7 +22,7 @@ export function ActivityScreen({ navigation }: Props) {
       ) : !data || data.length === 0 ? (
         <EmptyState icon="clock" title="No activity yet" body="Recent actions across your account appear here." />
       ) : (
-        <View className="rounded-card border border-line bg-surface">
+        <Card>
           {data.map((a, i) => (
             <View
               key={a.id}
@@ -33,10 +33,10 @@ export function ActivityScreen({ navigation }: Props) {
                 <Txt className="text-callout text-fg">{a.title}</Txt>
                 {a.detail ? <Txt className="mt-0.5 text-caption text-muted">{a.detail}</Txt> : null}
               </View>
-              {a.time ? <Mono className="text-micro text-faint">{formatRelativeTime(a.time)}</Mono> : null}
+              {a.time ? <Mono className="text-caption text-faint">{formatRelativeTime(a.time)}</Mono> : null}
             </View>
           ))}
-        </View>
+        </Card>
       )}
     </SheetScreen>
   );

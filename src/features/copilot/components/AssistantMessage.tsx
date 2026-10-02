@@ -42,7 +42,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       {msg.degraded && (
         <View className="mt-1.5 flex-row items-start gap-1.5">
           <Icon name="alert" size={12} color={colors.warningDot} />
-          <Mono className="flex-1 text-micro" style={{ color: colors.warning }}>
+          <Mono className="flex-1 text-caption" style={{ color: colors.warning }}>
             Answered by the rules engine because AI is unavailable, so it is basic. Try again shortly.
           </Mono>
         </View>

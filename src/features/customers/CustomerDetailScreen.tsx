@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   SheetScreen,
   StatCard,
+  KpiRow,
   Group,
   DetailRow,
   ListRow,
@@ -14,7 +15,7 @@ import {
   Txt,
   Mono,
 } from '@/components/ui';
-import { ErrorState } from '@/components/feedback';
+import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { quoteStage } from '@/lib/quoteStage';
 import { useCustomer, useCustomerQuotes, deleteCustomer, updateCustomer } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
@@ -38,14 +39,30 @@ const PAYMENT_TERMS: Record<string, string> = {
 
 export function CustomerDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
-  const { data, isError, refetch } = useCustomer(id, preview);
+  const { data, isError, isPending, error, refetch } = useCustomer(id, preview);
   const { data: quotesData } = useCustomerQuotes(id);
   const { openQuote } = useAppNavigation();
   const qc = useQueryClient();
   const demo = useDemo();
   const [busy, setBusy] = useState(false);
 
-  if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this customer." />;
+  if (isError && !data) {
+    return (error as { status?: number } | null)?.status === 404 ? (
+      <SheetScreen title="Customer" onBack={() => navigation.goBack()}>
+        <NotFoundState what="Customer" onBack={() => navigation.goBack()} />
+      </SheetScreen>
+    ) : (
+      <ErrorState onRetry={refetch} message="Couldn't load this customer." />
+    );
+  }
+  // Opened cold (no preview from a list) there is nothing to show yet.
+  if (!data && isPending) {
+    return (
+      <SheetScreen title="Customer" onBack={() => navigation.goBack()}>
+        <DetailSkeleton />
+      </SheetScreen>
+    );
+  }
   const c = (data ?? {}) as Record<string, unknown>;
   const name = str(pick(c, ['name', 'company_name', 'customer_name']), 'Customer');
   const active = pick(c, ['is_active']) !== false && str(pick(c, ['status'])).toUpperCase() !== 'INACTIVE';
@@ -99,7 +116,6 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow="Customer"
       title={name}
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
@@ -117,7 +133,7 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
             onPress={toggleActive}
             fullWidth
           />
-          <Button label="Delete customer" variant="danger" icon="x" onPress={confirmDelete} fullWidth />
+          <Button label="Delete customer" variant="danger" icon="trash" onPress={confirmDelete} fullWidth />
         </View>
       }
     >
@@ -134,33 +150,19 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
       </View>
 
       <Button
-        label="AI analysis"
-        icon="sparkle"
+        label="Payment risk"
+        icon="shield"
         variant="secondary"
         onPress={() => navigation.navigate('CustomerRisk', { id })}
         fullWidth
       />
 
-      <View className="mb-5 mt-4 flex-row flex-wrap gap-3">
-        <View className="flex-row" style={{ width: '47.5%' }}>
+      <View className="mb-5 mt-4">
+        <KpiRow>
           <StatCard label="Total quotes" value={String(totalQuotes)} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Accepted" value={String(accepted.length)} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Total revenue" value={formatCurrency(totalRevenue, { maximumFractionDigits: 0 })} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
-          <StatCard
-            label="Credit limit"
-            value={
-              pick(c, ['credit_limit']) != null
-                ? formatCurrency(num(pick(c, ['credit_limit'])), { maximumFractionDigits: 0 })
-                : '—'
-            }
-          />
-        </View>
+        </KpiRow>
       </View>
 
       <Group label="Contact">

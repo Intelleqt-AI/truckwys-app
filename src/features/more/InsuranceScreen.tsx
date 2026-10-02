@@ -1,6 +1,6 @@
 import { View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, SectionLabel, Badge, Button, Icon, Txt } from '@/components/ui';
+import { SheetScreen, SectionLabel, Badge, Button, Card, Icon, Txt } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -10,7 +10,7 @@ import type { AppStackParamList } from '@/navigation/types';
  * truthful instead of a dead row. Copy must not imply partners or cover that do
  * not exist yet. Mirrors the web's src/pages/Insurance.tsx: what is coming, and
  * what works today (premiums logged as Insurance expenses, already counted in
- * the P&L).
+ * the profit and loss).
  */
 type Props = NativeStackScreenProps<AppStackParamList, 'Insurance'>;
 
@@ -44,7 +44,7 @@ export function InsuranceScreen({ navigation }: Props) {
       </View>
 
       <SectionLabel>What is coming</SectionLabel>
-      <View className="mb-5 gap-3 rounded-card border border-line bg-surface p-4">
+      <Card className="mb-5 gap-3 p-4">
         {COMING.map((item) => (
           <View key={item.title} className="flex-row gap-3">
             <View className="mt-0.5">
@@ -56,12 +56,12 @@ export function InsuranceScreen({ navigation }: Props) {
             </View>
           </View>
         ))}
-      </View>
+      </Card>
 
       <SectionLabel>Until then</SectionLabel>
-      <View className="mb-5 gap-3 rounded-card border border-line bg-surface p-4">
+      <Card className="mb-5 gap-3 p-4">
         <Txt className="text-sub text-muted">
-          No cover through TruckWys yet. Log premiums as Insurance expenses so your P&amp;L counts them.
+          No cover through TruckWys yet. Log premiums as Insurance expenses so your profit and loss counts them.
         </Txt>
         <Button
           label="Go to expenses"
@@ -69,7 +69,7 @@ export function InsuranceScreen({ navigation }: Props) {
           fullWidth
           onPress={() => goTab('Finance', { tab: 'expenses' })}
         />
-      </View>
+      </Card>
     </SheetScreen>
   );
 }

@@ -72,7 +72,7 @@ export function MarginTab() {
       <View className="mb-3">
         <FilterChips options={PERIODS} value={period} onChange={setPeriod} />
       </View>
-      <Txt className="mb-4 text-micro text-faint">
+      <Txt className="mb-4 text-caption text-faint">
         {span}, excl. VAT, cash basis: money received less approved costs, as in the Profit and loss report.
         {data.partial.length ? ` Based on the ${data.partial.join(', ')}.` : ''}
       </Txt>

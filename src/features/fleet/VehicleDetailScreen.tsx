@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   SheetScreen,
   StatCard,
+  KpiRow,
   StatusPill,
   SegmentedControl,
   SelectField,
@@ -13,10 +14,11 @@ import {
   SectionLabel,
   ListRow,
   Button,
+  Card,
   Icon,
   Mono,
 } from '@/components/ui';
-import { ErrorState } from '@/components/feedback';
+import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { useVehicle, useVehicleLoads, updateVehicle, deleteVehicle, VEHICLE_STATUSES } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { num, str, pick, asArray } from '@/lib/api/list';
@@ -45,8 +47,8 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
   return (
     <View className="mb-3">
       <View className="mb-1 flex-row justify-between">
-        <Mono className="text-micro text-faint">{label}</Mono>
-        <Mono className="text-micro text-muted">{Math.round(value)}/100</Mono>
+        <Mono className="text-caption text-faint">{label}</Mono>
+        <Mono className="text-caption text-muted">{Math.round(value)}/100</Mono>
       </View>
       <View className="h-2 overflow-hidden rounded-pill" style={{ backgroundColor: colors.chartBar }}>
         <View style={{ width: `${pct}%`, height: '100%', backgroundColor: colors.accent }} />
@@ -57,7 +59,7 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
 
 export function VehicleDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
-  const { data, isError, refetch } = useVehicle(id, preview);
+  const { data, error, isError, isPending, refetch } = useVehicle(id, preview);
   const { data: loadsData } = useVehicleLoads(id);
   const { openLoad } = useAppNavigation();
   const { colors } = useTheme();
@@ -65,7 +67,23 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
   const demo = useDemo();
   const [tab, setTab] = useState<'overview' | 'financial'>('overview');
 
+  // A 404 means the vehicle was deleted or moved, which retrying can't fix.
+  if (isError && !data && (error as { status?: number } | null)?.status === 404) {
+    return (
+      <SheetScreen title="Vehicle" onBack={() => navigation.goBack()}>
+        <NotFoundState what="Vehicle" onBack={() => navigation.goBack()} />
+      </SheetScreen>
+    );
+  }
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this vehicle." />;
+  // Opened cold (push, deep link) with no list-row preview: skeleton, not empty values.
+  if (isPending && !data) {
+    return (
+      <SheetScreen title="Vehicle" onBack={() => navigation.goBack()}>
+        <DetailSkeleton />
+      </SheetScreen>
+    );
+  }
   const v = (data ?? {}) as Record<string, unknown>;
   const status = str(pick(v, ['status']), 'AVAILABLE').toUpperCase();
 
@@ -121,7 +139,6 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow="Vehicle"
       title={str(pick(v, ['name', 'make_model', 'model', 'registration']), 'Vehicle')}
       onBack={() => navigation.goBack()}
       actionLabel="Edit"
@@ -150,7 +167,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
         <SegmentedControl
           options={[
             { label: 'Overview', value: 'overview' },
-            { label: 'Financial Profile', value: 'financial' },
+            { label: 'Financial profile', value: 'financial' },
           ]}
           value={tab}
           onChange={setTab}
@@ -159,19 +176,13 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
 
       {tab === 'overview' ? (
         <>
-          <View className="mb-5 flex-row flex-wrap gap-3">
-            <View className="flex-row" style={{ width: '47.5%' }}>
-              <StatCard label="AI health score" value={`${num(pick(v, ['ai_health_score', 'health_score']))}/100`} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
+          <View className="mb-5">
+            <KpiRow>
+              <StatCard label="Health" value={`${num(pick(v, ['ai_health_score', 'health_score']))}/100`} />
               <StatCard label="Fuel efficiency" value={`${num(pick(v, ['fuel_efficiency_score']))}/100`} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Uptime" value={formatPercent(num(pick(v, ['uptime_percentage'])))} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Mileage" value={`${formatNumber(mileage)} km`} />
-            </View>
+            </KpiRow>
           </View>
 
           <Group label="Specification">
@@ -203,16 +214,6 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow label="Driver" value={str(pick(v, ['driver_name']), 'Unassigned')} mono={false} last />
           </Group>
 
-          <Group label="Economics">
-            <DetailRow label="Cost per km" value={formatCurrency(num(pick(v, ['cost_per_km'])))} />
-            <DetailRow label="Margin per trip" value={formatCurrency(num(pick(v, ['margin_per_trip'])))} />
-            <DetailRow
-              label="Fuel consumption"
-              value={`${formatNumber(num(pick(v, ['fuel_consumption_per_km'])), { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L/km`}
-              last
-            />
-          </Group>
-
           <Group label="Maintenance">
             <DetailRow label="Last maintenance" value={showDate(str(pick(v, ['last_maintenance_date'])))} />
             <DetailRow label="Service interval" value={serviceInterval ? `${formatNumber(serviceInterval)} km` : '—'} />
@@ -232,28 +233,21 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
         </>
       ) : (
         <>
-          <View className="mb-5 flex-row flex-wrap gap-3">
-            <View className="flex-row" style={{ width: '47.5%' }}>
+          <View className="mb-5">
+            <KpiRow>
               <StatCard label="Revenue" value={formatCurrencyCompact(totalRevenue)} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
-              <StatCard label="Avg / trip" value={formatCurrencyCompact(avgRevPerTrip)} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
-              <StatCard label="Revenue / km" value={formatCurrency(revPerKm)} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
-              <StatCard label="AI health" value={`${num(pick(v, ['ai_health_score']))}/100`} />
-            </View>
+              <StatCard label="Average per trip" value={formatCurrencyCompact(avgRevPerTrip)} />
+              <StatCard label="Revenue per km" value={formatCurrency(revPerKm)} />
+            </KpiRow>
           </View>
 
           <SectionLabel>Performance scores</SectionLabel>
-          <View className="mb-5 rounded-card border border-line bg-surface p-4">
-            <ScoreBar label="AI health" value={num(pick(v, ['ai_health_score', 'health_score']))} />
+          <Card className="mb-5 p-4">
+            <ScoreBar label="Health" value={num(pick(v, ['ai_health_score', 'health_score']))} />
             <ScoreBar label="Uptime" value={num(pick(v, ['uptime_score', 'uptime_percentage']))} />
             <ScoreBar label="Fuel efficiency" value={num(pick(v, ['fuel_efficiency_score']))} />
             <ScoreBar label="Maintenance" value={num(pick(v, ['maintenance_score']))} />
-          </View>
+          </Card>
 
           <Group label="Cost analysis">
             <DetailRow label="Cost per km" value={formatCurrency(num(pick(v, ['cost_per_km'])))} />
@@ -270,7 +264,7 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow label="Mileage" value={`${formatNumber(mileage)} km`} last />
           </Group>
 
-          <Group label="Compliance & maintenance">
+          <Group label="Compliance and maintenance">
             <DetailRow label="Last maintenance" value={showDate(str(pick(v, ['last_maintenance_date'])))} />
             <DetailRow label="Service interval" value={serviceInterval ? `${formatNumber(serviceInterval)} km` : '—'} />
             <DetailRow

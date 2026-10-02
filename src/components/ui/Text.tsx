@@ -26,18 +26,37 @@ const TABULAR: TextStyle = { fontVariant: ['tabular-nums'] };
  */
 export const INPUT_TEXT = { fontSize: 15 } as const;
 
-export function Txt({ className = '', style, ...props }: Props) {
+export function Txt({
+  className = '',
+  style,
+  tabular = false,
+  ...props
+}: Props & {
+  /** Tabular numerals, for a figure that has to line up with its neighbours. */
+  tabular?: boolean;
+}) {
   return (
     <RNText
       className={`text-body text-fg ${className}`}
-      style={style}
+      style={tabular ? [TABULAR, style] : style}
       {...props}
     />
   );
 }
 
+const HAS_SIZE = /(^|\s)text-(figure|display|title|heading|body|callout|sub|caption|micro|nano|\[)/;
+
+// A bare `<Mono>` used to fall back to React Native's 14px with no line height.
+// `text-callout` is added only when the caller gave no size class of their own, so
+// it never competes with one in the stylesheet.
 export function Mono({ className = '', style, ...props }: Props) {
-  return <RNText className={`text-fg ${className}`} style={[TABULAR, style]} {...props} />;
+  return (
+    <RNText
+      className={`${HAS_SIZE.test(className) ? '' : 'text-callout '}text-fg ${className}`}
+      style={[TABULAR, style]}
+      {...props}
+    />
+  );
 }
 
 export function Label({ className = '', style, ...props }: Props) {

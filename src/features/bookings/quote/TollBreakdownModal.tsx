@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable, Modal } from 'react-native';
+import { View, TouchableOpacity, Modal } from 'react-native';
 import { Button, Label, Txt, Mono } from '@/components/ui';
 import { num, pick, str } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
@@ -22,10 +22,11 @@ function TollBreakdownModalImpl({
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
-        <Pressable
+      <TouchableOpacity activeOpacity={1} className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
+        <TouchableOpacity
+          activeOpacity={1}
           className="rounded-panel border border-line bg-elevated p-4"
-          onPress={(e) => e.stopPropagation()}
+          onPress={() => {}}
         >
           <Label className="mb-3 text-muted">Toll plazas on this route</Label>
           {costs.tollsUnavailable ? (
@@ -55,19 +56,19 @@ function TollBreakdownModalImpl({
                 </Mono>
               </View>
               {costs.legs === 2 && (
-                <Mono className="mt-1 text-micro text-faint">
+                <Mono className="mt-1 text-caption text-faint">
                   × 2 for round trip = {formatCurrency(costs.tollBreakdownOneWay * 2)}
                 </Mono>
               )}
-              <Txt className="mt-2 text-micro text-faint">
+              <Txt className="mt-2 text-caption text-faint">
                 Tariffs exclude VAT, like the rest of the quote.
                 {costs.tollsEstimated ? ' This is an estimate, not a plaza match.' : ''}
               </Txt>
             </View>
           )}
           <Button label="Close" variant="secondary" onPress={onClose} fullWidth className="mt-4" />
-        </Pressable>
-      </Pressable>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }

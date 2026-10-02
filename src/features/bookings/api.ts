@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
+import type { AllPages } from '@/lib/api/fetchAllPages';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { useInfiniteList } from '@/lib/api/useInfiniteList';
 import { normalizeQuote, normalizeLoad } from '@/types/domain';
@@ -15,14 +16,33 @@ import { roundTo } from '@/lib/formatters';
  * lib/quoteStage.ts.
  */
 export const useQuotes = (status?: string) => {
+  const qc = useQueryClient();
   const server = status && status !== 'ALL' && status !== 'EXPIRED' ? status : null;
   return useInfiniteList(
     ['quotes', server ?? 'ALL'],
     server ? `quotes/?status=${encodeURIComponent(server)}` : 'quotes/',
     normalizeQuote,
+    {
+      // The list endpoint costs a handful of queries per row on the server, so
+      // the first page is kept small; more arrive on scroll.
+      pageSize: 20,
+      // Rows Home already downloaded stand in until the real page lands. They
+      // are every quote, which is a superset of any server filter, and the
+      // screen narrows by stage on the device anyway.
+      seed: () => qc.getQueryData<AllPages<Record<string, unknown>>>(['ledger-quotes'])?.rows,
+      keepPrevious: true,
+    },
   );
 };
-export const useLoads = () => useInfiniteList('loads', 'loads/', normalizeLoad);
+export const useLoads = () => {
+  const qc = useQueryClient();
+  // Page size stays at the default: Orders and History each filter this one
+  // list by status on the device and don't auto-fill, so a smaller page would
+  // leave one of them looking emptier than it is.
+  return useInfiniteList('loads', 'loads/', normalizeLoad, {
+    seed: () => qc.getQueryData<AllPages<Record<string, unknown>>>(['ledger-loads'])?.rows,
+  });
+};
 
 // ── Details ──────────────────────────────────────────────────────────────────
 export function useQuote(id: string | number, preview?: Record<string, unknown>) {
@@ -72,6 +92,26 @@ export function useLoad(id: string | number, preview?: Record<string, unknown>) 
     // See useQuote — placeholderData so the real record is always fetched.
     placeholderData: preview,
   });
+}
+
+/**
+ * Write a load record a mutation just returned straight into the detail cache,
+ * so the screen shows it on the first frame instead of waiting for a refetch.
+ * Ignores anything that isn't an object with an id, so an unexpected response
+ * shape can never replace a good cached record.
+ */
+export function seedLoad(qc: QueryClient, record: unknown, fallbackId?: string | number) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return;
+  const r = record as Record<string, unknown>;
+  const id = pick(r, ['id', 'pk']) ?? fallbackId;
+  if (id == null || id === '') return;
+  // A load record always carries a status; this keeps a non-load body (e.g. an
+  // upload ack) from being cached as one.
+  if (r.status == null) return;
+  qc.setQueryData(['load', id], r);
+  // The route param can be a string while the record's id is a number (or vice
+  // versa) — seed both spellings so useLoad's key always matches.
+  if (fallbackId != null && String(fallbackId) !== String(id)) qc.setQueryData(['load', fallbackId], r);
 }
 
 // ── Reference data for the quote builder ────────────────────────────────────
@@ -281,7 +321,7 @@ export const recordQuoteOutcome = (id: string | number, data: QuoteOutcome) =>
 export const convertQuoteToLoad = (
   id: string | number,
   data: { driver_id?: string; vehicle_id?: string } = {},
-) => postData({ url: `quotes/${id}/convert_to_load/`, data });
+) => postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
@@ -295,14 +335,14 @@ export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
 // Web patches the detail resource directly (there is no update_status action —
 // POST there returns "method not allowed").
 export const updateLoadStatus = (id: string | number, status: string) =>
-  patchData({ url: `loads/${id}/`, data: { status } });
+  patchData<Record<string, unknown>>({ url: `loads/${id}/`, data: { status } });
 
 // Assigns (or clears) both at once — the endpoint takes null to unassign.
 export const assignLoadDriver = (
   id: string | number,
   driver_id: number | null,
   vehicle_id: number | null,
-) => postData({ url: `loads/${id}/assign_driver/`, data: { driver_id, vehicle_id } });
+) => postData<Record<string, unknown>>({ url: `loads/${id}/assign_driver/`, data: { driver_id, vehicle_id } });
 
 export const convertLoadToInvoice = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `loads/${id}/convert_to_invoice/`, data: {} });

@@ -1,5 +1,5 @@
 import { View, TouchableOpacity } from 'react-native';
-import { Mono, Label, Txt, PressScale } from '@/components/ui';
+import { Card, Mono, Label, Txt, PressScale } from '@/components/ui';
 import { Skeleton } from '@/components/feedback';
 
 // One stat in the bar. Each cell has its own source, so one can fail or still be
@@ -29,7 +29,7 @@ export function CommandBar({ activeLoads, fleetReady }: { activeLoads: CommandCe
   ];
 
   return (
-    <View className="mb-5 flex-row rounded-card border border-line bg-surface py-3">
+    <Card className="mb-5 flex-row py-3">
       {stats.map((s, i) => {
         const cell = s.cell;
         const body =
@@ -56,7 +56,7 @@ export function CommandBar({ activeLoads, fleetReady }: { activeLoads: CommandCe
                 {cell.value}
               </Mono>
               {cell.note && (
-                <Mono className={`mt-0.5 text-micro ${cell.warn ? 'text-warning' : 'text-faint'}`}>
+                <Mono className={`mt-0.5 text-caption ${cell.warn ? 'text-warning' : 'text-faint'}`}>
                   {cell.note}
                 </Mono>
               )}
@@ -78,6 +78,6 @@ export function CommandBar({ activeLoads, fleetReady }: { activeLoads: CommandCe
           </PressScale>
         );
       })}
-    </View>
+    </Card>
   );
 }

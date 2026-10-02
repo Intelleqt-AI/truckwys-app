@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Modal, Pressable } from 'react-native';
+import { View, Modal, StyleSheet, TouchableOpacity } from 'react-native';
 import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Txt, Mono, Button, TextField, DateField, SelectField, type Option } from '@/components/ui';
 import { formatCurrency, formatPlain, parseNum, round2 } from '@/lib/formatters';
@@ -71,12 +71,16 @@ export function RecordPaymentSheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
-      <Pressable onPress={onCancel} className="flex-1 items-center justify-center bg-backdrop px-6">
+      <View className="flex-1 items-center justify-center bg-backdrop px-6">
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={onCancel}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          style={StyleSheet.absoluteFill}
+        />
         <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            className="rounded-panel border border-line bg-elevated p-5"
-          >
+          <View className="rounded-panel border border-line bg-elevated p-5">
             <Txt className="text-heading font-semibold text-fg">Record payment</Txt>
             <Txt className="mb-4 mt-1.5 text-sub text-muted">
               Outstanding balance {formatCurrency(balance)}
@@ -99,15 +103,17 @@ export function RecordPaymentSheet({
                     value={amount}
                     onChangeText={setAmount}
                   />
-                  <Pressable
-                    hitSlop={8}
+                  <TouchableOpacity
+                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                    activeOpacity={0.6}
+                    accessibilityRole="button"
                     onPress={() => setAmount(formatPlain(balance, 2))}
                     className="mt-1.5 self-start"
                   >
                     <Mono className="text-caption text-link">
-                      Full — {formatCurrency(balance)}
+                      Full balance, {formatCurrency(balance)}
                     </Mono>
-                  </Pressable>
+                  </TouchableOpacity>
                 </View>
 
                 <DateField
@@ -119,7 +125,7 @@ export function RecordPaymentSheet({
 
                 <SelectField
                   label="Method"
-                  icon="dollar"
+                  icon="banknote"
                   options={PAYMENT_METHODS}
                   value={method}
                   onSelect={setMethod}
@@ -133,7 +139,7 @@ export function RecordPaymentSheet({
                 />
 
                 {overpaying && (
-                  <Mono className="text-micro text-warning">
+                  <Mono className="text-caption text-warning">
                     Amount is more than the {formatCurrency(balance)} outstanding.
                   </Mono>
                 )}
@@ -162,9 +168,9 @@ export function RecordPaymentSheet({
                 />
               </View>
             </View>
-          </Pressable>
+          </View>
         </KeyboardAvoidingView>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

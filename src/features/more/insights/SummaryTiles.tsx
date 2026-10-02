@@ -60,10 +60,10 @@ export function SummaryTiles({ findings, summary }: { findings: Finding[]; summa
       <TouchableOpacity
         onPress={() => setOpen((o) => !o)}
         activeOpacity={0.6}
-        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+        hitSlop={{ top: 4, bottom: 4, left: 4, right: 8 }}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        className="mt-3 flex-row items-center gap-1 self-start"
+        className="mt-3 min-h-[36px] flex-row items-center gap-1 self-start"
       >
         <Mono className="text-caption font-medium text-muted">How cash held up is worked out</Mono>
         <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} color={colors.muted} />

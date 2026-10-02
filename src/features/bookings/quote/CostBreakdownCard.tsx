@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { Group, DetailRow, Icon, Txt, Mono } from '@/components/ui';
 import { formatCurrency, formatNumber } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -51,9 +51,10 @@ function CostBreakdownCardImpl({
     <Group label={`Cost breakdown · ${vehicleType || 'no truck picked'}`}>
       {/* The rate maths goes on the hint line rather than inside the label.
           Concatenated in, it grew with the numbers it described and squeezed
-          out the amount it was explaining. Pressable (like Tolls below) since
+          out the amount it was explaining. Tappable (like Tolls below) since
           the figure — especially an inferred one — can use the full working. */}
-      <Pressable
+      <TouchableOpacity
+        activeOpacity={0.7}
         onPress={onFuelPress}
         accessibilityRole="button"
         accessibilityLabel={`Fuel, ${formatCurrency(costs.fuelCost)}. Show how this was worked out`}
@@ -63,13 +64,13 @@ function CostBreakdownCardImpl({
           <Txt className="shrink text-callout text-muted" numberOfLines={1}>
             Fuel
           </Txt>
-          <Txt className="text-micro text-faint" numberOfLines={1}>
+          <Txt className="text-caption text-faint" numberOfLines={1}>
             {costs.consumption.toFixed(1)} L/100km @ {formatCurrency(costs.fuelPrice)}
             {costs.fuelZoneNote}
             {costs.fuelBasisInferred ? ' · est. from your fleet' : ''}
           </Txt>
           {!!costs.fuelLiveHint && (
-            <Txt className="text-micro text-faint" numberOfLines={1}>
+            <Txt className="text-caption text-faint" numberOfLines={1}>
               {costs.fuelLiveHint}
             </Txt>
           )}
@@ -80,8 +81,9 @@ function CostBreakdownCardImpl({
           </Mono>
           <Icon name="chevronRight" size={14} color={colors.faint} />
         </View>
-      </Pressable>
-      <Pressable
+      </TouchableOpacity>
+      <TouchableOpacity
+        activeOpacity={0.7}
         onPress={onTollPress}
         accessibilityRole="button"
         accessibilityLabel={`Tolls, ${formatCurrency(costs.tollCost)}, excluding VAT.${
@@ -99,11 +101,11 @@ function CostBreakdownCardImpl({
           {costs.tollsUnavailable ? (
             // toll_cost_zar is 0 here but that is a gap, not a toll-free route;
             // say so in the backend's own words so it gets filled in by hand.
-            <Txt className="text-micro text-warning">{costs.tollWarning}</Txt>
+            <Txt className="text-caption text-warning">{costs.tollWarning}</Txt>
           ) : costs.tollFree && costs.tollCost === 0 ? (
-            <Txt className="text-micro text-faint">No plazas on this route · excl. VAT</Txt>
+            <Txt className="text-caption text-faint">No plazas on this route · excl. VAT</Txt>
           ) : (
-            <Txt className="text-micro text-faint">
+            <Txt className="text-caption text-faint">
               {costs.tollsEstimated ? 'Estimated · excl. VAT' : 'Excl. VAT'}
             </Txt>
           )}
@@ -117,9 +119,10 @@ function CostBreakdownCardImpl({
           </Mono>
           <Icon name="chevronRight" size={14} color={colors.faint} />
         </View>
-      </Pressable>
+      </TouchableOpacity>
       {costs.crossBorderCost > 0 && (
-        <Pressable
+        <TouchableOpacity
+        activeOpacity={0.7}
           onPress={onCrossBorderPress}
           accessibilityRole="button"
           accessibilityLabel={`Cross-border / weighbridge, ${formatCurrency(costs.crossBorderCost)}. Show cross-border breakdown`}
@@ -136,7 +139,7 @@ function CostBreakdownCardImpl({
             </Mono>
             <Icon name="chevronRight" size={14} color={colors.faint} />
           </View>
-        </Pressable>
+        </TouchableOpacity>
       )}
       <DetailRow label="Driver allowance" value={formatCurrency(costs.driver)} boldValue />
       <DetailRow
@@ -146,7 +149,8 @@ function CostBreakdownCardImpl({
         boldValue
       />
       {serviceCharge !== 0 && (
-        <Pressable
+        <TouchableOpacity
+        activeOpacity={0.7}
           onPress={onRemoveUplift}
           accessibilityRole="button"
           accessibilityLabel={`Price uplift, ${formatCurrency(serviceCharge)}, from AI recommendation. Remove`}
@@ -154,7 +158,7 @@ function CostBreakdownCardImpl({
         >
           <View className="flex-1">
             <Txt className="text-callout text-muted">Price uplift</Txt>
-            <Txt className="text-micro text-faint">From AI recommendation</Txt>
+            <Txt className="text-caption text-faint">From AI recommendation</Txt>
           </View>
           <View className="shrink-0 flex-row items-center gap-2">
             <Mono className="text-sub font-semibold text-fg" numberOfLines={1}>
@@ -162,7 +166,7 @@ function CostBreakdownCardImpl({
             </Mono>
             <Icon name="x" size={15} color={colors.faint} />
           </View>
-        </Pressable>
+        </TouchableOpacity>
       )}
       {/* numberOfLines matters here for a reason that isn't obvious: en-ZA
           groups thousands with a space, which is a legal line break, so an
@@ -172,12 +176,12 @@ function CostBreakdownCardImpl({
         <Txt className="shrink text-callout font-semibold text-fg" numberOfLines={1}>
           Quote total
         </Txt>
-        <Mono className="shrink-0 text-heading font-semibold text-accent" numberOfLines={1}>
+        <Mono className="shrink-0 text-heading font-semibold text-fg" numberOfLines={1}>
           {formatCurrency(costs.total)}
         </Mono>
       </View>
       <View className="px-3.5 py-2">
-        <Mono className="text-micro text-faint">
+        <Mono className="text-caption text-faint">
           {formatNumber(Math.round(costs.distance))} km one way ·{' '}
           {formatNumber(Math.round(costs.chargeDistance))} km{' '}
           {tripType === 'ROUND_TRIP' ? 'round trip' : 'total'} · live diesel ·{' '}

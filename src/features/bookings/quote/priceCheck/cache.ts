@@ -12,8 +12,9 @@ export interface Entry {
   /** Inputs only the win chance depends on (client, date, weight). */
   winSig: string;
   at: number;
-  /** Which side (yours / market) of each item is currently chosen. */
-  choices: Record<ItemKey, Choice>;
+  /** Unused now: the quote's own figures decide which side is chosen. Only
+      older stored entries still carry it. */
+  choices?: Record<ItemKey, Choice>;
 }
 
 const CACHE_KEY = 'tw-price-check-v1';

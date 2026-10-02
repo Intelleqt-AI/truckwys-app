@@ -26,7 +26,7 @@ export function AdvanceDetailScreen({ route, navigation }: Props) {
   const idx = LIFECYCLE.indexOf(status);
 
   return (
-    <SheetScreen eyebrow="Advance" title={formatCurrency(num(pick(a, ['amount', 'advance_amount'])))} onBack={() => navigation.goBack()}>
+    <SheetScreen title={formatCurrency(num(pick(a, ['amount', 'advance_amount'])))} onBack={() => navigation.goBack()}>
       <View className="mb-4 flex-row">
         <StatusPill status={status} />
       </View>

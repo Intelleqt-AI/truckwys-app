@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   SearchField,
   StatCard,
+  KpiRow,
   Avatar,
   ListRow,
   IconButton,
@@ -17,7 +18,7 @@ import {
   SelectionDot,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { num, str, pick } from '@/lib/api/list';
+import { num, pick } from '@/lib/api/list';
 import { useCustomers, bulkDeleteCustomers } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -103,7 +104,13 @@ export function CustomersScreen({ navigation }: Props) {
       ) : (
         <View className="flex-row items-center gap-1">
           {hasData && (
-            <TouchableOpacity hitSlop={8} activeOpacity={0.7} className="px-2" onPress={() => enter()}>
+            <TouchableOpacity
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              className="px-2"
+              onPress={() => enter()}
+            >
               <Mono className="text-sub font-medium text-link">Select</Mono>
             </TouchableOpacity>
           )}
@@ -127,22 +134,16 @@ export function CustomersScreen({ navigation }: Props) {
 
   const total = data?.length ?? 0;
   const withCredit = data ? data.filter((c) => num(pick(c.raw, ['credit_limit'])) > 0).length : 0;
-  const cities = data ? new Set(data.map((c) => str(pick(c.raw, ['city']))).filter(Boolean)).size : 0;
-  const net30 = data ? data.filter((c) => (str(pick(c.raw, ['payment_terms_default'])) || 'NET30') === 'NET30').length : 0;
 
   return (
     <View className="flex-1 bg-bg-deep">
       <View className="px-screen pt-3">
         {data && (
-          <View className="mb-3 gap-3">
-            <View className="flex-row gap-3">
+          <View className="mb-3">
+            <KpiRow>
               <StatCard label="Total customers" value={String(total)} />
               <StatCard label="With credit limit" value={String(withCredit)} />
-            </View>
-            <View className="flex-row gap-3">
-              <StatCard label="Cities covered" value={String(cities)} />
-              <StatCard label="NET30 clients" value={String(net30)} />
-            </View>
+            </KpiRow>
           </View>
         )}
         <View className="pb-3">
@@ -180,9 +181,8 @@ export function CustomersScreen({ navigation }: Props) {
             return (
               <View
                 className={`mb-2.5 overflow-hidden rounded-card border ${
-                  isSelected ? 'border-accent' : 'border-line bg-surface'
+                  isSelected ? 'border-line-strong bg-raised' : 'border-line bg-surface'
                 }`}
-                style={isSelected ? { backgroundColor: colors.accentDim } : undefined}
               >
                 <ListRow
                   leading={

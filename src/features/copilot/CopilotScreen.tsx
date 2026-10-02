@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { View, TextInput, Pressable, Platform, TouchableOpacity } from 'react-native';
+import { View, TextInput, Platform, TouchableOpacity } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -81,29 +81,31 @@ export function CopilotScreen({ navigation }: Props) {
   const renderRight = useCallback(
     () => (
       <View className="flex-row items-center gap-1">
-        <Pressable
+        <TouchableOpacity
           onPress={() => startNewChat()}
-          hitSlop={8}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          activeOpacity={0.5}
           accessibilityRole="button"
           accessibilityLabel="New chat"
-          className="h-9 w-9 items-center justify-center active:opacity-50"
+          className="h-9 w-9 items-center justify-center"
         >
-          <Icon name="plus" size={21} color={colors.accent} strokeWidth={2} />
-        </Pressable>
-        <Pressable
+          <Icon name="plus" size={21} color={colors.fg} strokeWidth={2} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => setHistoryOpen(true)}
-          hitSlop={8}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          activeOpacity={0.5}
           accessibilityRole="button"
           accessibilityLabel="Conversation history"
-          className="h-9 w-9 items-center justify-center active:opacity-50"
+          className="h-9 w-9 items-center justify-center"
         >
-          <Icon name="clock" size={20} color={colors.accent} strokeWidth={2} />
-        </Pressable>
+          <Icon name="clock" size={20} color={colors.fg} strokeWidth={2} />
+        </TouchableOpacity>
       </View>
     ),
     // startNewChat is stable enough for a header button; it only reads refs/setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [colors.accent],
+    [colors.fg],
   );
 
   // iOS 26: the legacy headerRight above wraps its custom view in a native
@@ -120,13 +122,13 @@ export function CopilotScreen({ navigation }: Props) {
         element: (
           <TouchableOpacity
             onPress={() => startNewChat()}
-            hitSlop={8}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             activeOpacity={0.5}
             accessibilityRole="button"
             accessibilityLabel="New chat"
             className="h-9 w-9 items-center justify-center"
           >
-            <Icon name="plus" size={21} color={colors.accent} strokeWidth={2} />
+            <Icon name="plus" size={21} color={colors.fg} strokeWidth={2} />
           </TouchableOpacity>
         ),
       },
@@ -135,26 +137,26 @@ export function CopilotScreen({ navigation }: Props) {
         element: (
           <TouchableOpacity
             onPress={() => setHistoryOpen(true)}
-            hitSlop={8}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             activeOpacity={0.5}
             accessibilityRole="button"
             accessibilityLabel="Conversation history"
             className="h-9 w-9 items-center justify-center"
           >
-            <Icon name="clock" size={20} color={colors.accent} strokeWidth={2} />
+            <Icon name="clock" size={20} color={colors.fg} strokeWidth={2} />
           </TouchableOpacity>
         ),
       },
     ],
     // startNewChat is stable enough for a header button; it only reads refs/setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [colors.accent],
+    [colors.fg],
   );
 
   useLayoutEffect(() => {
     const isIOS = Platform.OS === 'ios';
     navigation.setOptions({
-      title: 'AI Copilot',
+      title: 'Copilot',
       headerLargeTitle: false,
       headerTransparent: false,
       headerStyle: { backgroundColor: colors.bgDeep },
@@ -438,7 +440,7 @@ export function CopilotScreen({ navigation }: Props) {
             ) : aiAvailable === false ? (
               <View className="mb-2 flex-row items-center gap-1.5">
                 <Icon name="alert" size={12} color={colors.warningDot} />
-                <Mono className="text-micro" style={{ color: colors.warning }}>
+                <Mono className="text-caption" style={{ color: colors.warning }}>
                   Rules engine
                 </Mono>
               </View>
@@ -480,17 +482,18 @@ export function CopilotScreen({ navigation }: Props) {
               scrollEnabled
             />
           </View>
-          <Pressable
+          <TouchableOpacity
             onPress={() => void send(input)}
             disabled={!canSend}
+            activeOpacity={0.6}
             accessibilityRole="button"
             accessibilityLabel="Send"
             accessibilityState={{ disabled: !canSend }}
-            className="h-11 w-11 items-center justify-center rounded-control active:opacity-60"
+            className="h-11 w-11 items-center justify-center rounded-control"
             style={{ opacity: canSend ? 1 : 0.35 }}
           >
             <Icon name="send" size={20} color={colors.fg} />
-          </Pressable>
+          </TouchableOpacity>
         </Animated.View>
       </KeyboardAvoidingView>
 

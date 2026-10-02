@@ -276,7 +276,6 @@ export function CreateInvoiceScreen({ route, navigation }: Props) {
   return (
     <View className="flex-1">
       <SheetScreen
-        eyebrow={editing ? 'Edit' : 'New invoice'}
         title={editing ? 'Edit invoice' : 'Create invoice'}
         variant="modal"
         onBack={() => navigation.goBack()}

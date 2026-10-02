@@ -69,14 +69,33 @@ const MAP: Record<DomainEvent, string[]> = {
   copilot: ['agent-proposals', 'quotes', 'quote', 'loads', 'load', 'invoices', 'invoice', ...DASHBOARD, ...FINANCE],
 };
 
+function invalidateEvents(qc: QueryClient, events: readonly DomainEvent[], cancelRefetch: boolean): void {
+  const keys = new Set<string>();
+  for (const e of events) for (const k of MAP[e] ?? []) keys.add(k);
+  for (const k of keys) void qc.invalidateQueries({ queryKey: [k] }, { cancelRefetch });
+}
+
 /**
  * Invalidate everything affected by `event`. Fire-and-forget: awaiting it makes
  * a screen wait on unrelated background refetches before it can navigate away.
+ *
+ * Restarts any fetch already in flight for an affected key (TanStack's
+ * default), which is what a local write wants: a request that began before the
+ * save may carry pre-save data.
  */
 export function invalidateFor(qc: QueryClient, ...events: DomainEvent[]): void {
-  const keys = new Set<string>();
-  for (const e of events) for (const k of MAP[e] ?? []) keys.add(k);
-  for (const k of keys) void qc.invalidateQueries({ queryKey: [k] });
+  invalidateEvents(qc, events, true);
+}
+
+// Server-pushed variant. One save reaches this device several times over — the
+// mutation's own invalidation, a data.changed push, a named event, an FCM push —
+// and with cancelRefetch the later waves aborted the detail fetch the user was
+// waiting on and restarted it (the aborted HTTP request keeps its connection
+// slot, since fetchData doesn't forward the signal). The mutation's own
+// invalidation already restarted anything stale, so a push that lands mid-fetch
+// just joins the request that is already running.
+function invalidateFromServer(qc: QueryClient, events: readonly DomainEvent[]): void {
+  invalidateEvents(qc, events, false);
 }
 
 // Server event name (booking.delivered, invoice.paid, …) -> domain events. Used
@@ -120,7 +139,7 @@ export const ALL_DATA_TOPICS = Object.keys(TOPIC_EVENTS);
 export function invalidateForTopics(qc: QueryClient, topics: readonly string[]): void {
   const events = new Set<DomainEvent>();
   for (const t of topics) for (const e of TOPIC_EVENTS[t] ?? []) events.add(e);
-  if (events.size) invalidateFor(qc, ...events);
+  if (events.size) invalidateFromServer(qc, [...events]);
 }
 
 export function invalidateForServerEvent(qc: QueryClient, event: string): void {
@@ -132,5 +151,5 @@ export function invalidateForServerEvent(qc: QueryClient, event: string): void {
       break;
     }
   }
-  invalidateFor(qc, ...events);
+  invalidateFromServer(qc, events);
 }

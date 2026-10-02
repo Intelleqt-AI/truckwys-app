@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { Badge, Card, Icon, Mono, Txt } from '@/components/ui';
 import { formatDate } from '@/lib/formatters';
+import { Skeleton } from '@/components/feedback';
 import { useTheme } from '@/theme/ThemeProvider';
+import { radius } from '@/theme/tokens';
 import type { PriceCheck } from './usePriceCheck';
 import {
   ITEM_LABELS,
@@ -18,6 +20,7 @@ import {
   moneyWhole,
   perLitre,
   safeSources,
+  type Choice,
   type ItemKey,
   type ReviewItem,
 } from './types';
@@ -25,20 +28,19 @@ import {
 // The "Market price check" card that replaces the old win-model panel. Port of
 // the web's AIPriceAnalysisPanel: nothing runs on its own, a check is started
 // with a button, and every number comes from the backend. Switching an item
-// between "use market" and "use mine" is a lookup, never a recalculation here.
+// between Mine and Market moves the quote to that combination at once, and is
+// a lookup, never a recalculation here.
 
 /** A small bordered button. TouchableOpacity, as the app does for new buttons. */
 function SmallButton({
   label,
   onPress,
   disabled,
-  pressed,
   accessibilityLabel,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  pressed?: boolean;
   accessibilityLabel?: string;
 }) {
   return (
@@ -46,12 +48,14 @@ function SmallButton({
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.7}
+      // 36 drawn + 8 = a 44 hit area.
+      hitSlop={{ top: 4, bottom: 4 }}
       accessibilityRole="button"
-      accessibilityState={{ disabled: !!disabled, selected: pressed }}
+      accessibilityState={{ disabled: !!disabled }}
       accessibilityLabel={accessibilityLabel ?? label}
-      className={`min-h-[36px] items-center justify-center rounded-control border border-line-active px-3 ${
-        pressed ? 'bg-surface-hover' : 'bg-surface'
-      } ${disabled ? 'opacity-40' : ''}`}
+      className={`min-h-[36px] items-center justify-center rounded-control border border-line-active bg-surface px-3 ${
+        disabled ? 'opacity-40' : ''
+      }`}
     >
       <Mono className="text-caption font-medium text-fg">{label}</Mono>
     </TouchableOpacity>
@@ -70,6 +74,7 @@ export function PriceCheckCard({
   benchmarkAvg,
   benchmarkRecommendation,
   guard,
+  onChoose,
   routeError,
   onOpenFuelSettings,
 }: {
@@ -78,6 +83,8 @@ export function PriceCheckCard({
   benchmarkAvg: number;
   benchmarkRecommendation?: string | null;
   guard: GuardInfo | null;
+  /** Moves the quote to the market or the person's own figure for one item. */
+  onChoose: (t: ItemKey, c: Choice) => void;
   routeError?: boolean;
   onOpenFuelSettings?: () => void;
 }) {
@@ -93,7 +100,6 @@ export function PriceCheckCard({
     outOfDate,
     figuresChanged,
     breakdown,
-    choices,
     failText,
     failure,
     canCheck,
@@ -118,7 +124,7 @@ export function PriceCheckCard({
   if (loading) {
     tools = (
       <View className="flex-row items-center gap-2">
-        <Txt className="text-micro text-muted" accessibilityLiveRegion="polite">
+        <Txt className="text-caption text-muted" accessibilityLiveRegion="polite">
           {elapsed >= 3 ? `Checking… ${elapsed} s` : 'Checking…'}
         </Txt>
         <SmallButton label="Cancel" onPress={pc.cancelCheck} />
@@ -132,7 +138,7 @@ export function PriceCheckCard({
         {outOfDate ? (
           <Badge label="Out of date" tone="warning" />
         ) : entry ? (
-          <Txt className="text-micro text-muted">{checkedAgo(entry.at, now)}</Txt>
+          <Txt className="text-caption text-muted">{checkedAgo(entry.at, now)}</Txt>
         ) : null}
         <SmallButton
           label={label}
@@ -151,9 +157,9 @@ export function PriceCheckCard({
   if (showSkeleton) {
     body = (
       <View className="gap-2" accessibilityElementsHidden>
-        <View className="h-12 rounded-control bg-surface-hover" />
-        <View className="h-9 rounded-control bg-surface-hover" />
-        <View className="h-9 rounded-control bg-surface-hover" />
+        <Skeleton height={48} radius={radius.control} />
+        <Skeleton height={36} radius={radius.control} />
+        <Skeleton height={36} radius={radius.control} />
       </View>
     );
   } else if (entry && combo) {
@@ -165,7 +171,7 @@ export function PriceCheckCard({
     ) : (
       <View className={loading ? 'opacity-60' : ''}>
         <Stats pc={pc} />
-        <ItemRows pc={pc} crossBorder={crossBorder} />
+        <ItemRows pc={pc} crossBorder={crossBorder} onChoose={onChoose} />
       </View>
     );
   } else if (outOfDate) {
@@ -209,7 +215,7 @@ export function PriceCheckCard({
         <View className="flex-row items-start justify-between gap-3">
           <View className="flex-1">
             <Txt className="text-callout font-semibold text-fg">Market price check</Txt>
-            <Txt className="mt-0.5 text-micro text-faint">Fuel, tolls, driver and rate vs market</Txt>
+            <Txt className="mt-0.5 text-caption text-faint">Fuel, tolls, driver and rate vs market</Txt>
           </View>
           {tools}
         </View>
@@ -217,8 +223,8 @@ export function PriceCheckCard({
         {(benchmarkAvg > 0 || body) && (
           <View className="mt-3">
             {benchmarkAvg > 0 && (
-              <Txt className="mb-2 text-micro text-muted">
-                Lane benchmark <Mono className="text-micro text-fg">{moneyWhole(benchmarkAvg)}</Mono> average
+              <Txt className="mb-2 text-caption text-muted">
+                Lane benchmark <Mono className="text-caption text-fg">{moneyWhole(benchmarkAvg)}</Mono> average
                 {benchmarkRecommendation ? ` · ${clean(benchmarkRecommendation)}` : ''}
               </Txt>
             )}
@@ -226,7 +232,7 @@ export function PriceCheckCard({
           </View>
         )}
 
-        {!!notice && <Txt className="mt-3 text-micro text-warning">{notice}</Txt>}
+        {!!notice && <Txt className="mt-3 text-caption text-warning">{notice}</Txt>}
 
         {hasResult && detailsOpen && (
           <Details pc={pc} fuelSettingStale={fuelSettingStale} onOpenFuelSettings={onOpenFuelSettings} />
@@ -239,6 +245,7 @@ export function PriceCheckCard({
             disabled={showSkeleton}
             accessibilityRole="button"
             accessibilityState={{ expanded: detailsOpen }}
+            hitSlop={{ top: 4, bottom: 4 }}
             className="mt-3 min-h-[36px] flex-row items-center gap-1"
           >
             <Icon name={detailsOpen ? 'chevronUp' : 'chevronDown'} size={15} color={colors.faint} />
@@ -278,25 +285,23 @@ export function PriceCheckCard({
 
 // ── headline figure + win chance ────────────────────────────────────────────
 function Stats({ pc }: { pc: PriceCheck }) {
-  const { combo, matches, noneVerified, headLabel, headNote, winText, winNote, winStale } = pc;
+  const { combo, total, quoteNote, winText, winNote, winStale } = pc;
   if (!combo) return null;
   return (
     <View className="mb-3 flex-row gap-3">
       <View className="flex-1 rounded-control border border-line bg-surface-hover p-3">
-        <Txt className="text-micro text-faint">{headLabel}</Txt>
+        <Txt className="text-caption text-faint">Your quote</Txt>
         <Txt
-          className={`mt-0.5 ${
-            matches ? `text-callout font-semibold ${noneVerified ? 'text-muted' : 'text-fg'}` : 'text-heading font-semibold text-fg'
-          }`}
+          className="mt-0.5 text-heading font-semibold text-fg"
           numberOfLines={1}
           adjustsFontSizeToFit
         >
-          {matches ? (noneVerified ? 'Nothing verified' : 'Matches your quote') : moneyWhole(combo.price_zar)}
+          {moneyWhole(total)}
         </Txt>
-        <Txt className="mt-0.5 text-micro text-muted">{headNote}</Txt>
+        <Txt className="mt-0.5 text-caption text-muted">{quoteNote}</Txt>
       </View>
       <View className="flex-1 rounded-control border border-line bg-surface-hover p-3">
-        <Txt className="text-micro text-faint">Win chance</Txt>
+        <Txt className="text-caption text-faint">Win chance</Txt>
         <Txt
           className={`mt-0.5 ${
             winText === 'Not scored' ? 'text-callout font-semibold text-muted' : 'text-heading font-semibold text-fg'
@@ -305,30 +310,99 @@ function Stats({ pc }: { pc: PriceCheck }) {
         >
           {winText}
         </Txt>
-        <Txt className={`mt-0.5 text-micro ${winStale ? 'text-warning' : 'text-muted'}`}>{winNote}</Txt>
+        <Txt className={`mt-0.5 text-caption ${winStale ? 'text-warning' : 'text-muted'}`}>{winNote}</Txt>
       </View>
     </View>
   );
 }
 
-// ── the four items, with "use market" / "use mine" ──────────────────────────
-function ItemRows({ pc, crossBorder }: { pc: PriceCheck; crossBorder: number }) {
+// ── the four items, each with a Mine | Market switch ────────────────────────
+function ItemRows({
+  pc,
+  crossBorder,
+  onChoose,
+}: {
+  pc: PriceCheck;
+  crossBorder: number;
+  onChoose: (t: ItemKey, c: Choice) => void;
+}) {
   const { breakdown, choices } = pc;
   return (
     <View className="overflow-hidden rounded-control border border-line">
       {TOPICS.map((t, i) => {
         const item = breakdown[t];
         if (!item) return null;
-        return <ItemRow key={t} t={t} item={item} chosen={choices?.[t]} pc={pc} first={i === 0} />;
+        return (
+          <ItemRow
+            key={t}
+            t={t}
+            item={item}
+            chosen={choices?.[t] ?? 'mine'}
+            loading={pc.loading}
+            onChoose={onChoose}
+            first={i === 0}
+          />
+        );
       })}
       {crossBorder > 0 && (
         <View className="flex-row items-center justify-between border-t border-line-row px-3 py-2.5">
           <Txt className="text-callout text-muted">Cross-border</Txt>
           <Txt className="text-sub text-fg">
-            {money(crossBorder)} <Txt className="text-micro text-faint">not checked</Txt>
+            {money(crossBorder)} <Txt className="text-caption text-faint">not checked</Txt>
           </Txt>
         </View>
       )}
+    </View>
+  );
+}
+
+/** Mine | Market: shows which figure the quote uses now; tap the other to switch. */
+function ChoiceSwitch({
+  label,
+  chosen,
+  loading,
+  onChoose,
+}: {
+  label: string;
+  chosen: Choice;
+  loading: boolean;
+  onChoose: (c: Choice) => void;
+}) {
+  const options: { value: Choice; text: string }[] = [
+    { value: 'mine', text: 'Mine' },
+    { value: 'ai', text: 'Market' },
+  ];
+  return (
+    <View
+      className={`flex-row overflow-hidden rounded-control border border-line-active ${
+        loading ? 'opacity-40' : ''
+      }`}
+      accessibilityRole="radiogroup"
+      accessibilityLabel={label}
+    >
+      {options.map((o) => {
+        const on = chosen === o.value;
+        return (
+          <TouchableOpacity
+            key={o.value}
+            onPress={() => onChoose(o.value)}
+            disabled={on || loading}
+            activeOpacity={0.7}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: on, disabled: loading }}
+            accessibilityLabel={`${label}: ${o.value === 'ai' ? 'market figure' : 'my figure'}`}
+            // 44 tall: the segments sit inside an overflow-hidden track, which
+            // would clip a hitSlop, so the size is real rather than padded.
+            className={`min-h-[44px] min-w-[64px] items-center justify-center px-3 ${
+              on ? 'bg-raised' : 'bg-surface'
+            }`}
+          >
+            <Mono className={`text-caption ${on ? 'font-semibold text-fg' : 'font-medium text-muted'}`}>
+              {o.text}
+            </Mono>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
@@ -337,13 +411,15 @@ function ItemRow({
   t,
   item,
   chosen,
-  pc,
+  loading,
+  onChoose,
   first,
 }: {
   t: ItemKey;
   item: ReviewItem;
-  chosen?: 'ai' | 'mine';
-  pc: PriceCheck;
+  chosen: Choice;
+  loading: boolean;
+  onChoose: (t: ItemKey, c: Choice) => void;
   first: boolean;
 }) {
   const chip = chipFor(t, item);
@@ -365,7 +441,7 @@ function ItemRow({
         ) : (
           <Txt className="text-sub text-fg">
             {money(item.current_value_zar)}{' '}
-            <Txt className="text-micro text-faint">{item.verdict === 'accurate' ? 'at market' : 'yours kept'}</Txt>
+            <Txt className="text-caption text-faint">{item.verdict === 'accurate' ? 'at market' : 'yours kept'}</Txt>
           </Txt>
         )}
       </View>
@@ -374,11 +450,11 @@ function ItemRow({
           <Badge label={chip.label} tone={chip.tone} />
         </View>
         {item.toggleable && (
-          <SmallButton
-            label={chosen === 'ai' ? 'Use mine' : 'Use market'}
-            pressed={chosen === 'ai'}
-            onPress={() => pc.setChoice(t, chosen === 'ai' ? 'mine' : 'ai')}
-            accessibilityLabel={`${ITEM_LABELS[t]}: ${chosen === 'ai' ? 'use my figure' : 'use the market figure'}`}
+          <ChoiceSwitch
+            label={ITEM_LABELS[t]}
+            chosen={chosen}
+            loading={loading}
+            onChoose={(c) => onChoose(t, c)}
           />
         )}
       </View>
@@ -442,7 +518,7 @@ function Details({
                     {p.route ? `${clean(p.route)} ` : ''}
                     {p.plaza}: yours {p.your_tariff_zar != null ? money(p.your_tariff_zar) : MISSING}, published{' '}
                     {p.market_tariff_zar != null ? money(p.market_tariff_zar) : MISSING}
-                    <Txt className="text-micro text-faint">
+                    <Txt className="text-caption text-faint">
                       {'  '}
                       {p.verified
                         ? p.effective_from
@@ -467,7 +543,7 @@ function Details({
               </Txt>
             ) : null}
             {hosts.length > 0 && (
-              <Txt className="mt-0.5 text-micro text-faint">Source: {hosts.join(', ')}</Txt>
+              <Txt className="mt-0.5 text-caption text-faint">Source: {hosts.join(', ')}</Txt>
             )}
           </View>
         );

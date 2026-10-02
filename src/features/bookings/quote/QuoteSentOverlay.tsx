@@ -50,7 +50,7 @@ export function QuoteSentOverlay({
       ? 'Finish it any time from Bookings → Quotes'
       : emailSent
         ? `Emailed to ${clientName}`
-        : "Email pending — we'll retry";
+        : "Email pending. We'll retry";
 
   return (
     <View
@@ -63,7 +63,7 @@ export function QuoteSentOverlay({
         </View>
         <Txt className="mt-4 text-center text-heading font-semibold text-fg">{title}</Txt>
         {total > 0 && (
-          <Mono className="mt-1 text-callout font-semibold text-accent" numberOfLines={1}>
+          <Mono className="mt-1 text-callout font-semibold text-fg" numberOfLines={1}>
             {formatCurrency(total)}
           </Mono>
         )}

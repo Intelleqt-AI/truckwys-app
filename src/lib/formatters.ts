@@ -174,12 +174,10 @@ export const formatDateTime = (date: string | Date): string =>
   formatDate(date, { hour: '2-digit', minute: '2-digit', hour12: false });
 
 // Truckwys operates in South Africa — currency is always ZAR regardless of
-// device region, and web's live clock (Overview.tsx's formatDate/formatTime)
-// always computes with an explicit Africa/Johannesburg timezone regardless of
-// what timezone the browser itself is in. These match that exactly, for the
-// same reason: "what time is it for the business" must never depend on which
-// timezone the viewing device happens to be set to (a phone in Bangladesh
-// showing its own local time here would just be showing the wrong time).
+// device region, and web's Home date (Overview.tsx) always computes with an
+// explicit Africa/Johannesburg timezone regardless of what timezone the
+// browser itself is in. This matches that, for the same reason: "what day is
+// it for the business" must never depend on the viewing device's timezone.
 const SAST = 'Africa/Johannesburg';
 
 export const formatOperationalDate = (date: Date): string =>
@@ -190,19 +188,6 @@ export const formatOperationalDate = (date: Date): string =>
     month: 'short',
     year: 'numeric',
   });
-
-// Seconds + a trailing "SAST" label, matching web's clock exactly. The
-// "SAST" is hardcoded rather than derived — this app is always South Africa
-// time, same reasoning as currency always being ZAR regardless of device
-// region, so it isn't worth threading through as a parameter.
-export const formatOperationalTime = (date: Date): string =>
-  `${date.toLocaleTimeString('en-ZA', {
-    timeZone: SAST,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })} SAST`;
 
 export const formatRelativeTime = (date: string | Date): string => {
   const dateObj = typeof date === 'string' ? new Date(date) : date;

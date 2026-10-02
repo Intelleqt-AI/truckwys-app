@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { Pressable } from 'react-native';
+import { TouchableOpacity } from 'react-native';
 import { Badge, LiveDot } from './primitives';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useDemo } from '@/hooks/useDemo';
 import { SubscriptionDetailModal } from '@/features/more/SubscriptionDetailModal';
 import { DemoDetailModal } from '@/features/more/DemoDetailModal';
 import { DEMO_BADGE_LABEL } from '@/lib/demoStatus';
+
+// The badge is ~22 tall; pad the hit area up to TAP_MIN (web rule R7).
+const HIT_SLOP = { top: 11, bottom: 11, left: 8, right: 8 };
 
 /**
  * Replaces AppHeader's hardcoded "Live" dot with the truth: the static Live
@@ -28,9 +31,15 @@ export function SubscriptionDot() {
   if (demo.isDemo) {
     return (
       <>
-        <Pressable onPress={() => setOpen(true)} hitSlop={8}>
+        <TouchableOpacity
+          onPress={() => setOpen(true)}
+          hitSlop={HIT_SLOP}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`${DEMO_BADGE_LABEL}, demo account details`}
+        >
           <Badge label={DEMO_BADGE_LABEL} tone="warning" dot />
-        </Pressable>
+        </TouchableOpacity>
         <DemoDetailModal visible={open} onClose={() => setOpen(false)} />
       </>
     );
@@ -40,9 +49,15 @@ export function SubscriptionDot() {
 
   return (
     <>
-      <Pressable onPress={() => setOpen(true)} hitSlop={8}>
+      <TouchableOpacity
+        onPress={() => setOpen(true)}
+        hitSlop={HIT_SLOP}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Subscription status, ${subscription.label}`}
+      >
         <Badge label={subscription.label} tone={subscription.tone} dot />
-      </Pressable>
+      </TouchableOpacity>
       <SubscriptionDetailModal visible={open} onClose={() => setOpen(false)} />
     </>
   );

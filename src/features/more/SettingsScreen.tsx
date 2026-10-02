@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Pressable, Alert, Modal, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as WebBrowser from 'expo-web-browser';
@@ -23,6 +23,7 @@ import {
   EmptyState,
   StatCard,
   Badge,
+  Banner,
   SwipeRow,
   SelectionDot,
   type IconName,
@@ -94,10 +95,10 @@ const SECTIONS: { key: string; label: string; icon: IconName }[] = [
   { key: 'security', label: 'Security', icon: 'lock' },
   { key: 'company', label: 'Company details', icon: 'building' },
   { key: 'vehicle-types', label: 'Vehicle types', icon: 'truck' },
-  { key: 'users', label: 'Users & permissions', icon: 'users' },
+  { key: 'users', label: 'Users and permissions', icon: 'users' },
   { key: 'billing', label: 'Billing', icon: 'card' },
   { key: 'integrations', label: 'Integrations', icon: 'plug' },
-  { key: 'risk', label: 'Risk-Scoring API', icon: 'shield' },
+  { key: 'risk', label: 'Payment risk API', icon: 'shield' },
 ];
 
 export function SettingsScreen({ route, navigation }: Props) {
@@ -112,7 +113,6 @@ export function SettingsScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow="Settings"
       title={current?.label ?? 'Settings'}
       onBack={() => navigation.goBack()}
     >
@@ -163,17 +163,20 @@ function SettingsMenu({
   return (
     <Group>
       {sections.map((s, i) => (
-        <Pressable
+        <TouchableOpacity
           key={s.key}
           onPress={() => onOpen(s.key)}
-          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={s.label}
+          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 ${
             i === sections.length - 1 ? '' : 'border-b border-line-row'
           }`}
         >
           <Icon name={s.icon} size={19} color={colors.muted} />
           <Txt className="flex-1 text-body text-fg">{s.label}</Txt>
           <Icon name="chevronRight" size={16} color={colors.faint} />
-        </Pressable>
+        </TouchableOpacity>
       ))}
     </Group>
   );
@@ -198,17 +201,20 @@ function DirectorySection({
   return (
     <Group label="Directory">
       {rows.map((r, i) => (
-        <Pressable
+        <TouchableOpacity
           key={r.key}
           onPress={r.onPress}
-          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={r.label}
+          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 ${
             i === rows.length - 1 ? '' : 'border-b border-line-row'
           }`}
         >
           <Icon name={r.icon} size={19} color={colors.muted} />
           <Txt className="flex-1 text-body text-fg">{r.label}</Txt>
           <Icon name="chevronRight" size={16} color={colors.faint} />
-        </Pressable>
+        </TouchableOpacity>
       ))}
     </Group>
   );
@@ -581,9 +587,12 @@ function VehicleTypesSection() {
         <Label className="text-muted">Vehicle types</Label>
         <View className="flex-row items-center gap-1">
           {sorted.length > 0 && (
-            <Pressable
+            <TouchableOpacity
               hitSlop={8}
-              className="px-2"
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={selectMode ? 'Done selecting' : 'Select vehicle types'}
+              className="min-h-[44px] justify-center px-2"
               onPress={() => {
                 setSelectMode((v) => !v);
                 setSelected(new Set());
@@ -592,7 +601,7 @@ function VehicleTypesSection() {
               <Mono className="text-caption font-medium text-link">
                 {selectMode ? 'Done' : 'Select'}
               </Mono>
-            </Pressable>
+            </TouchableOpacity>
           )}
           {!selectMode && (
             <IconButton
@@ -615,7 +624,7 @@ function VehicleTypesSection() {
           title="Couldn't load vehicle types"
           body="Check your connection and try again."
           action={
-            <Button label="Retry" variant="secondary" icon="route" onPress={() => refetch()} />
+            <Button label="Retry" variant="secondary" icon="refresh" onPress={() => refetch()} />
           }
         />
       ) : sorted.length > 0 ? (
@@ -675,7 +684,7 @@ function VehicleTypesSection() {
                     deleteLabel={isOverride ? 'Reset' : 'Delete'}
                     onDelete={() => removeOne(r, tid, isOverride)}
                   >
-                    <Pressable
+                    <TouchableOpacity
                       onPress={() => {
                         if (selectMode) {
                           if (!isShared) toggleSel(tid);
@@ -684,7 +693,10 @@ function VehicleTypesSection() {
                         openEdit();
                       }}
                       disabled={isDeleting}
-                      className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3 active:bg-surface-hover"
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${str(pick(r, ['name']), 'Vehicle type')}${selectMode ? (isSel ? ', selected' : '') : ', edit'}`}
+                      className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3"
                     >
                       {/* Not selectable when shared — batch-delete can't
                           touch a platform default, so its dot never fills
@@ -716,7 +728,7 @@ function VehicleTypesSection() {
                           </Txt>
                         )}
                         {!!meta && (
-                          <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                          <Mono className="mt-0.5 text-caption text-faint" numberOfLines={1}>
                             {meta}
                           </Mono>
                         )}
@@ -726,7 +738,7 @@ function VehicleTypesSection() {
                       ) : (
                         !selectMode && <Icon name="chevronRight" size={16} color={colors.faint} />
                       )}
-                    </Pressable>
+                    </TouchableOpacity>
                   </SwipeRow>
                 </View>
               );
@@ -734,7 +746,7 @@ function VehicleTypesSection() {
           </View>
 
           {!selectMode && (
-            <Mono className="-mt-1 text-center text-micro text-faint">
+            <Mono className="-mt-1 text-center text-caption text-faint">
               Swipe a row left to delete
             </Mono>
           )}
@@ -1020,26 +1032,35 @@ function SecuritySection() {
       </Group>
 
       <Group label="Danger zone">
-        <Pressable
+        <TouchableOpacity
           onPress={() => setShowDelete(true)}
-          className="min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover"
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+          className="min-h-[52px] flex-row items-center gap-3 px-4 py-3"
         >
           <Icon name="x" size={18} color={colors.dangerDot} />
           <Txt className="flex-1 text-body text-danger">Delete account</Txt>
-        </Pressable>
+        </TouchableOpacity>
       </Group>
 
       {/* The endpoint requires the current password, and Alert.alert can't
           collect input — hence a real modal rather than a system dialog. */}
       {showDelete && (
         <Modal visible transparent animationType="fade" onRequestClose={closeDelete}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={closeDelete}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
             className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
-              <Pressable
-                onPress={(e) => e.stopPropagation()}
+              {/* Swallows taps on the card so only the backdrop dismisses. */}
+              <TouchableOpacity
+                activeOpacity={1}
+                accessible={false}
+                onPress={() => {}}
                 className="rounded-panel border border-line bg-surface p-5"
               >
                 <Txt className="text-heading font-semibold text-fg">Delete account</Txt>
@@ -1073,9 +1094,9 @@ function SecuritySection() {
                     />
                   </View>
                 </View>
-              </Pressable>
+              </TouchableOpacity>
             </KeyboardAvoidingView>
-          </Pressable>
+          </TouchableOpacity>
         </Modal>
       )}
 
@@ -1095,13 +1116,23 @@ function SecuritySection() {
                 </Mono>
               </View>
               {!s.current && (
-                <Pressable hitSlop={8} onPress={() => revoke(s.id)}>
+                <TouchableOpacity
+                  hitSlop={8}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Revoke session on ${s.device}`}
+                  className="min-h-[44px] justify-center"
+                  onPress={() => revoke(s.id)}
+                >
                   <Mono className="text-caption font-medium text-danger">Revoke</Mono>
-                </Pressable>
+                </TouchableOpacity>
               )}
             </View>
           ))}
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={otherCount > 0 ? 'Log out other sessions' : 'Log out all sessions'}
             onPress={() =>
               otherCount > 0
                 ? Alert.alert(
@@ -1125,12 +1156,12 @@ function SecuritySection() {
                     ],
                   )
             }
-            className="border-t border-line-row px-4 py-3.5 active:bg-surface-hover"
+            className="min-h-[44px] justify-center border-t border-line-row px-4 py-3.5"
           >
             <Mono className="text-caption font-medium text-danger">
               {otherCount > 0 ? 'Log out other sessions' : 'Log out all sessions'}
             </Mono>
-          </Pressable>
+          </TouchableOpacity>
         </Group>
       )}
 
@@ -1149,7 +1180,7 @@ function SecuritySection() {
                 <Txt className="text-caption text-fg">
                   {ACTIVITY_LABEL[a.event] ?? (a.action === 'LOGIN' ? 'Signed in' : 'Signed out')}
                 </Txt>
-                <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                <Mono className="mt-0.5 text-caption text-faint" numberOfLines={1}>
                   {[a.device, a.ip, formatRelativeTime(a.time)].filter(Boolean).join(' · ')}
                 </Mono>
               </View>
@@ -2115,10 +2146,10 @@ function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
         <Mono className="text-caption text-fg">{formatCurrency(c.amount)}</Mono>
       </View>
       <View className="mt-1 flex-row items-center gap-2">
-        <Mono className="text-micro text-faint">
+        <Mono className="text-caption text-faint">
           {[c.createdAt ? formatDate(c.createdAt) : '', c.reference].filter(Boolean).join(' · ')}
         </Mono>
-        <Mono className="text-micro capitalize" style={{ color: chargeTone(c.status) }}>
+        <Mono className="text-caption capitalize" style={{ color: chargeTone(c.status) }}>
           {c.status}
         </Mono>
       </View>
@@ -2163,32 +2194,22 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   return (
     <View className="gap-4">
       {suspended && (
-        <View className="flex-row items-start gap-2.5 rounded-control border border-danger bg-danger-bg p-3">
-          <Icon name="alert" size={17} color={colors.dangerDot} />
-          <Txt className="flex-1 text-sub text-muted">
-            Your subscription is suspended. You can still view existing data and manage drivers and
-            vehicles, but new quotes and invoices are blocked until payment is settled.
-          </Txt>
-        </View>
+        <Banner
+          tone="danger"
+          message="Your subscription is suspended. You can still view existing data and manage drivers and vehicles, but new quotes and invoices are blocked until payment is settled."
+        />
       )}
       {!suspended && cancelling && (
-        <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color={colors.warningDot} />
-          <Txt className="flex-1 text-sub text-muted">
-            Cancelling
-            {subEnd ? ` — access continues until ${formatDate(subEnd)}` : ''}. Quoting and invoicing
-            keep working until then.
-          </Txt>
-        </View>
+        <Banner
+          tone="warning"
+          message={`Cancelling${subEnd ? `. Access continues until ${formatDate(subEnd)}` : ''}. Quoting and invoicing keep working until then.`}
+        />
       )}
       {!suspended && !cancelling && graceDays > 0 && (
-        <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color={colors.warningDot} />
-          <Txt className="flex-1 text-sub text-muted">
-            Payment is overdue — {graceDays} day{graceDays === 1 ? '' : 's'} of grace remaining
-            {graceExpires ? ` (until ${formatDate(graceExpires)})` : ''}.
-          </Txt>
-        </View>
+        <Banner
+          tone="warning"
+          message={`Payment is overdue. ${graceDays} day${graceDays === 1 ? '' : 's'} of grace remaining${graceExpires ? ` (until ${formatDate(graceExpires)})` : ''}.`}
+        />
       )}
 
       {failedItems.length > 0 && (
@@ -2238,7 +2259,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
       </Group>
 
       {!!countdown && (
-        <Mono className="text-caption text-accent" style={{ fontVariant: ['tabular-nums'] }}>
+        <Mono className="text-caption text-muted" style={{ fontVariant: ['tabular-nums'] }}>
           {countdown}
         </Mono>
       )}

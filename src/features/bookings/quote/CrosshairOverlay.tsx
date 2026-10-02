@@ -61,7 +61,7 @@ function CrosshairOverlayImpl({
   const isPickup = target === 'pickup';
   const isStop = typeof target === 'object';
   const tint = isPickup ? colors.successDot : isStop ? colors.infoDot : colors.dangerDot;
-  const noun = isPickup ? 'collection' : isStop ? 'stop' : 'drop-off';
+  const noun = isPickup ? 'collection' : isStop ? 'stop' : 'delivery';
 
   return (
     <>
@@ -81,7 +81,7 @@ function CrosshairOverlayImpl({
       <View className="absolute left-0 right-0 px-4" style={{ bottom: bottomInset + 12 }}>
         <View className="gap-2.5 rounded-card border border-line bg-elevated p-3.5">
           <Label className="text-muted">
-            {isPickup ? 'Collection point' : isStop ? 'Stop point' : 'Drop-off point'}
+            {isPickup ? 'Collection point' : isStop ? 'Stop point' : 'Delivery point'}
           </Label>
           {resolving ? (
             <View className="flex-row items-center gap-2">
@@ -92,7 +92,7 @@ function CrosshairOverlayImpl({
             // Still confirmable — this is just "no address name found here",
             // not "no pin". Confirming falls back to the coordinates.
             <Txt className="text-sub text-warning">
-              No address here — will use the exact coordinates
+              No address here. The exact coordinates will be used
             </Txt>
           ) : (
             <Txt className="text-callout text-fg" numberOfLines={2}>

@@ -1,12 +1,12 @@
 import { memo, useMemo, useState } from 'react';
-import { View, Pressable, Modal, FlatList } from 'react-native';
+import { View, TouchableOpacity, Modal, FlatList } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, FieldLabel } from './Text';
 import { Icon, type IconName } from './icons';
 import { SearchField, FieldMessage } from './forms';
 import { useTheme } from '@/theme/ThemeProvider';
-import { motion } from '@/theme/tokens';
+import { motion, TAP_MIN } from '@/theme/tokens';
 
 export interface Option {
   label: string;
@@ -67,10 +67,15 @@ function SelectFieldImpl({
   return (
     <View>
       <FieldLabel label={label} required={required} />
-      <Pressable onPress={() => setOpen(true)}>
+      <TouchableOpacity
+        onPress={() => setOpen(true)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${label ?? 'Select'}, ${selected?.label ?? 'not set'}`}
+      >
         <Animated.View
-          className="min-h-[44px] flex-row items-center gap-2 rounded-control border bg-input px-3"
-          style={borderStyle}
+          style={[{ minHeight: TAP_MIN }, borderStyle]}
+          className="flex-row items-center gap-2 rounded-control border bg-input px-3"
         >
           {icon && <Icon name={icon} size={17} color={colors.faint} />}
           <Txt
@@ -81,7 +86,7 @@ function SelectFieldImpl({
           </Txt>
           <Icon name="chevronDown" size={16} color={colors.faint} />
         </Animated.View>
-      </Pressable>
+      </TouchableOpacity>
       <FieldMessage error={error} warning={warning} />
 
       <Modal
@@ -93,9 +98,15 @@ function SelectFieldImpl({
         <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top + 8 }}>
           <View className="flex-row items-center justify-between px-screen pb-3">
             <Txt className="text-heading font-semibold text-fg">{label ?? 'Select'}</Txt>
-            <Pressable hitSlop={8} onPress={() => setOpen(false)}>
+            <TouchableOpacity
+              hitSlop={12}
+              activeOpacity={0.6}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={() => setOpen(false)}
+            >
               <Mono className="text-callout font-medium text-link">Close</Mono>
-            </Pressable>
+            </TouchableOpacity>
           </View>
           <View className="px-screen pb-2">
             <SearchField
@@ -112,13 +123,17 @@ function SelectFieldImpl({
             renderItem={({ item }) => {
               const active = item.value === value;
               return (
-                <Pressable
+                <TouchableOpacity
                   onPress={() => {
                     onSelect(item.value);
                     setQ('');
                     setOpen(false);
                   }}
-                  className="min-h-[52px] flex-row items-center gap-3 border-b border-line-row py-3 active:bg-surface-hover"
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.sub ? `${item.label}, ${item.sub}` : item.label}
+                  accessibilityState={{ selected: active }}
+                  className="min-h-[52px] flex-row items-center gap-3 border-b border-line-row py-3"
                 >
                   <View className="flex-1">
                     <Txt className="text-body text-fg">{item.label}</Txt>
@@ -129,7 +144,7 @@ function SelectFieldImpl({
                   {active && (
                     <Icon name="check" size={18} color={colors.accent} strokeWidth={2.4} />
                   )}
-                </Pressable>
+                </TouchableOpacity>
               );
             }}
           />

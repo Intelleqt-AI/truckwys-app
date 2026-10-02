@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Modal, Pressable } from 'react-native';
+import { View, Modal, StyleSheet, TouchableOpacity } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Txt, Button, DateField } from '@/components/ui';
 import { formatDate } from '@/lib/formatters';
@@ -40,15 +40,16 @@ export function DueDateSheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => !busy && onCancel()}>
-      <Pressable
-        onPress={() => !busy && onCancel()}
-        className="flex-1 items-center justify-center bg-backdrop px-6"
-      >
+      <View className="flex-1 items-center justify-center bg-backdrop px-6">
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => !busy && onCancel()}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          style={StyleSheet.absoluteFill}
+        />
         <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            className="rounded-panel border border-line bg-elevated p-5"
-          >
+          <View className="rounded-panel border border-line bg-elevated p-5">
             <Txt className="text-heading font-semibold text-fg">Change due date</Txt>
             <Txt className="mb-4 mt-1.5 text-sub text-muted">
               {invoiceNumber}
@@ -63,7 +64,7 @@ export function DueDateSheet({
               error={error ?? undefined}
             />
             {!error && (
-              <Txt className="mt-2 text-micro text-faint">
+              <Txt className="mt-2 text-caption text-faint">
                 Reminders and overdue status follow the new date.
               </Txt>
             )}
@@ -82,9 +83,9 @@ export function DueDateSheet({
                 />
               </View>
             </View>
-          </Pressable>
+          </View>
         </KeyboardAvoidingView>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

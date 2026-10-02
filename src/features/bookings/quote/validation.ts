@@ -180,7 +180,7 @@ export function collectIssues({
     issues.push({
       field: 'dropoff',
       section: 'route',
-      message: 'Set a drop-off point',
+      message: 'Set a delivery point',
       blocks: 'both',
       fixable: true,
     });

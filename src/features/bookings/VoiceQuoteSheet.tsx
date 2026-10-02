@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Modal, Pressable, Platform } from 'react-native';
+import { View, Modal, TouchableOpacity, Platform } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -37,7 +37,7 @@ function Bar({ heights, index }: { heights: SharedValue<number[]>; index: number
     return { height: 4 + v * 56 };
   });
   return (
-    <Animated.View style={[{ width: 4, borderRadius: 2, backgroundColor: colors.accent }, style]} />
+    <Animated.View style={[{ width: 4, borderRadius: 2, backgroundColor: colors.fg }, style]} />
   );
 }
 
@@ -161,20 +161,26 @@ export function VoiceQuoteSheet({
         style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
       >
         <View className="flex-row justify-end">
-          <Pressable onPress={cancel} hitSlop={12} accessibilityRole="button" accessibilityLabel="Cancel">
+          <TouchableOpacity
+            onPress={cancel}
+            activeOpacity={0.6}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+          >
             <Icon name="x" size={26} color={colors.muted} />
-          </Pressable>
+          </TouchableOpacity>
         </View>
 
         <View className="flex-1 items-center justify-center">
           <LiveWaveform heights={heights} />
-          <Mono className="mt-6 text-callout text-accent" style={{ fontVariant: ['tabular-nums'] }}>
+          <Mono className="mt-6 text-callout text-muted" style={{ fontVariant: ['tabular-nums'] }}>
             {mmss(elapsed)}
           </Mono>
 
           <Txt className="mt-8 text-heading font-semibold text-fg">Listening</Txt>
           <Txt className="mt-2 text-center text-sub text-muted">
-            Describe the job — route, load, when
+            Describe the job: route, load, when
           </Txt>
         </View>
 

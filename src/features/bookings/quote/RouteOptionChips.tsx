@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 // Gesture-handler's ScrollView, not react-native's — nested inside
 // BottomSheetScrollView's PanGestureHandler tree, a plain ScrollView loses
 // touch arbitration and never gets to claim a horizontal swipe (documented
@@ -99,48 +99,49 @@ function RouteOptionChipsImpl({
             .join(', ');
 
           return (
-            <Pressable
+            <TouchableOpacity
               key={i}
               onPress={() => onSelect(i)}
+              activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               accessibilityLabel={a11yLabel}
               className={`min-w-[152px] justify-center gap-1 rounded-control border px-3 py-2.5 ${
-                active ? 'border-accent bg-accent-dim' : 'border-line bg-surface'
+                active ? 'border-line-strong bg-raised' : 'border-line bg-surface'
               }`}
             >
               <View className="flex-row items-center gap-1.5">
                 <Mono
-                  className={`flex-shrink text-caption font-medium ${active ? 'text-accent' : 'text-muted'}`}
+                  className={`flex-shrink text-caption font-medium ${active ? 'text-fg' : 'text-muted'}`}
                   numberOfLines={1}
                 >
                   {label}
                 </Mono>
                 {tags[0] && (
                   <Mono
-                    className="text-micro font-medium text-success"
+                    className="text-caption font-medium text-success"
                     numberOfLines={1}
                   >
                     {tags[0]}
                   </Mono>
                 )}
               </View>
-              <Mono className="text-micro text-faint" numberOfLines={1}>
+              <Mono className="text-caption text-faint" numberOfLines={1}>
                 {Math.round(s.distanceKm)} km · {formatDuration(s.durationMin / 60)}
               </Mono>
               {deltaDistance == null || deltaDuration == null || deltaToll == null ? (
-                <Mono className="text-micro text-faint" numberOfLines={1}>
+                <Mono className="text-caption text-faint" numberOfLines={1}>
                   {s.tollsUnavailable ? 'Tolls unavailable' : `${formatCurrency(s.tollZar)} tolls`}
                 </Mono>
               ) : (
-                <Mono className="text-micro text-faint" numberOfLines={1}>
+                <Mono className="text-caption text-faint" numberOfLines={1}>
                   {sign(deltaDistance)}
                   {Math.round(Math.abs(deltaDistance))} km · {sign(deltaDuration)}
                   {Math.round(Math.abs(deltaDuration))} min · {sign(deltaToll)}
                   {formatCurrency(Math.abs(deltaToll))}
                 </Mono>
               )}
-            </Pressable>
+            </TouchableOpacity>
           );
         })}
       </ScrollView>

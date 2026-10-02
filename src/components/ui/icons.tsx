@@ -56,6 +56,9 @@ import {
   Trash2,
   Upload,
   Import,
+  Info,
+  RefreshCw,
+  Banknote,
   type LucideIcon,
 } from 'lucide-react-native';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -120,6 +123,9 @@ export const icons = {
   idCard: IdCard,
   idCardLanyard: IdCardLanyard,
   trash: Trash2,
+  info: Info,
+  refresh: RefreshCw,
+  banknote: Banknote,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

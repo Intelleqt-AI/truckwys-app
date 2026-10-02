@@ -18,6 +18,7 @@ import {
   joinWords,
   ITEM_WORDS,
   kindOf,
+  moneyWhole,
 } from './types';
 import { formatNumber, formatPercent } from '@/lib/formatters';
 
@@ -61,8 +62,6 @@ export interface PriceCheckInputs {
   marketAvgRate: number;
   billingBlocked: boolean;
   quoteId?: number | string | null;
-  /** The choice key of the market figures applied to this quote, if any. */
-  appliedKey: string | null;
 }
 
 /** What the price bar needs to offer the market price. */
@@ -255,7 +254,6 @@ export function usePriceCheck(p: PriceCheckInputs) {
       laneSig: sigAtRequest,
       winSig: winSigAtRequest,
       at: Date.now(),
-      choices: { ...review.combinations![review.default_choice_key!]!.choices },
     };
     setCache((c) => {
       const next = { ...c, [sigAtRequest]: entry };
@@ -279,11 +277,10 @@ export function usePriceCheck(p: PriceCheckInputs) {
   const review = entry?.review || null;
   const breakdown = (review?.cost_breakdown || {}) as Record<ItemKey, ReviewItem>;
   const combos = review?.combinations || {};
-  const choices = entry?.choices;
-  const currentKey = choices ? choiceKey(choices) : '';
-  const combo: Combination | undefined = entry
-    ? combos[currentKey] || combos[review!.default_choice_key!]
-    : undefined;
+  // Every market/yours combination's price is already in the result, so the
+  // all-market one is a lookup too.
+  const marketKey = review?.default_choice_key ?? '';
+  const marketCombo: Combination | undefined = combos[marketKey];
 
   // Which side (yours / market) each line of the live quote is on right now.
   // null = it matches neither, i.e. someone changed it after the check.
@@ -305,29 +302,28 @@ export function usePriceCheck(p: PriceCheckInputs) {
   };
   const sides = entry ? TOPICS.map(sideOf) : [];
   const figuresChanged = !!entry && sides.some((s) => s === null);
+  // The selection is the quote itself: no hidden preview that can disagree with
+  // the price bar. A fresh result therefore starts on "mine".
+  const choices =
+    entry && !figuresChanged
+      ? (Object.fromEntries(TOPICS.map((t, i) => [t, sides[i]!])) as Record<ItemKey, Choice>)
+      : undefined;
+  const currentKey = choices ? choiceKey(choices) : '';
+  // Falls back to the all-market one only so a result whose figures were edited
+  // still has a combination to read; it is never shown (see figuresChanged).
+  const combo: Combination | undefined = entry ? combos[currentKey] || marketCombo : undefined;
   const hasResult = !!entry && !!combo && !figuresChanged;
   const outOfDate = (!!entry && figuresChanged) || (!entry && !!lastSig && !!cache[lastSig]);
-  const quoteKey = hasResult
-    ? choiceKey(Object.fromEntries(TOPICS.map((t, i) => [t, sides[i]!])) as Record<ItemKey, Choice>)
-    : null;
-  const delta = hasResult ? combo!.price_zar - p.total : 0;
-  const needsApply = hasResult && (quoteKey !== currentKey || Math.abs(delta) >= 0.5);
   const toggleable = (review?.toggleable_items || []).filter((t) => breakdown[t]);
   const marketChosen = TOPICS.filter((t) => choices?.[t] === 'ai');
-  const isApplied = hasResult && !needsApply && p.appliedKey === currentKey && marketChosen.length > 0;
 
-  const setChoice = useCallback(
-    (t: ItemKey, c: Choice) => {
-      setCache((prev) => {
-        const e = prev[laneSig];
-        if (!e) return prev;
-        const next = { ...prev, [laneSig]: { ...e, choices: { ...e.choices, [t]: c } } };
-        saveCache(next);
-        return next;
-      });
-    },
-    [laneSig],
-  );
+  /** The key of the combination with one item switched to `c`. */
+  const keyWith = (t: ItemKey, c: Choice) => choiceKey({ ...(choices || {}), [t]: c });
+
+  // What the footer offers: every market figure at once.
+  const marketDelta = hasResult && marketCombo ? marketCombo.price_zar - p.total : 0;
+  const needsApply =
+    hasResult && !!marketCombo && (currentKey !== marketKey || Math.abs(marketDelta) >= 0.5);
 
   const loading = loadingSince !== null;
   const elapsed = loading ? Math.max(0, Math.floor((now - loadingSince!) / 1000)) : 0;
@@ -349,38 +345,30 @@ export function usePriceCheck(p: PriceCheckInputs) {
       : WIN_REASON_COPY[winModel?.reason || ''] || WIN_REASON_COPY.not_enough_history!;
   const winText = winP != null ? formatPercent(winP * 100, 0) : 'Not scored';
 
-  // Headline: the one figure the reader acts on.
-  const matches = hasResult && !needsApply;
-  const headLabel = matches
-    ? 'Market check'
-    : marketChosen.length === toggleable.length && toggleable.length > 0
-      ? 'Market price'
-      : marketChosen.length > 0
-        ? 'Price with your picks'
-        : 'Your figures';
+  // Headline: the live quote total, with a note on which figures it uses.
   const anyUnverified = TOPICS.some((t) => breakdown[t] && kindOf(t, breakdown[t]) === 'unverified');
   // Nothing could be checked: never say the quote "matches" the market.
   const noneVerified =
     hasResult && TOPICS.every((t) => !breakdown[t] || kindOf(t, breakdown[t]) === 'unverified');
-  const headNote = !hasResult
+  const quoteNote = !hasResult
     ? ''
-    : noneVerified && matches
-      ? 'Your figures are kept'
-      : isApplied
-        ? 'Market figures in use'
-        : matches
-          ? toggleable.length === 0
-            ? anyUnverified
-              ? 'Nothing to change in the checked figures'
-              : 'Your figures are at market'
-            : 'You kept your own figures'
+    : noneVerified
+      ? 'Nothing verified, your figures are kept'
+      : toggleable.length === 0
+        ? anyUnverified
+          ? 'Nothing to change in the checked figures'
+          : 'Your figures are at market'
+        : marketChosen.length === toggleable.length
+          ? 'Market figures in use'
           : marketChosen.length > 0
             ? `With market ${joinWords(marketChosen.map((t) => ITEM_WORDS[t]))}`
-            : 'Without the market changes';
+            : Math.abs(marketDelta) >= 0.5
+              ? `Your figures. Market price is ${moneyWhole(marketCombo!.price_zar)}`
+              : 'Your figures';
 
   const offer: PriceCheckOffer | null =
-    p.active && hasResult && review
-      ? { review, key: currentKey, price: combo!.price_zar, needsApply }
+    p.active && hasResult && review && marketCombo
+      ? { review, key: marketKey, price: marketCombo.price_zar, needsApply }
       : null;
 
   return {
@@ -406,12 +394,10 @@ export function usePriceCheck(p: PriceCheckInputs) {
     outOfDate,
     figuresChanged,
     needsApply,
-    isApplied,
     toggleable,
     marketChosen,
-    matches,
-    headLabel,
-    headNote,
+    total: p.total,
+    quoteNote,
     noneVerified,
     winText,
     winNote,
@@ -420,7 +406,7 @@ export function usePriceCheck(p: PriceCheckInputs) {
     // actions
     runCheck,
     cancelCheck,
-    setChoice,
+    keyWith,
   };
 }
 

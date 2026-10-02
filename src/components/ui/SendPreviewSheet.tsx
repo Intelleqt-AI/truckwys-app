@@ -1,4 +1,4 @@
-import { Modal, Pressable, ScrollView, View } from 'react-native';
+import { Modal, TouchableOpacity, ScrollView, View } from 'react-native';
 import { Txt, Mono } from './Text';
 import { Button } from './primitives';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -77,12 +77,16 @@ export function SendPreviewSheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={() => !sending && onCancel()}>
-      <Pressable
+      <TouchableOpacity
+        activeOpacity={1}
+        accessible={false}
         onPress={() => !sending && onCancel()}
         className="flex-1 items-center justify-center bg-backdrop px-6"
       >
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
+        {/* Inner touchable swallows taps so they don't reach the backdrop. */}
+        <TouchableOpacity
+          activeOpacity={1}
+          accessible={false}
           className="max-h-[88%] w-full max-w-[420px] rounded-panel border border-line bg-elevated p-5"
           style={{ boxShadow: colors.shadowPop }}
         >
@@ -168,8 +172,8 @@ export function SendPreviewSheet({
             )}
             <Button label="Cancel" variant="secondary" onPress={onCancel} disabled={sending} fullWidth />
           </View>
-        </Pressable>
-      </Pressable>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }

@@ -21,7 +21,7 @@ export function RiskScoresScreen({ navigation }: Props) {
   const { data, isLoading, isError, refetch } = useRiskScores();
 
   return (
-    <SheetScreen eyebrow="Underwriting" title="Risk scores" onBack={() => navigation.goBack()}>
+    <SheetScreen title="Risk scores" onBack={() => navigation.goBack()}>
       {isLoading ? (
         <ListSkeleton />
       ) : isError ? (

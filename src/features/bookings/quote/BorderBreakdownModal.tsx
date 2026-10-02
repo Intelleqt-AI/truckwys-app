@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable, Modal } from 'react-native';
+import { View, TouchableOpacity, Modal } from 'react-native';
 import { Button, Label, Txt, Mono } from '@/components/ui';
 import { num, pick, str } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
@@ -36,10 +36,11 @@ function BorderBreakdownModalImpl({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
-        <Pressable
+      <TouchableOpacity activeOpacity={1} className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
+        <TouchableOpacity
+          activeOpacity={1}
           className="rounded-panel border border-line bg-elevated p-4"
-          onPress={(e) => e.stopPropagation()}
+          onPress={() => {}}
         >
           <Label className="mb-3 text-muted">Cross-border charges</Label>
           {rows.length === 0 ? (
@@ -64,15 +65,15 @@ function BorderBreakdownModalImpl({
                 </Mono>
               </View>
               {costs.legs === 2 && (
-                <Mono className="mt-1 text-micro text-faint">
+                <Mono className="mt-1 text-caption text-faint">
                   × 2 for round trip = {formatCurrency(Math.round(oneWayTotal * 2))}
                 </Mono>
               )}
             </View>
           )}
           <Button label="Close" variant="secondary" onPress={onClose} fullWidth className="mt-4" />
-        </Pressable>
-      </Pressable>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }

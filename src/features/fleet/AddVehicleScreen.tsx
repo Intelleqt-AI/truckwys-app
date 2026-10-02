@@ -46,7 +46,7 @@ const FALLBACK_TYPES = [
   'Box Truck',
 ];
 const STATUSES = ['AVAILABLE', 'IN_USE', 'MAINTENANCE', 'INACTIVE', 'OUT_OF_SERVICE'].map((v) => ({
-  label: v.replace(/_/g, ' '),
+  label: v.charAt(0) + v.slice(1).toLowerCase().replace(/_/g, ' '),
   value: v,
 }));
 
@@ -217,7 +217,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   }, [types]);
   const driverOptions = useMemo(
     () => [
-      { label: '— No driver —', value: '' },
+      { label: 'No driver', value: '' },
       ...(drivers ?? []).map((d) => ({ label: d.name, value: String(d.id) })),
     ],
     [drivers],
@@ -377,7 +377,6 @@ export function AddVehicleScreen({ route, navigation }: Props) {
   return (
     <View className="flex-1">
       <SheetScreen
-        eyebrow={editing ? 'Edit' : 'New vehicle'}
         title={editing ? 'Edit vehicle' : 'Add vehicle'}
         variant="modal"
         onBack={() => navigation.goBack()}
@@ -392,17 +391,11 @@ export function AddVehicleScreen({ route, navigation }: Props) {
         }
       >
         <Animated.View className="gap-4" style={shakeStyle}>
-          {/* Required first, so nothing mandatory is buried under a run of
-              optional fields. Vehicle type sits above Capacity because picking a
-              type seeds a starting capacity below it. */}
-          <VText
-            control={control}
-            name="vin"
-            anchors={anchors}
-            label="VIN"
-            placeholder="17-character VIN — optional"
-            autoCapitalize="characters"
-          />
+          {/* Required first (web order), so nothing mandatory is buried under a
+              run of optional fields. VIN and Year are optional here (a bulk-imported
+              vehicle has neither), so they sit with the optional group below.
+              Vehicle type sits above Capacity because picking a type seeds a
+              starting capacity below it. */}
           <View className="flex-row gap-3">
             <View className="flex-1">
               <VText
@@ -425,34 +418,16 @@ export function AddVehicleScreen({ route, navigation }: Props) {
               />
             </View>
           </View>
-          {/* Year and Vehicle type pair here instead of Year+Plate — both are
-              short (a 4-digit number, a dropdown). Registration plate moves
-              to its own full-width row below, since a plate number is just as
-              cramped at half-width as VIN above. */}
-          <View className="flex-row gap-3">
-            <View className="flex-1">
-              <VText
-                control={control}
-                name="year"
-                anchors={anchors}
-                label="Year"
-                placeholder="e.g. 2022 — optional"
-                keyboardType="number-pad"
-              />
-            </View>
-            <View className="flex-1">
-              <VSelect
-                control={control}
-                name="type"
-                anchors={anchors}
-                label="Vehicle type"
-                icon="box"
-                required
-                options={typeOptions}
-                onSelectExtra={chooseType}
-              />
-            </View>
-          </View>
+          <VSelect
+            control={control}
+            name="type"
+            anchors={anchors}
+            label="Vehicle type"
+            icon="box"
+            required
+            options={typeOptions}
+            onSelectExtra={chooseType}
+          />
           <VText
             control={control}
             name="plate"
@@ -475,7 +450,25 @@ export function AddVehicleScreen({ route, navigation }: Props) {
           />
 
           <Label className="mt-1 text-muted">Optional</Label>
+          <VText
+            control={control}
+            name="vin"
+            anchors={anchors}
+            label="VIN"
+            placeholder="17 characters"
+            autoCapitalize="characters"
+          />
           <View className="flex-row gap-3">
+            <View className="flex-1">
+              <VText
+                control={control}
+                name="year"
+                anchors={anchors}
+                label="Year"
+                placeholder="e.g. 2022"
+                keyboardType="number-pad"
+              />
+            </View>
             <View className="flex-1">
               <VText
                 control={control}
@@ -487,10 +480,8 @@ export function AddVehicleScreen({ route, navigation }: Props) {
                 numeric
               />
             </View>
-            <View className="flex-1">
-              <VSelect control={control} name="status" anchors={anchors} label="Status" options={STATUSES} />
-            </View>
           </View>
+          <VSelect control={control} name="status" anchors={anchors} label="Status" options={STATUSES} />
           <VSelect
             control={control}
             name="driver"
@@ -500,7 +491,7 @@ export function AddVehicleScreen({ route, navigation }: Props) {
             options={driverOptions}
           />
 
-          <Label className="mt-1 text-muted">Service & compliance</Label>
+          <Label className="mt-1 text-muted">Service and compliance</Label>
           <View className="flex-row gap-3">
             <View className="flex-1">
               <VDate

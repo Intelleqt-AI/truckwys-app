@@ -4,11 +4,12 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { formatNumber } from '@/lib/formatters';
 import type { QuoteFunnel } from './derive';
 
-// ── QuoteFunnelCard: how far quotes get. Quoted → Sent → Accepted → Booked → On
-// the road → Delivered, each a bar against the first stage. Stage rules and the
-// counting are in derive.ts computeFunnel (the web's QuoteConversion + pipeline):
-// expired quotes are never live Draft or Sent, and in-transit loads left open are
-// said under "On the road", not counted in it. The last stage wears the accent.
+// ── QuoteFunnelCard: where quotes stand. Draft, Sent, Accepted, Booked, On the
+// road, Declined and (only when there is one) Expired, each a bar against the
+// largest stage, then the single win-rate figure. Stage rules and the counting
+// are in derive.ts computeFunnel (the web's QuoteConversion + pipeline): expired
+// quotes are never live Draft or Sent, and in-transit loads left open are said
+// under "On the road", not counted in it. Accepted wears the accent.
 export function QuoteFunnelCard({
   funnel,
   total,
@@ -32,7 +33,7 @@ export function QuoteFunnelCard({
               onPress={onNewQuote}
               activeOpacity={0.7}
               accessibilityRole="button"
-              className="min-h-[40px] justify-center rounded-control border border-line-active px-4"
+              className="min-h-[44px] justify-center rounded-control border border-line-active px-4"
             >
               <Mono className="text-caption font-medium text-fg">New quote</Mono>
             </TouchableOpacity>
@@ -42,14 +43,7 @@ export function QuoteFunnelCard({
     );
   }
 
-  const first = Math.max(1, funnel.stages[0]?.count ?? 0);
-  const lastIndex = funnel.stages.length - 1;
-  const waiting: string[] = [
-    funnel.awaiting > 0 ? `${funnel.awaiting} awaiting a reply` : '',
-    funnel.drafts > 0 ? `${funnel.drafts} ${funnel.drafts === 1 ? 'draft' : 'drafts'}` : '',
-    funnel.declined > 0 ? `${funnel.declined} declined` : '',
-    funnel.expired > 0 ? `${funnel.expired} expired` : '',
-  ].filter(Boolean);
+  const max = Math.max(1, ...funnel.stages.map((s) => s.count));
 
   return (
     <Group label="Quote pipeline" action={onViewAll ? 'View all' : undefined} onAction={onViewAll}>
@@ -66,9 +60,9 @@ export function QuoteFunnelCard({
                 <View
                   style={{
                     height: 8,
-                    width: s.count === 0 ? 0 : `${Math.max((s.count / first) * 100, 2)}%`,
+                    width: s.count === 0 ? 0 : `${Math.max((s.count / max) * 100, 2)}%`,
                     borderRadius: 4,
-                    backgroundColor: i === lastIndex ? colors.accent : colors.chartMuted,
+                    backgroundColor: s.key === 'accepted' ? colors.accent : colors.chartMuted,
                   }}
                 />
               </View>
@@ -80,23 +74,25 @@ export function QuoteFunnelCard({
               </Mono>
             </View>
             {(s.sub || s.note) && (
-              <Txt className="mt-0.5 text-micro text-faint" style={{ marginLeft: 108 }}>
+              <Txt className="mt-0.5 text-caption text-faint" style={{ marginLeft: 108 }}>
                 {s.note ?? s.sub}
               </Txt>
             )}
           </View>
         ))}
 
-        <View className="mt-3.5 gap-1 border-t border-line pt-3">
-          <Txt className="text-caption text-muted">
-            {funnel.winRate != null
-              ? `Win rate ${funnel.winRate}%: ${funnel.accepted} of ${funnel.sentEver} quotes sent were accepted.`
-              : 'Win rate shows once a quote has been sent.'}
-          </Txt>
-          {waiting.length > 0 && (
-            <Txt className="text-caption text-faint">{`Other quotes: ${waiting.join(', ')}.`}</Txt>
+        <View className="mt-3.5 border-t border-line pt-3">
+          {funnel.winRate != null ? (
+            <View className="flex-row items-baseline gap-2">
+              <Mono className="text-title font-semibold text-fg">{`${funnel.winRate}%`}</Mono>
+              <Txt className="flex-1 text-caption text-muted">
+                {`win rate: ${funnel.accepted} of ${funnel.sentEver} quotes sent were accepted`}
+              </Txt>
+            </View>
+          ) : (
+            <Txt className="text-caption text-muted">Win rate shows once a quote has been sent.</Txt>
           )}
-          <Txt className="text-caption text-faint">{`All ${formatNumber(total)} ${total === 1 ? 'quote' : 'quotes'}.`}</Txt>
+          <Txt className="mt-1 text-caption text-faint">{`All ${formatNumber(total)} ${total === 1 ? 'quote' : 'quotes'}.`}</Txt>
         </View>
       </View>
     </Group>

@@ -55,17 +55,6 @@ module.exports = {
         neutral: 'var(--status-neutral-text)',
         'neutral-dot': 'var(--status-neutral-dot)',
         'neutral-bg': 'var(--status-neutral-bg)',
-        // Quote pipeline stages — folded onto the status tones (v3 has no
-        // per-stage hues): draft neutral, sent/transit info, accepted/completed success.
-        'stage-draft': 'var(--status-neutral-dot)',
-        'stage-sent': 'var(--status-info-dot)',
-        'stage-accepted': 'var(--status-success-dot)',
-        'stage-transit': 'var(--status-info-dot)',
-        'stage-completed': 'var(--status-success-dot)',
-        // Confidence
-        'conf-high': 'var(--status-success-text)',
-        'conf-medium': 'var(--status-warning-text)',
-        'conf-low': 'var(--status-danger-text)',
       },
       fontFamily: {
         sans: ['System'],

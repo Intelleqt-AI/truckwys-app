@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useBottomSheetInternal, KEYBOARD_STATUS } from '@gorhom/bottom-sheet';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Button, Icon, Mono } from '@/components/ui';
@@ -124,45 +124,47 @@ function QuoteFooterActionsImpl({
           {showTotal ? (
             <>
               <Mono
-                className="text-callout font-semibold text-accent"
+                className="text-callout font-semibold text-fg"
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.2}
               >
                 {formatCurrency(total)}
               </Mono>
               {/* The one price: what the client is sent, excluding VAT. */}
-              <Mono className="shrink-0 text-micro text-muted" maxFontSizeMultiplier={1.2}>
+              <Mono className="shrink-0 text-caption text-muted" maxFontSizeMultiplier={1.2}>
                 · excl. VAT
               </Mono>
-              {calculating && <ActivityIndicator size="small" />}
+              {calculating && <ActivityIndicator size="small" color={colors.faint} />}
             </>
           ) : strip ? null : (
             // Tappable for the same reason the strip on the right is: the
             // hint itself is generic, but tapping still jumps to the first
             // outstanding gap. Chevron only when there's somewhere to go.
-            <Pressable
+            <TouchableOpacity
               onPress={onPriceHintPress}
               disabled={!onPriceHintPress}
+              activeOpacity={0.6}
               accessibilityRole={onPriceHintPress ? 'button' : undefined}
               accessibilityLabel={priceHint}
               className="flex-1 flex-row items-center gap-1"
             >
               <Mono
-                className="flex-shrink text-micro text-faint"
+                className="flex-shrink text-caption text-faint"
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.2}
               >
                 {priceHint}
               </Mono>
               {onPriceHintPress && <Icon name="chevronRight" size={13} color={colors.faint} />}
-            </Pressable>
+            </TouchableOpacity>
           )}
         </View>
         {!strip && showTotal && offer && <OfferAction offer={offer} />}
         {strip && (
-          <Pressable
+          <TouchableOpacity
             onPress={strip.onPress}
             disabled={!strip.onPress}
+            activeOpacity={0.6}
             accessibilityRole={strip.onPress ? 'button' : undefined}
             accessibilityLabel={strip.message}
             className="min-w-0 flex-shrink flex-row items-center justify-end gap-1"
@@ -171,21 +173,21 @@ function QuoteFooterActionsImpl({
                 overload warning); they truncate to a single 26px line next to
                 the chevron. */}
             <Mono
-              className={`shrink text-micro ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
+              className={`shrink text-caption ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
               numberOfLines={1}
               maxFontSizeMultiplier={1.2}
             >
               {strip.message}
             </Mono>
             {strip.onPress && <Icon name="chevronRight" size={13} color={stripColor} />}
-          </Pressable>
+          </TouchableOpacity>
         )}
       </Animated.View>
 
       <View className="flex-row gap-2.5">
         <View className="flex-1">
           <Button
-            label="Save draft"
+            label="Save as draft"
             variant="secondary"
             loading={busy === 'draft'}
             disabled={saveDisabled}
@@ -195,7 +197,7 @@ function QuoteFooterActionsImpl({
         </View>
         <View className="flex-1">
           <Button
-            label="Send to client"
+            label="Send quote"
             icon="send"
             loading={busy === 'send'}
             disabled={sendDisabled}
@@ -214,7 +216,7 @@ function OfferAction({ offer }: { offer: FooterOffer }) {
   if (offer.kind === 'same') {
     return (
       <Mono
-        className="min-w-0 shrink text-micro text-faint"
+        className="min-w-0 shrink text-caption text-faint"
         numberOfLines={1}
         maxFontSizeMultiplier={1.2}
       >
@@ -227,7 +229,7 @@ function OfferAction({ offer }: { offer: FooterOffer }) {
       ? 'Check market price'
       : offer.kind === 'apply'
         ? offer.label
-        : 'Using market price · Undo';
+        : 'Market figures in use · Undo';
   return (
     <TouchableOpacity
       onPress={offer.onPress}
@@ -237,7 +239,7 @@ function OfferAction({ offer }: { offer: FooterOffer }) {
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
       className="min-w-0 shrink flex-row items-center justify-end gap-1"
     >
-      <Mono className="shrink text-micro text-link" numberOfLines={1} maxFontSizeMultiplier={1.2}>
+      <Mono className="shrink text-caption text-link" numberOfLines={1} maxFontSizeMultiplier={1.2}>
         {text}
       </Mono>
       <Icon name="chevronRight" size={13} color={colors.link} />

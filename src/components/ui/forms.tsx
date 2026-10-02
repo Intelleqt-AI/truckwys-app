@@ -2,7 +2,7 @@ import { forwardRef, useId, useState } from 'react';
 import {
   View,
   TextInput,
-  Pressable,
+  TouchableOpacity,
   Platform,
   Keyboard,
   InputAccessoryView,
@@ -19,7 +19,7 @@ import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
 import { Txt, Mono, Label, FieldLabel, INPUT_TEXT } from './Text';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { motion } from '@/theme/tokens';
+import { motion, TAP_MIN } from '@/theme/tokens';
 import { parseNum, formatNumber, formatPlain } from '@/lib/formatters';
 
 // Shared by TextField/SelectField/DateField: the error-or-warning message row,
@@ -30,7 +30,7 @@ export function FieldMessage({ error, warning }: { error?: string; warning?: str
   if (!message) return null;
   return (
     <Animated.View entering={FadeInDown.duration(motion.fast)} exiting={FadeOut.duration(120)}>
-      <Mono className={`mt-1 text-micro ${error ? 'text-danger' : 'text-warning'}`}>{message}</Mono>
+      <Mono className={`mt-1 text-caption ${error ? 'text-danger' : 'text-warning'}`}>{message}</Mono>
     </Animated.View>
   );
 }
@@ -54,16 +54,17 @@ export function KeyboardDoneBar({ nativeID }: { nativeID: string }) {
     <InputAccessoryView nativeID={nativeID} backgroundColor={colors.surface}>
       <View
         className="flex-row items-center justify-end border-t border-line px-4"
-        style={{ height: 44 }}
+        style={{ height: TAP_MIN }}
       >
-        <Pressable
+        <TouchableOpacity
           onPress={() => Keyboard.dismiss()}
           hitSlop={12}
+          activeOpacity={0.6}
           accessibilityRole="button"
           accessibilityLabel="Dismiss keyboard"
         >
           <Txt className="text-callout font-semibold text-link">Done</Txt>
-        </Pressable>
+        </TouchableOpacity>
       </View>
     </InputAccessoryView>
   );
@@ -185,8 +186,9 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
     <View className={className}>
       <FieldLabel label={label} required={required} />
       <Animated.View
-        className="min-h-[44px] flex-row items-center gap-2 rounded-control border bg-input px-3"
+        className="flex-row items-center gap-2 rounded-control border bg-input px-3"
         style={[
+          { minHeight: TAP_MIN },
           borderStyle,
           focused && !error && !warning ? { boxShadow: `0 0 0 3px ${colors.focusRing}` } : null,
         ]}
@@ -207,14 +209,15 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
           inputAccessoryViewID={props.inputAccessoryViewID ?? accessoryID}
         />
         {secureTextEntry && (
-          <Pressable
-            hitSlop={10}
+          <TouchableOpacity
+            hitSlop={14}
+            activeOpacity={0.6}
             onPress={() => setHidden((h) => !h)}
             accessibilityRole="button"
             accessibilityLabel={hidden ? 'Show password' : 'Hide password'}
           >
             <Icon name="eye" size={18} color={colors.faint} />
-          </Pressable>
+          </TouchableOpacity>
         )}
       </Animated.View>
       <FieldMessage error={error} warning={warning} />
@@ -269,10 +272,14 @@ export function SegmentedControl<T extends string>({
       {options.map((o) => {
         const active = o.value === value;
         return (
-          <Pressable
+          // Drawn 36 tall; hitSlop reaches the 44pt hit area (web rule R7).
+          <TouchableOpacity
             key={o.value}
             onPress={() => onChange(o.value)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 4, bottom: 4 }}
             accessibilityRole="button"
+            accessibilityLabel={o.label}
             accessibilityState={{ selected: active }}
             className="min-h-[36px] flex-1 items-center justify-center rounded-chip"
             style={
@@ -288,7 +295,7 @@ export function SegmentedControl<T extends string>({
             <Mono className={`text-sub font-medium ${active ? 'text-fg' : 'text-muted'}`}>
               {o.label}
             </Mono>
-          </Pressable>
+          </TouchableOpacity>
         );
       })}
     </View>
@@ -307,10 +314,12 @@ export function Toggle({
 }) {
   const { colors } = useTheme();
   return (
-    <Pressable
+    <TouchableOpacity
       accessibilityRole="switch"
       accessibilityState={{ checked: value, disabled: !!disabled }}
       disabled={disabled}
+      activeOpacity={0.8}
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
       onPress={() => onValueChange(!value)}
       style={{
         width: 46,
@@ -333,7 +342,7 @@ export function Toggle({
           transform: [{ translateX: value ? 18 : 0 }],
         }}
       />
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -358,16 +367,20 @@ export function RadioRows({
     <View>
       {label && <Label className="mb-1.5 text-sub text-muted">{label}</Label>}
       {options.length === 0 ? (
-        <Mono className="text-micro text-warning">{emptyText ?? 'Nothing available'}</Mono>
+        <Mono className="text-caption text-warning">{emptyText ?? 'Nothing available'}</Mono>
       ) : (
         <View className="overflow-hidden rounded-card border border-line bg-surface">
           {options.map((o, i) => {
             const active = o.value === value;
             return (
-              <Pressable
+              <TouchableOpacity
                 key={`${o.value}-${i}`}
                 onPress={() => onSelect(o.value)}
-                className={`min-h-[44px] flex-row items-center gap-3 px-3 py-2.5 active:bg-surface-hover ${
+                activeOpacity={0.6}
+                accessibilityRole="radio"
+                accessibilityLabel={o.sub ? `${o.label}, ${o.sub}` : o.label}
+                accessibilityState={{ selected: active }}
+                className={`min-h-[44px] flex-row items-center gap-3 px-3 py-2.5 ${
                   i === options.length - 1 ? '' : 'border-b border-line-row'
                 }`}
               >
@@ -381,7 +394,7 @@ export function RadioRows({
                   {o.sub ? <Txt className="mt-0.5 text-caption text-faint">{o.sub}</Txt> : null}
                 </View>
                 {active && <Icon name="check" size={17} color={colors.accent} strokeWidth={2.4} />}
-              </Pressable>
+              </TouchableOpacity>
             );
           })}
         </View>

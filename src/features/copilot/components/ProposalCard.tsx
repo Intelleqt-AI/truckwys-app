@@ -32,7 +32,7 @@ export function ProposalCard({
   return (
     <View
       className="mt-3 rounded-card border bg-surface"
-      style={{ borderColor: pending ? colors.accent : colors.line }}
+      style={{ borderColor: pending ? colors.lineStrong : colors.line }}
     >
       <View className="flex-row items-center gap-2 px-3.5 pt-3">
         <Badge label={operationLabel} tone={operationTone} dot />

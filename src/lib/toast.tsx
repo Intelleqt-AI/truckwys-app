@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Platform, View } from 'react-native';
+import { AccessibilityInfo, Platform, View } from 'react-native';
 import Animated, {
   Easing,
   FadeInDown,
@@ -40,11 +40,27 @@ const successHaptic = () => {
   if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 };
 
+// A toast is purely visual, so a screen-reader user would never hear it. Every
+// message is also announced; success/info stay visually silent (policy above) but
+// still get spoken, since for VoiceOver/TalkBack that is the only confirmation.
+const announce = (m?: string) => {
+  if (m) AccessibilityInfo.announceForAccessibility(m);
+};
+
 export const toast = {
-  error: (m: string) => useToastStore.getState().push(m),
+  error: (m: string) => {
+    announce(m);
+    useToastStore.getState().push(m);
+  },
   // Silent + haptic — the screen already reflects the change.
-  success: (_m?: string) => successHaptic(),
-  info: (_m?: string) => successHaptic(),
+  success: (m?: string) => {
+    announce(m);
+    successHaptic();
+  },
+  info: (m?: string) => {
+    announce(m);
+    successHaptic();
+  },
 };
 
 export function ToastHost() {

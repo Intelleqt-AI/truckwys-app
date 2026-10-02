@@ -7,6 +7,13 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { decimate, MAX_ROUTE_POINTS, type GeoPoint } from '@/lib/routeGeometry';
 import { MAPTILER_KEY } from '@/lib/mapNative';
 
+// `#RRGGBB` theme token to `rgba(r,g,b,a)`. NativeWind's `/70` opacity modifier is
+// a no-op on a CSS-variable colour, so a translucent backing is set explicitly.
+const withAlpha = (hex: string, alpha: number) => {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+};
+
 // Static route map: OpenStreetMap raster tiles under an SVG polyline.
 //
 // Deliberately non-interactive — no pan, no pinch, no tap-to-pick. That keeps it
@@ -234,14 +241,17 @@ export function RouteMap({
             has to overlay it inside the map and lift it above whatever covers the
             bottom — below the box it would sit off-screen. */}
         {fullBleed && (
-          <View className="absolute right-2 rounded-xs bg-bg-deep/70 px-1.5 py-0.5" style={{ bottom: bottomInset + 6 }}>
-            <Mono className="text-micro text-faint">© MapTiler © OpenStreetMap</Mono>
+          <View
+            className="absolute right-2 rounded-xs px-1.5 py-0.5"
+            style={{ bottom: bottomInset + 6, backgroundColor: withAlpha(colors.bgDeep, 0.7) }}
+          >
+            <Mono className="text-caption text-faint">© MapTiler © OpenStreetMap</Mono>
           </View>
         )}
       </View>
 
       {!fullBleed && (
-        <Mono className="mt-1 text-right text-micro text-faint">© MapTiler © OpenStreetMap contributors</Mono>
+        <Mono className="mt-1 text-right text-caption text-faint">© MapTiler © OpenStreetMap contributors</Mono>
       )}
     </View>
   );

@@ -147,7 +147,7 @@ export function ImportPanel({
       // success haptic.
       toast.success();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't read that file — try saving it as CSV or Excel");
+      toast.error(e instanceof Error ? e.message : "Couldn't read that file. Try saving it as CSV or Excel.");
     } finally {
       setBusy(false);
     }
@@ -178,7 +178,7 @@ export function ImportPanel({
         invalidateFor(qc, entity === 'customers' ? 'customer' : 'vehicle');
         onImported?.(res);
       } else {
-        toast.error('Nothing was imported — every row needs attention');
+        toast.error('Nothing was imported. Every row needs attention.');
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Import failed');
@@ -222,29 +222,29 @@ export function ImportPanel({
           </View>
 
           <Txt className="text-caption text-faint">
-            Include the heading row if you have one — we work out which column is which.{'\n'}
+            Include the heading row if you have one. We work out which column is which.{'\n'}
             Columns we recognise: {sample.columns}
           </Txt>
         </View>
       ) : (
         <View>
           <View className="mb-3 flex-row flex-wrap items-center gap-2">
-            <Mono className="text-micro text-faint">{preview.total} found</Mono>
-            <Mono className="text-micro text-faint">·</Mono>
-            <Mono className="text-micro" style={{ color: preview.ready ? colors.success : colors.faint }}>
+            <Mono className="text-caption text-faint">{preview.total} found</Mono>
+            <Mono className="text-caption text-faint">·</Mono>
+            <Mono className="text-caption" style={{ color: preview.ready ? colors.success : colors.faint }}>
               {preview.ready} ready
             </Mono>
             {preview.needs_attention > 0 && (
               <>
-                <Mono className="text-micro text-faint">·</Mono>
-                <Mono className="text-micro text-warning">{preview.needs_attention} need attention</Mono>
+                <Mono className="text-caption text-faint">·</Mono>
+                <Mono className="text-caption text-warning">{preview.needs_attention} need attention</Mono>
               </>
             )}
           </View>
 
           {preview.needs_attention > 0 && (
             <Txt className="mb-3 text-caption text-faint">
-              Rows needing attention are skipped — the other {preview.ready} still import. Fix them in your
+              Rows needing attention are skipped. The other {preview.ready} still import. Fix them in your
               spreadsheet and paste again.
             </Txt>
           )}
@@ -281,7 +281,7 @@ export function ImportPanel({
                   subtitle={subtitle || undefined}
                   trailing={
                     <Mono
-                      className={`text-micro ${r.problems.length ? 'text-warning' : 'text-faint'}`}
+                      className={`text-caption ${r.problems.length ? 'text-warning' : 'text-faint'}`}
                       numberOfLines={2}
                       style={{ maxWidth: 140, textAlign: 'right' }}
                     >
@@ -295,7 +295,7 @@ export function ImportPanel({
           })}
           {preview.rows.length > DISPLAY_CAP && (
             <Txt className="text-center text-caption text-faint">
-              Showing the first {DISPLAY_CAP} of {preview.rows.length} rows — all of them still import.
+              Showing the first {DISPLAY_CAP} of {preview.rows.length} rows. All of them still import.
             </Txt>
           )}
         </View>

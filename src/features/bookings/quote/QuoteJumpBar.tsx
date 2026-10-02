@@ -1,5 +1,5 @@
 import { forwardRef, memo, useImperativeHandle, useState } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { Mono } from '@/components/ui';
 import type { SectionId } from './types';
@@ -48,14 +48,17 @@ export const QuoteJumpBar = memo(
           {sections.map((s) => {
             const isActive = s.id === active;
             return (
-              <Pressable
+              <TouchableOpacity
                 key={s.id}
                 onPress={() => onPress(s.id)}
+                activeOpacity={0.7}
+                // 32 drawn + 12 = a 44 hit area, still inside the bar's own padding.
+                hitSlop={{ top: 6, bottom: 6 }}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isActive }}
                 accessibilityLabel={`${s.label}${s.hasIssue ? ', needs attention' : s.complete ? ', complete' : ', incomplete'}`}
                 className={`min-h-[32px] flex-row items-center gap-1.5 rounded-pill border px-3 ${
-                  isActive ? 'border-accent bg-accent-dim' : 'border-line bg-surface'
+                  isActive ? 'border-line-strong bg-raised' : 'border-line bg-surface'
                 }`}
               >
                 <View
@@ -65,11 +68,11 @@ export const QuoteJumpBar = memo(
                   }
                 />
                 <Mono
-                  className={`text-caption font-medium ${isActive ? 'text-accent' : 'text-muted'}`}
+                  className={`text-caption font-medium ${isActive ? 'text-fg' : 'text-muted'}`}
                 >
                   {s.label}
                 </Mono>
-              </Pressable>
+              </TouchableOpacity>
             );
           })}
         </ScrollView>

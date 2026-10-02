@@ -6,6 +6,7 @@ import Animated, {
   withRepeat,
   withTiming,
   Easing,
+  useReducedMotion,
 } from 'react-native-reanimated';
 import { Screen, EmptyState, Button, Txt, LogoMark } from '@/components/ui';
 import { radius as radiusTokens } from '@/theme/tokens';
@@ -22,10 +23,16 @@ export function Skeleton({
   radius?: number;
   className?: string;
 }) {
-  const o = useSharedValue(0.4);
+  const reduceMotion = useReducedMotion();
+  const o = useSharedValue(reduceMotion ? 0.7 : 0.4);
   useEffect(() => {
+    // Reduce Motion: a still, mid-opacity block instead of the pulse.
+    if (reduceMotion) {
+      o.value = 0.7;
+      return;
+    }
     o.value = withRepeat(withTiming(0.9, { duration: 800 }), -1, true);
-  }, [o]);
+  }, [o, reduceMotion]);
   const style = useAnimatedStyle(() => ({ opacity: o.value }));
   return (
     <Animated.View
@@ -44,10 +51,41 @@ export function ErrorState({ onRetry, message }: { onRetry: () => void; message?
           icon="alert"
           title="Something went wrong"
           body={message ?? 'Please check your connection and try again.'}
-          action={<Button label="Retry" variant="secondary" icon="route" onPress={onRetry} />}
+          action={<Button label="Retry" variant="secondary" icon="refresh" onPress={onRetry} />}
         />
       </View>
     </Screen>
+  );
+}
+
+// ── Detail screen loading + not-found ───────────────────────────────────────
+// A detail screen opened cold (push notification, deep link) has no preview to
+// render from, so it used to paint empty values ("DRAFT / R0") until the fetch
+// landed. Web shows a block skeleton and, for a 404, a not-found state; these are
+// the mobile equivalents. Content only — the caller keeps its own SheetScreen.
+export function DetailSkeleton() {
+  return (
+    <View accessibilityLabel="Loading" accessibilityRole="progressbar">
+      <View className="mb-5 flex-row gap-3">
+        <Skeleton width="48%" height={78} radius={radiusTokens.card} />
+        <Skeleton width="48%" height={78} radius={radiusTokens.card} />
+      </View>
+      <Skeleton height={168} radius={radiusTokens.card} className="mb-5" />
+      <Skeleton height={132} radius={radiusTokens.card} className="mb-5" />
+      <Skeleton height={96} radius={radiusTokens.card} />
+    </View>
+  );
+}
+
+/** Web's "It may have been deleted or moved." for a record that no longer exists. */
+export function NotFoundState({ what, onBack }: { what: string; onBack: () => void }) {
+  return (
+    <EmptyState
+      icon="search"
+      title={`${what} not found`}
+      body="It may have been deleted or moved."
+      action={<Button label="Go back" variant="secondary" onPress={onBack} />}
+    />
   );
 }
 
@@ -124,7 +162,7 @@ export function SectionError({ message, onRetry }: { message: string; onRetry: (
   return (
     <View className="mb-5 items-center gap-2 rounded-card border border-line bg-surface p-4">
       <Txt className="text-center text-caption text-faint">{message}</Txt>
-      <Button label="Retry" variant="secondary" icon="route" onPress={onRetry} />
+      <Button label="Retry" variant="secondary" icon="refresh" onPress={onRetry} />
     </View>
   );
 }
@@ -159,14 +197,21 @@ export function WorkingOverlay({ visible, title }: { visible: boolean; title: st
 function BreathingLogo() {
   const t = useSharedValue(0);
   const spin = useSharedValue(0);
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
+    // Reduce Motion: hold the mark still at full strength.
+    if (reduceMotion) {
+      t.value = 1;
+      spin.value = 0;
+      return;
+    }
     t.value = withRepeat(
       withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }),
       -1,
       true,
     );
     spin.value = withRepeat(withTiming(1, { duration: 4000, easing: Easing.linear }), -1, false);
-  }, [t, spin]);
+  }, [t, spin, reduceMotion]);
   const style = useAnimatedStyle(() => ({
     opacity: 0.45 + t.value * 0.55,
     transform: [{ scale: 0.88 + t.value * 0.24 }, { rotate: `${spin.value * 360}deg` }],

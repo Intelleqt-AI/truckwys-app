@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, ScrollView, RefreshControl, Pressable, Alert } from 'react-native';
+import { View, ScrollView, RefreshControl, TouchableOpacity, Alert } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,13 +10,15 @@ import {
   SearchField,
   FilterChips,
   StatCard,
+  KpiRow,
   StatusPill,
   Group,
   DetailRow,
-  ListRow,
   Card,
-  Icon,
   IconButton,
+  OverflowMenu,
+  type OverflowAction,
+  Button,
   Txt,
   Mono,
   SectionLabel,
@@ -37,7 +39,7 @@ import type { ExpenseLite, InvoiceLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
 import { invoiceBalance, isInvoiceOverdue } from '@/lib/invoiceStatus';
-import { localDateISO } from '@/lib/dates';
+import { localDateISO, saDaysBetween } from '@/lib/dates';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -115,12 +117,29 @@ function invoiceMatches(inv: InvoiceLite, filter: InvoiceFilter): boolean {
   return inv.status === filter;
 }
 
+// Whole rands in lists and tiles; cents live on the invoice itself.
+const wholeRands = (n: number) => formatCurrency(n, { maximumFractionDigits: 0 });
+
+// Aging line for an invoice that is still owed: "12 days late" (danger, by the
+// shared overdue rule), "due today", "due in 3 days". Drafts, paid and cancelled
+// invoices have nothing to chase, so they get none.
+function dueAging(inv: InvoiceLite): { text: string; late: boolean } | null {
+  if (!OWED_STATUSES.has(inv.status) || !inv.dueDate || !(invoiceBalance(inv.raw) > 0)) return null;
+  const days = saDaysBetween(inv.dueDate.slice(0, 10), new Date());
+  if (days == null) return null;
+  if (isInvoiceOverdue(inv.raw) && days > 0) return { text: `${days} ${days === 1 ? 'day' : 'days'} late`, late: true };
+  if (days === 0) return { text: 'due today', late: false };
+  if (days < 0) return { text: `due in ${-days} ${-days === 1 ? 'day' : 'days'}`, late: false };
+  return null;
+}
+
 function InvoicesTab() {
+  // useInvoices follows every page (fetchAllRows), so the tiles and chip counts
+  // below are totals over the whole ledger, not the size of a first page.
   const { data, isLoading, isError, refetch } = useInvoices();
   const { refreshing, onRefresh } = useManualRefresh(refetch);
-  const { openInvoice } = useAppNavigation();
+  const { openInvoice, goTab } = useAppNavigation();
   const [filter, setFilter] = useState<InvoiceFilter>('ALL');
-  const { colors } = useTheme();
 
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load invoices." />;
@@ -141,7 +160,7 @@ function InvoicesTab() {
   // disagrees with the rows it shows or with the tiles above.
   const options = FILTERS.map((f) => ({
     ...f,
-    label: `${f.label} ${data.filter((i) => invoiceMatches(i, f.value)).length}`,
+    count: data.filter((i) => invoiceMatches(i, f.value)).length,
   }));
   const rows = data.filter((i) => invoiceMatches(i, filter));
 
@@ -155,39 +174,77 @@ function InvoicesTab() {
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
-          <View className="mb-3 flex-row gap-3">
-            <StatCard
-              label="Outstanding"
-              value={formatCurrencyCompact(outstanding)}
-              sub={`${owed.length} ${owed.length === 1 ? 'invoice' : 'invoices'} unpaid`}
-            />
-            <StatCard
-              label="Overdue"
-              value={formatCurrencyCompact(overdueAmount)}
-              sub={`${overdueList.length} ${overdueList.length === 1 ? 'invoice' : 'invoices'} late`}
-            />
+          <View className="mb-3">
+            <KpiRow>
+              <StatCard
+                label="Outstanding"
+                value={wholeRands(outstanding)}
+                note={`${owed.length} ${owed.length === 1 ? 'invoice' : 'invoices'} unpaid`}
+                emphasis
+              />
+              <StatCard
+                label="Overdue"
+                value={wholeRands(overdueAmount)}
+                note={
+                  overdueList.length > 0
+                    ? `${overdueList.length} ${overdueList.length === 1 ? 'invoice' : 'invoices'} late`
+                    : 'Nothing late'
+                }
+                tone={overdueList.length > 0 ? 'danger' : undefined}
+                onPress={() => setFilter('OVERDUE')}
+              />
+            </KpiRow>
           </View>
           <FilterChips options={options} value={filter} onChange={(v) => setFilter(v as InvoiceFilter)} />
         </View>
       }
       ListEmptyComponent={
-        <EmptyState
-          icon="receipt"
-          title="No invoices"
-          body={filter === 'ALL' ? 'Invoices you raise appear here.' : 'No invoices match this filter.'}
-        />
+        filter === 'ALL' ? (
+          <EmptyState
+            icon="receipt"
+            title="No invoices yet."
+            body="Invoices are generated from completed bookings."
+            action={<Button label="View bookings" variant="secondary" onPress={() => goTab('Bookings', { tab: 'history' })} />}
+          />
+        ) : (
+          <EmptyState
+            icon="receipt"
+            title="No invoices here."
+            body="No invoices match this filter."
+            action={<Button label="Show all" variant="secondary" onPress={() => setFilter('ALL')} />}
+          />
+        )
       }
-      renderItem={({ item }) => (
-        <View className="mb-2.5 overflow-hidden rounded-card border border-line bg-surface">
-          <ListRow
-            leading={<Icon name="receipt" size={22} color={colors.faint} />}
-            title={item.number}
-            subtitle={item.customer}
-            trailing={
+      renderItem={({ item }) => {
+        const aging = dueAging(item);
+        return (
+          <Card className="mb-2.5">
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => openInvoice(item.id, item.raw)}
+              accessibilityRole="button"
+              className="min-h-[56px] flex-row items-center gap-3 px-4 py-3"
+            >
+              <View className="flex-1">
+                <Txt className="text-body text-fg" numberOfLines={1}>
+                  {item.customer}
+                </Txt>
+                <View className="mt-0.5 flex-row items-center gap-1.5">
+                  <Mono className="shrink text-caption text-muted" numberOfLines={1}>
+                    {item.number}
+                  </Mono>
+                  {aging && (
+                    <Mono
+                      className={`text-caption ${aging.late ? 'font-medium text-danger' : 'text-faint'}`}
+                      numberOfLines={1}
+                    >
+                      {`· ${aging.text}`}
+                    </Mono>
+                  )}
+                </View>
+              </View>
               <View className="items-end gap-1">
-                <Mono className="text-callout font-semibold text-fg">
-                  {formatCurrency(item.total, { maximumFractionDigits: 0 })}
-                </Mono>
+                <Mono className="text-callout font-semibold text-fg">{wholeRands(item.total)}</Mono>
                 <StatusPill
                   status={
                     isInvoiceOverdue(item.raw) && (item.status === 'SENT' || item.status === 'VIEWED')
@@ -196,12 +253,10 @@ function InvoicesTab() {
                   }
                 />
               </View>
-            }
-            onPress={() => openInvoice(item.id, item.raw)}
-            last
-          />
-        </View>
-      )}
+            </TouchableOpacity>
+          </Card>
+        );
+      }}
     />
   );
 }
@@ -230,27 +285,27 @@ function ExpensesTab() {
     }
   };
 
-  // Contextual action sheet — Edit always; Approve/Reject only while pending; Delete.
-  const openActions = (e: ExpenseLite) => {
-    const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [
-      { text: 'Edit', onPress: () => nav.navigate('AddExpense', { id: e.id, preview: e.raw }) },
-    ];
-    if (e.status === 'PENDING') {
-      buttons.push({ text: 'Approve', onPress: () => act(() => approveExpense(e.id), 'Could not approve') });
-      buttons.push({ text: 'Reject', onPress: () => act(() => rejectExpense(e.id), 'Could not reject') });
-    }
-    buttons.push({
-      text: 'Delete',
-      style: 'destructive',
+  // Per-row action sheet: Edit always; Approve/Reject only while pending; Delete
+  // last, after its confirmation.
+  const actionsFor = (e: ExpenseLite): OverflowAction[] => [
+    { label: 'Edit', icon: 'edit', onPress: () => nav.navigate('AddExpense', { id: e.id, preview: e.raw }) },
+    ...(e.status === 'PENDING'
+      ? [
+          { label: 'Approve', icon: 'check' as const, onPress: () => act(() => approveExpense(e.id), 'Could not approve') },
+          { label: 'Reject', icon: 'x' as const, onPress: () => act(() => rejectExpense(e.id), 'Could not reject') },
+        ]
+      : []),
+    {
+      label: 'Delete',
+      icon: 'trash',
+      destructive: true,
       onPress: () =>
         Alert.alert('Delete expense', 'Permanently delete this expense?', [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Delete', style: 'destructive', onPress: () => act(() => deleteExpense(e.id), 'Could not delete') },
         ]),
-    });
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert(e.description || expenseCategoryLabel(e.category), formatCurrency(e.amount), buttons);
-  };
+    },
+  ];
 
   if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
   if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load expenses." />;
@@ -287,22 +342,19 @@ function ExpensesTab() {
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
-          <View className="mb-3 flex-row flex-wrap gap-3">
-            <View className="flex-row" style={{ width: '47.5%' }}>
+          <View className="mb-3">
+            <KpiRow>
               <StatCard label="Total (MTD)" value={formatCurrencyCompact(totalMtd)} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
-              <StatCard label="Pending approval" value={`${pending.length} · ${formatCurrencyCompact(pendingAmount)}`} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
-              <StatCard label="Fuel (MTD)" value={formatCurrencyCompact(fuelMtd)} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard
-                label="Top category"
-                value={topEntry ? `${expenseCategoryLabel(topEntry[0])}` : 'N/A'}
+                label="Pending approval"
+                value={formatCurrencyCompact(pendingAmount)}
+                note={`${pending.length} ${pending.length === 1 ? 'expense' : 'expenses'}`}
+                tone={pending.length > 0 ? 'warning' : undefined}
+                onPress={() => setStatusF('PENDING')}
               />
-            </View>
+              <StatCard label="Fuel (MTD)" value={formatCurrencyCompact(fuelMtd)} />
+              {topEntry && <StatCard label="Top category" value={expenseCategoryLabel(topEntry[0])} />}
+            </KpiRow>
           </View>
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search expenses…" />
@@ -311,10 +363,21 @@ function ExpensesTab() {
         </View>
       }
       ItemSeparatorComponent={() => <View className="h-2.5" />}
-      ListEmptyComponent={<EmptyState icon="dollar" title="No expenses" body="No expenses match this filter." />}
+      ListEmptyComponent={
+        <EmptyState
+          icon="banknote"
+          title="No expenses"
+          body={statusF === 'ALL' && !q ? 'Expenses you record appear here.' : 'No expenses match this filter.'}
+        />
+      }
       renderItem={({ item }) => (
-        <Card>
-          <Pressable className="p-3.5 active:bg-surface-hover" onPress={() => openActions(item)}>
+        <Card className="flex-row items-start">
+          <TouchableOpacity
+            activeOpacity={0.7}
+            className="flex-1 p-3.5"
+            accessibilityRole="button"
+            onPress={() => nav.navigate('AddExpense', { id: item.id, preview: item.raw })}
+          >
             <View className="mb-1.5 flex-row items-center justify-between gap-2">
               <Mono className="text-caption font-medium text-muted">
                 {expenseCategoryLabel(item.category)}
@@ -330,7 +393,14 @@ function ExpensesTab() {
               </Txt>
               <Mono className="text-body font-semibold text-fg">{formatCurrency(item.amount)}</Mono>
             </View>
-          </Pressable>
+          </TouchableOpacity>
+          <View className="py-3 pr-3">
+            <OverflowMenu
+              actions={actionsFor(item)}
+              title={item.description || expenseCategoryLabel(item.category)}
+              accessibilityLabel={`Actions for ${item.description || expenseCategoryLabel(item.category)}`}
+            />
+          </View>
         </Card>
       )}
     />
@@ -360,37 +430,31 @@ function ReportsTab() {
         />
       }
     >
-      <View className="mb-5 flex-row flex-wrap gap-3">
-        <View className="flex-row" style={{ width: '47.5%' }}>
+      <View className="mb-5">
+        <KpiRow>
           <StatCard label="Total revenue" value={formatCurrencyCompact(f.totalRevenue)} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Net margin" value={formatPercent(f.netMarginPct)} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Outstanding" value={formatCurrencyCompact(f.outstanding)} />
-        </View>
-        <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="DSO" value={`${formatNumber(f.dso, { maximumFractionDigits: 1 })}d`} />
-        </View>
+        </KpiRow>
       </View>
 
       {monthlyTrend.length > 0 && (
         <View className="mb-5">
           <SectionLabel>Revenue vs expense</SectionLabel>
-          <View className="rounded-card border border-line bg-surface p-4">
+          <Card className="p-4">
             {monthlyTrend.map((m) => (
               <View key={m.label} className="mb-3">
                 <View className="mb-1 flex-row justify-between">
-                  <Mono className="text-micro text-faint">{m.label}</Mono>
-                  <Mono className="text-micro text-muted">{formatCurrencyCompact(m.revenue)}</Mono>
+                  <Mono className="text-caption text-faint">{m.label}</Mono>
+                  <Mono className="text-caption text-muted">{formatCurrencyCompact(m.revenue)}</Mono>
                 </View>
                 <Bar value={m.revenue} max={maxTrend} tone="accent" />
                 <View className="h-1" />
                 <Bar value={m.expense} max={maxTrend} tone="muted" />
               </View>
             ))}
-          </View>
+          </Card>
         </View>
       )}
 

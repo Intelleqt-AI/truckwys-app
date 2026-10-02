@@ -1,4 +1,4 @@
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { Txt, Label, Icon } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAuthStore } from '@/stores/authStore';
@@ -22,15 +22,15 @@ interface Starter {
 const FAST_PAY_STARTER: Starter = {
   title: 'Fast-pay capacity',
   prompt: 'How much can I advance?',
-  hint: 'Eligible invoices & net payout',
+  hint: 'Eligible invoices and net payout',
 };
 
 const STARTERS: Starter[] = [
   { title: "What's overdue?", prompt: "What's overdue?", hint: 'Chase the right accounts first' },
   // Fast Pay is not live yet, so it is not suggested (lib/features.ts).
   ...(CAPITAL_LAUNCHED ? [FAST_PAY_STARTER] : []),
-  { title: 'Quotes pipeline', prompt: "How's my pipeline?", hint: 'Win/loss & open quotes' },
-  { title: 'Fleet status', prompt: 'Fleet status', hint: 'Active, idle & maintenance' },
+  { title: 'Quotes pipeline', prompt: "How's my pipeline?", hint: 'Won, lost and open quotes' },
+  { title: 'Fleet status', prompt: 'Fleet status', hint: 'Active, idle and in maintenance' },
 ];
 
 // Roles that can write get two more: the agent drafts the record and the user
@@ -78,20 +78,21 @@ export function Starters({ onPick }: { onPick: (prompt: string) => void }) {
       <Label className="mb-2.5 text-faint">Try asking</Label>
       <View className="gap-2.5">
         {starters.map((s) => (
-          <Pressable
+          <TouchableOpacity
             key={s.title}
             onPress={() => onPick(s.prompt)}
+            activeOpacity={0.7}
             accessibilityRole="button"
             accessibilityLabel={s.title}
             accessibilityHint={`Puts "${s.prompt}" in the ask box`}
-            className="rounded-control border border-line bg-surface px-3.5 py-3 active:bg-surface-hover active:opacity-80"
+            className="rounded-control border border-line bg-surface px-3.5 py-3"
           >
             <View className="flex-row items-center justify-between gap-2">
               <Txt className="flex-1 text-callout font-medium text-fg">{s.title}</Txt>
               <Icon name="arrowRight" size={15} color={colors.faint} />
             </View>
             <Txt className="mt-0.5 text-caption text-faint">{s.hint}</Txt>
-          </Pressable>
+          </TouchableOpacity>
         ))}
       </View>
     </View>

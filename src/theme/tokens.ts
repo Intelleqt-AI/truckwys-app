@@ -38,6 +38,9 @@ export const palette = {
     fg: '#EDEFF2',
     muted: '#B4BAC3',
     faint: '#9BA1AB',
+    // Hint colour for empty inputs only — deliberately lighter than `faint` so a
+    // placeholder never reads as typed content. Never use for real text.
+    placeholder: '#5E646E',
     disabled: '#555B64',
     // Overlays + press feedback
     backdrop: 'rgba(0,0,0,0.64)',
@@ -96,6 +99,7 @@ export const palette = {
     fg: '#0E1116',
     muted: '#434A55',
     faint: '#636A75',
+    placeholder: '#A0A6AF',
     disabled: '#A3A8B1',
     backdrop: 'rgba(14,17,22,0.40)',
     tintPressed: 'rgba(14,17,22,0.07)',

@@ -348,6 +348,9 @@ const STATUS_MAP: Record<string, { tone: BadgeTone; label: string }> = {
   UNPAID: { tone: 'warning', label: 'Unpaid' },
   PARTIAL: { tone: 'warning', label: 'Partial' },
   VOID: { tone: 'neutral', label: 'Void' },
+  // Fully credited by a credit note, and a credit note that is in force.
+  CREDITED: { tone: 'neutral', label: 'Credited' },
+  ISSUED: { tone: 'info', label: 'Issued' },
   REFUNDED: { tone: 'neutral', label: 'Refunded' },
   // The status the backend actually stores for a part-paid invoice.
   PARTIALLY_PAID: { tone: 'warning', label: 'Partially paid' },

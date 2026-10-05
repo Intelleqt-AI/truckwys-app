@@ -5,6 +5,8 @@ import { ErrorState } from '@/components/feedback';
 import { useAdvance } from './api';
 import { num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
+import { CAPITAL_LAUNCHED } from '@/lib/features';
+import { FastPayAdvanceDetail } from '@/features/capital/FastPayAdvanceDetail';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AdvanceDetail'>;
@@ -17,7 +19,16 @@ function advanceTier(a: Record<string, unknown>): string {
   return str(pick(a, ['risk_tier'])) || (detail ? str(pick(detail, ['tier', 'risk_tier'])) : '') || '—';
 }
 
-export function AdvanceDetailScreen({ route, navigation }: Props) {
+/**
+ * One Fast Pay advance. Once Fast Pay is launched (lib/features.ts) this is the
+ * request exactly as the server reports it (features/capital); before that it is
+ * the older advance record below.
+ */
+export function AdvanceDetailScreen(props: Props) {
+  return CAPITAL_LAUNCHED ? <FastPayAdvanceDetail {...props} /> : <LegacyAdvanceDetail {...props} />;
+}
+
+function LegacyAdvanceDetail({ route, navigation }: Props) {
   const { id } = route.params;
   const { data, isError, refetch } = useAdvance(id);
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this advance." />;

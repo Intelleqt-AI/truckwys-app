@@ -210,7 +210,7 @@ function LocationFieldImpl({
         <BottomSheetTextInput
           className="flex-1 text-fg"
           placeholder={placeholder}
-          placeholderTextColor={colors.faint}
+          placeholderTextColor={colors.placeholder}
           value={text}
           onChangeText={(t) => {
             // A real keystroke means the settled value no longer applies, so
@@ -261,7 +261,7 @@ function LocationFieldImpl({
         <Card className="mt-2 gap-2 p-3">
           <TextField
             label="Latitude, longitude"
-            placeholder="-33.9249, 18.4241"
+            placeholder="e.g. -33.9249, 18.4241"
             value={coordText}
             onChangeText={(t) => {
               setCoordText(t);

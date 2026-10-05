@@ -41,7 +41,14 @@ export interface InfiniteListOptions {
   keepPrevious?: boolean;
 }
 
-export function useInfiniteList<T>(
+/**
+ * Everything on page 1's envelope except `results`: the server-side lists send
+ * their tiles and chip counts alongside the rows (`summary`, `flags`,
+ * `status_counts`, `counts`, `issued_total`).
+ */
+export type ListExtras<X> = { count: number } & X;
+
+export function useInfiniteList<T, X extends object = Record<string, unknown>>(
   key: string | readonly unknown[],
   path: string,
   normalize: (raw: Record<string, unknown>) => T,
@@ -101,8 +108,17 @@ export function useInfiniteList<T>(
     return rows.map(normalize);
   }, [query.data, normalize, path]);
 
+  // Page 1's envelope is the freshest word on the totals (later pages repeat
+  // them, but were fetched earlier on a long scroll).
+  const first = query.data?.pages[0];
+  const extras =
+    first && !Array.isArray(first) ? (first as unknown as ListExtras<X>) : undefined;
+
   return {
     combinedData,
+    /** Total rows the server matched (not just those loaded so far). */
+    count: extras?.count,
+    extras,
     loadMore: query.fetchNextPage,
     refresh: query.refetch,
     // No paging off a placeholder: its single page has no real `next`, and the
@@ -111,6 +127,12 @@ export function useInfiniteList<T>(
     isPlaceholderData: query.isPlaceholderData,
     isLoading: query.isLoading,
     isFetching: query.isFetchingNextPage,
+    /** Any request in flight: the first page, a refresh, or the next page. */
+    isFetchingAny: query.isFetching,
     isError: query.isError,
+    /** A refresh failed while rows from an earlier load are still shown. */
+    isRefetchError: query.isRefetchError,
+    /** When the rows shown were last loaded (epoch ms), for stale-data notices. */
+    dataUpdatedAt: query.dataUpdatedAt,
   };
 }

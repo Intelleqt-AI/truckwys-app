@@ -89,7 +89,7 @@ export function DateField({
           className="flex-row items-center gap-2 rounded-control border bg-input px-3"
         >
           <Icon name="calendar" size={17} color={colors.faint} />
-          <Txt numberOfLines={1} className={`flex-1 text-body ${value ? 'text-fg' : 'text-faint'}`}>
+          <Txt numberOfLines={1} className={`flex-1 text-body ${value ? 'text-fg' : 'text-placeholder'}`}>
             {value ? formatDate(value) : placeholder}
           </Txt>
           {value ? (

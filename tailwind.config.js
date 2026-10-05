@@ -32,6 +32,7 @@ module.exports = {
         fg: 'var(--text-primary)',
         muted: 'var(--text-secondary)',
         faint: 'var(--text-tertiary)',
+        placeholder: 'var(--text-placeholder)',
         disabled: 'var(--text-disabled)',
         'on-accent': 'var(--text-on-accent)',
         // Buttons (ink primary)

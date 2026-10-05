@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { View, TouchableOpacity, Modal, FlatList } from 'react-native';
+import { View, TouchableOpacity, Modal, FlatList, ActivityIndicator } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, FieldLabel } from './Text';
@@ -28,6 +28,10 @@ function SelectFieldImpl({
   error,
   warning,
   required,
+  onSearch,
+  searching,
+  selectedLabel,
+  listNote,
 }: {
   label?: string;
   value?: string;
@@ -40,12 +44,25 @@ function SelectFieldImpl({
   warning?: string;
   /** Renders a danger-coloured * after the label. Presentational only. */
   required?: boolean;
+  /**
+   * Server-side search: typing calls this instead of filtering `options` on the
+   * device, and the caller swaps `options` for what the server found. Called
+   * with '' when the list closes.
+   */
+  onSearch?: (text: string) => void;
+  /** With `onSearch`: the new results are still loading. */
+  searching?: boolean;
+  /** Label for `value` when it isn't among `options` (e.g. outside the current results). */
+  selectedLabel?: string;
+  /** A line under the list (e.g. "12 more. Keep typing to narrow the list."). */
+  listNote?: string;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const selected = options.find((o) => o.value === value);
+  const selectedText = selected?.label ?? (value ? selectedLabel : undefined);
   // De-duplicate by value so lists (e.g. vehicle types returned more than once)
   // never render duplicate keys.
   const unique = useMemo(() => {
@@ -53,8 +70,8 @@ function SelectFieldImpl({
     return options.filter((o) => (seen.has(o.value) ? false : (seen.add(o.value), true)));
   }, [options]);
   const filtered = useMemo(
-    () => (q ? unique.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : unique),
-    [unique, q],
+    () => (q && !onSearch ? unique.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : unique),
+    [unique, q, onSearch],
   );
 
   const borderStyle = useAnimatedStyle(() => ({
@@ -71,7 +88,7 @@ function SelectFieldImpl({
         onPress={() => setOpen(true)}
         activeOpacity={0.7}
         accessibilityRole="button"
-        accessibilityLabel={`${label ?? 'Select'}, ${selected?.label ?? 'not set'}`}
+        accessibilityLabel={`${label ?? 'Select'}, ${selectedText ?? 'not set'}`}
       >
         <Animated.View
           style={[{ minHeight: TAP_MIN }, borderStyle]}
@@ -79,10 +96,10 @@ function SelectFieldImpl({
         >
           {icon && <Icon name={icon} size={17} color={colors.faint} />}
           <Txt
-            className={`flex-1 text-body ${selected ? 'text-fg' : 'text-faint'}`}
+            className={`flex-1 text-body ${selectedText ? 'text-fg' : 'text-placeholder'}`}
             numberOfLines={1}
           >
-            {selected?.label ?? placeholder}
+            {selectedText ?? placeholder}
           </Txt>
           <Icon name="chevronDown" size={16} color={colors.faint} />
         </Animated.View>
@@ -93,7 +110,13 @@ function SelectFieldImpl({
         visible={open}
         animationType="slide"
         presentationStyle="pageSheet"
-        onRequestClose={() => setOpen(false)}
+        onRequestClose={() => {
+          setOpen(false);
+          if (q) {
+            setQ('');
+            onSearch?.('');
+          }
+        }}
       >
         <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top + 8 }}>
           <View className="flex-row items-center justify-between px-screen pb-3">
@@ -103,7 +126,13 @@ function SelectFieldImpl({
               activeOpacity={0.6}
               accessibilityRole="button"
               accessibilityLabel="Close"
-              onPress={() => setOpen(false)}
+              onPress={() => {
+                setOpen(false);
+                if (q) {
+                  setQ('');
+                  onSearch?.('');
+                }
+              }}
             >
               <Mono className="text-callout font-medium text-link">Close</Mono>
             </TouchableOpacity>
@@ -111,7 +140,10 @@ function SelectFieldImpl({
           <View className="px-screen pb-2">
             <SearchField
               value={q}
-              onChangeText={setQ}
+              onChangeText={(t) => {
+                setQ(t);
+                onSearch?.(t);
+              }}
               placeholder={`Search ${label ?? ''}`.trim()}
             />
           </View>
@@ -120,6 +152,15 @@ function SelectFieldImpl({
             keyExtractor={(o, i) => `${o.value}-${i}`}
             contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 24 }}
             keyboardShouldPersistTaps="handled"
+            ListFooterComponent={
+              searching ? (
+                <View className="py-3">
+                  <ActivityIndicator color={colors.faint} />
+                </View>
+              ) : listNote ? (
+                <Txt className="py-3 text-caption text-muted">{listNote}</Txt>
+              ) : null
+            }
             renderItem={({ item }) => {
               const active = item.value === value;
               return (
@@ -127,6 +168,7 @@ function SelectFieldImpl({
                   onPress={() => {
                     onSelect(item.value);
                     setQ('');
+                    onSearch?.('');
                     setOpen(false);
                   }}
                   activeOpacity={0.6}

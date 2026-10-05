@@ -5,33 +5,16 @@ import { formatDate } from '@/lib/formatters';
 import { staleWork, staleLabel } from '@/lib/staleWork';
 
 // "Doing now" for a truck: what the open order naming it says it is doing. Port
-// of the web Vehicles page (pages/Vehicles.tsx doingNow). The status on a truck
-// is set by hand and is often wrong, so a status the orders contradict is said
-// plainly, never shown as normal.
-
-/** Orders that put a truck and a driver on the road. */
-const ACTIVE_LOAD = ['ASSIGNED', 'LOADING', 'IN_TRANSIT'];
+// of the web Vehicles page (pages/Vehicles.tsx doingNow). The order itself comes
+// from the server on each row (`active_load`, backend core.services.vehicle_list).
+// The status on a truck is set by hand and is often wrong, so a status the
+// orders contradict is said plainly, never shown as normal.
 
 export interface DoingNow {
   text: string;
   sub?: string;
   /** warn: the status and the orders disagree, or the order was left open. */
   tone: 'normal' | 'warn';
-}
-
-/**
- * The open order naming each truck. A current order wins over a stale one, so a
- * truck is only shown as stale when every order it is on has been left open.
- */
-export function activeLoadByVehicle(loads: readonly Load[]): Map<number, Load> {
-  const byVehicle = new Map<number, Load>();
-  for (const l of loads) {
-    if (l.vehicle == null || !ACTIVE_LOAD.includes(String(l.status).toUpperCase())) continue;
-    const k = Number(l.vehicle);
-    const had = byVehicle.get(k);
-    if (!had || (staleWork(had) && !staleWork(l))) byVehicle.set(k, l);
-  }
-  return byVehicle;
 }
 
 const isFree = (s: string) => s === 'AVAILABLE' || s === 'ACTIVE';

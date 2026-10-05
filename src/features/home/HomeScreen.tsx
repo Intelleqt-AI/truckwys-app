@@ -186,18 +186,22 @@ export function HomeScreen() {
   const owedNoteTone: 'success' | 'danger' | undefined =
     m && m.owed > 0.005 ? (m.pastDue > 0 ? 'danger' : 'success') : undefined;
   const partialNote = receivedPartial ? ` Figures use the ${money.partial.join(', ')} that loaded.` : '';
-  const afterPending = m ? m.revenueExcl - m.costs - m.pending : 0;
+  const basisWord = m?.basis === 'accrual' ? 'accrual (invoiced)' : 'cash (received)';
   const marginChange =
     m && m.margin != null && m.marginPrior != null ? Math.round((m.margin - m.marginPrior) * 10) / 10 : null;
+  // Costs already include expenses awaiting approval, so say how much of them
+  // that is rather than offering an "if approved" figure.
   const marginNote =
     m == null
       ? undefined
       : m.margin == null
-        ? 'No revenue received yet'
+        ? m.basis === 'accrual'
+          ? 'No revenue invoiced yet'
+          : 'No revenue received yet'
         : m.pending > 0.005
-          ? `${wholeRand(afterPending)} if the ${wholeRand(m.pending)} pending is approved`
+          ? `Includes ${wholeRand(m.pending)} awaiting approval`
           : marginChange == null
-            ? 'Excl. VAT, cash basis'
+            ? `Excl. VAT, ${basisWord}`
             : undefined;
 
   // ── Needs you ─────────────────────────────────────────────────────────────
@@ -300,15 +304,14 @@ export function HomeScreen() {
             screen, and "Refresh now" refetches everything Home shows. An
             automatic refresh in progress isn't news; only a manual one is shown. */}
         {(noticeRefreshing || !fresh.fetching) && (
-          <View className="mb-5">
-            <StaleDataNotice
-              updatedAt={fresh.updatedAt}
-              refreshFailed={fresh.refreshFailed}
-              refreshing={noticeRefreshing}
-              onRetry={refreshFromNotice}
-              staleAfterMs={STALE_MS + 60_000}
-            />
-          </View>
+          <StaleDataNotice
+            className="mb-5"
+            updatedAt={fresh.updatedAt}
+            refreshFailed={fresh.refreshFailed}
+            refreshing={noticeRefreshing}
+            onRetry={refreshFromNotice}
+            staleAfterMs={STALE_MS + 60_000}
+          />
         )}
 
         {/* Command bar: active loads and fleet ready */}
@@ -372,7 +375,7 @@ export function HomeScreen() {
                   label="Net margin, 12 months"
                   aside={
                     <InfoTip
-                      text={`Margin is revenue received less approved expenses, excl. VAT, cash basis. Compared with the 12 months before.${partialNote}`}
+                      text={`Margin is revenue excl. VAT (${basisWord}) less every expense that is not rejected, approved or awaiting approval, excl. VAT, as a share of that revenue. The same figure as the profit and loss report on that basis. Compared with the 12 months before.${partialNote}`}
                       label="About net margin"
                     />
                   }
@@ -461,7 +464,7 @@ export function HomeScreen() {
                       trailing={
                         <View className="items-end gap-1">
                           <Mono className="text-callout font-semibold text-fg">
-                            {formatCurrency(q.amount, { maximumFractionDigits: 0 })}
+                            {formatCurrency(q.amountInclVat, { maximumFractionDigits: 0 })}
                           </Mono>
                           <View>
                             {/* The stage, not the raw status: a lapsed Draft or Sent quote

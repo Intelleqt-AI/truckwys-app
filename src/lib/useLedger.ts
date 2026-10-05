@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchAllPages, type AllPages } from '@/lib/api/fetchAllPages';
-import type { Customer, Expense, Invoice, Load, Payment, Quote, Vehicle } from '@/lib/ledger';
+import type { CreditNoteRec, Customer, Expense, Invoice, Load, Payment, Quote, Vehicle } from '@/lib/ledger';
 
 // Loads the ledgers in full (every page, up to 1 000 rows each), for screens
 // that add things up on the device: Home's money tiles, the Insights findings.
@@ -16,7 +16,8 @@ export type SourceName =
   | 'loads'
   | 'quotes'
   | 'customers'
-  | 'vehicles';
+  | 'vehicles'
+  | 'creditNotes';
 
 const PATHS: Record<SourceName, string> = {
   invoices: 'invoices/',
@@ -26,6 +27,7 @@ const PATHS: Record<SourceName, string> = {
   quotes: 'quotes/',
   customers: 'customers/',
   vehicles: 'vehicles/',
+  creditNotes: 'credit-notes/',
 };
 
 const NOUN: Record<SourceName, string> = {
@@ -36,6 +38,7 @@ const NOUN: Record<SourceName, string> = {
   quotes: 'quotes',
   customers: 'customers',
   vehicles: 'vehicles',
+  creditNotes: 'credit notes',
 };
 
 const STALE = 5 * 60_000;
@@ -43,7 +46,16 @@ const STALE = 5 * 60_000;
 function useSource<T>(name: SourceName, enabled: boolean) {
   return useQuery<AllPages<T>>({
     queryKey: [`ledger-${name}`],
-    queryFn: () => fetchAllPages<T>(PATHS[name]),
+    // Credit notes only refine accrual revenue: if they can't be loaded the
+    // figures still show, and say so (see `partial` below) rather than the whole
+    // screen failing.
+    queryFn:
+      name === 'creditNotes'
+        ? () =>
+            fetchAllPages<T>(PATHS[name]).catch(
+              (): AllPages<T> => ({ rows: [], count: 0, complete: false }),
+            )
+        : () => fetchAllPages<T>(PATHS[name]),
     staleTime: STALE,
     retry: 2,
     retryDelay: (attempt) => 4000 * (attempt + 1),
@@ -59,6 +71,8 @@ export interface Ledger {
   quotes: Quote[];
   customers: Customer[];
   vehicles: Vehicle[];
+  /** Every credit note (issued and void); revenue nets the ISSUED ones. */
+  creditNotes: CreditNoteRec[];
   /** "first 1000 of 1250 invoices" style notes when a list could not be loaded in full. */
   partial: string[];
   /** When the oldest of the lists in use was last refreshed (epoch ms). */
@@ -82,6 +96,7 @@ export function useLedger(need: SourceName[]) {
     quotes: useSource<Quote>('quotes', need.includes('quotes')),
     customers: useSource<Customer>('customers', need.includes('customers')),
     vehicles: useSource<Vehicle>('vehicles', need.includes('vehicles')),
+    creditNotes: useSource<CreditNoteRec>('creditNotes', need.includes('creditNotes')),
   };
   const used = need.map((n) => q[n]);
   const error = used.some((x) => loadFailed(x));
@@ -99,7 +114,11 @@ export function useLedger(need: SourceName[]) {
   }
   const partial = need
     .filter((n) => q[n].data && !q[n].data!.complete)
-    .map((n) => `first ${q[n].data!.rows.length} of ${q[n].data!.count} ${NOUN[n]}`);
+    .map((n) =>
+      n === 'creditNotes' && q[n].data!.count === 0
+        ? 'invoices without credit notes (credit notes couldn’t load)'
+        : `first ${q[n].data!.rows.length} of ${q[n].data!.count} ${NOUN[n]}`,
+    );
   const rows = <T,>(n: SourceName) => (q[n].data?.rows ?? []) as unknown as T[];
   const data: Ledger = {
     invoices: rows<Invoice>('invoices'),
@@ -109,6 +128,7 @@ export function useLedger(need: SourceName[]) {
     quotes: rows<Quote>('quotes'),
     customers: rows<Customer>('customers'),
     vehicles: rows<Vehicle>('vehicles'),
+    creditNotes: rows<CreditNoteRec>('creditNotes'),
     partial,
     loadedAt: Math.min(...used.map((x) => x.dataUpdatedAt || Date.now())),
   };

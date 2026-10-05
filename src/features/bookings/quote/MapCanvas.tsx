@@ -376,7 +376,9 @@ function InteractiveMap({
         )}
         {(stops ?? [])
           .filter((s) => s.id !== hiddenStopId)
-          .map((s) => <StopMarker key={s.id} Marker={Marker} point={s} index={s.index} />)}
+          .map((s) => (
+            <StopMarker key={s.id} Marker={Marker} point={s} index={s.index} />
+          ))}
       </MapView>
     </View>
   );
@@ -559,11 +561,10 @@ function InteractiveMapLibre({
       </MapLibreView>
 
       {/* MapTiler's ToS and OSM's ODbL both require attribution. */}
-      <View
-        className="absolute self-end px-1.5 py-0.5"
-        style={{ bottom: bottomInset, backgroundColor: withAlpha(colors.bgDeep, 0.85) }}
-      >
-        <Mono className="text-caption text-faint">© MapTiler © OpenStreetMap</Mono>
+      <View pointerEvents="none" className="absolute right-1.5" style={{ bottom: bottomInset + 2 }}>
+        <Mono className="text-nano text-faint" maxFontSizeMultiplier={1}>
+          © MapTiler © OpenStreetMap
+        </Mono>
       </View>
     </View>
   );

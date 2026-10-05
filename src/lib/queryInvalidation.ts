@@ -22,6 +22,8 @@ export type DomainEvent =
   | 'load'
   | 'invoice'
   | 'payment'
+  | 'credit-note'
+  | 'supplier'
   | 'expense'
   | 'vehicle'
   | 'driver'
@@ -48,13 +50,18 @@ const MAP: Record<DomainEvent, string[]> = {
   // A load's status drives revenue recognition, fleet utilisation and the
   // Home heatmap; delivering one can also auto-raise an invoice. A quote reports
   // the load it was booked as (booked_load), so quotes move with loads too.
-  load: ['loads', 'load', 'ledger-loads', 'ledger-quotes', 'quotes', 'quote', 'customer-quotes', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
-  invoice: ['invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'customer', ...DASHBOARD, ...FINANCE, ...RISK],
-  payment: ['invoices', 'invoice', 'ledger-payments', 'ledger-invoices', 'invoice-payments', ...DASHBOARD, ...FINANCE, ...RISK],
-  expense: ['expenses', 'ledger-expenses', 'vehicle-loads', ...DASHBOARD, ...FINANCE],
+  load: ['loads', 'load', 'ledger-loads', 'ledger-quotes', 'quotes', 'quote', 'customer-quotes', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'driver-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
+  // Credit notes move an invoice's balance and status, so they ride along with
+  // invoice and payment changes (the backend pushes no credit-note topic of its
+  // own; issuing one saves the invoice, which does push).
+  invoice: ['invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'credit-notes', 'credit-note', 'ledger-creditNotes', 'customer', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
+  payment: ['invoices', 'invoice', 'ledger-payments', 'ledger-invoices', 'invoice-payments', 'credit-notes', 'credit-note', 'ledger-creditNotes', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
+  'credit-note': ['credit-notes', 'credit-note', 'ledger-creditNotes', 'invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
+  supplier: ['suppliers', 'supplier', 'expenses', 'expense', 'ledger-expenses'],
+  expense: ['expenses', 'expense', 'ledger-expenses', 'suppliers', 'vehicle-loads', ...DASHBOARD, ...FINANCE],
   vehicle: ['vehicles', 'vehicle', 'ledger-vehicles', 'vehicle-loads', 'vehicle-types', 'drivers', ...ASSIGN, ...DASHBOARD],
   // Drivers are Users too — AddDriverScreen POSTs to users/ as well.
-  driver: ['drivers', 'driver', 'vehicles', 'vehicle', 'users', ...ASSIGN, ...DASHBOARD],
+  driver: ['drivers', 'driver', 'driver-loads', 'vehicles', 'vehicle', 'users', ...ASSIGN, ...DASHBOARD],
   customer: ['customers', 'customer', 'ledger-customers', 'customer-quotes', 'quotes', 'invoices', ...RISK, ...DASHBOARD],
   advance: ['capital', 'capital-eligible', 'advance', 'invoices', 'invoice', 'ledger-invoices', ...DASHBOARD, ...FINANCE],
   notification: ['notifications', 'notifications-unread'],
@@ -62,7 +69,7 @@ const MAP: Record<DomainEvent, string[]> = {
   // The three security preferences, the device list and the activity feed all
   // move together — revoking a session shows up in all three.
   security: ['security-settings', 'sessions', 'login-activity'],
-  company: ['company-profile', 'billing-status'],
+  company: ['company-profile', 'billing-status', 'finance-settings', 'tax-codes'],
   'vehicle-type': ['vehicle-types', ...ASSIGN],
   // The agent acts on real records on the server and doesn't report which, so
   // this one is deliberately broad.

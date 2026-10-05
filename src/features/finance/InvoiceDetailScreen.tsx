@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Share, Modal, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Share, Modal, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import {
   StatusPill,
   Group,
   DetailRow,
+  ListRow,
   Button,
   Txt,
   Mono,
@@ -28,16 +29,43 @@ import {
   markInvoicePaid,
   recordPayment,
   updateInvoice,
+  paymentsManagedBy,
+  type InvoicePayment,
 } from './api';
+import { deleteInvoice, deletePayment, updatePayment, voidInvoice } from '@/lib/finance/api';
 import { RecordPaymentSheet, type PaymentDraft } from './RecordPaymentSheet';
 import { DueDateSheet } from './DueDateSheet';
 import { InvoiceSendPreview, type InvoiceMessageKind } from './InvoiceSendPreview';
+import { ReasonDialog } from './components/ReasonDialog';
+import { TotalsBreakdown } from './components/TotalsBreakdown';
+import {
+  AccountingSyncCard,
+  AccountingSyncNotice,
+  PaymentSourceBadge,
+} from '@/features/accounting/components/DocumentSync';
+import { usePaymentsManaged } from '@/features/accounting/api';
+import { FastPayInvoicePanel } from '@/features/capital/FastPayInvoicePanel';
+import { CAPITAL_LAUNCHED } from '@/lib/features';
+import { isManualPayment } from '@/lib/finance/payments';
+import { sumLines, taxCodeShort, toNumber } from '@/lib/finance/tax';
+import {
+  revenueTypeLabel,
+  type AccountingSync,
+  type CreditNoteSummary,
+  type InvoiceLine,
+} from '@/lib/finance/types';
 import { num, str, pick } from '@/lib/api/list';
 import { invoiceShareUrl } from '@/lib/legal';
 import { openWhatsApp } from '@/lib/whatsapp';
-import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
+import { formatCurrency, formatDate } from '@/lib/formatters';
 import { saDaysBetween } from '@/lib/dates';
-import { canEditDueDate, canSendReminder, isInvoiceOverdue } from '@/lib/invoiceStatus';
+import {
+  canEditDueDate,
+  canSendReminder,
+  invoiceDisplayNumber,
+  isInvoiceLocked,
+  isInvoiceOverdue,
+} from '@/lib/invoiceStatus';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -52,18 +80,25 @@ const CAN_SEND = ['DRAFT', 'SENT', 'VIEWED'];
 const CAN_PAY = ['SENT', 'VIEWED', 'OVERDUE', 'PARTIALLY_PAID'];
 // Editing is only offered pre-send: once an invoice is SENT/VIEWED/PAID/etc.
 // the customer has already seen or paid it, so changing the customer/amount
-// afterward would be misleading.
-const CAN_EDIT = ['DRAFT'];
+// afterward would be misleading. The server enforces the same rule (400
+// "invoice_locked"), and `is_locked` also covers a draft that is already
+// financed (see isInvoiceLocked).
+
+const money = (n: number) => formatCurrency(n);
 
 export function InvoiceDetailScreen({ route, navigation }: Props) {
   const { id, preview } = route.params;
   const { data, isError, isPending, error, refetch } = useInvoice(id, preview);
   const { data: payments } = useInvoicePayments(id);
+  // Whether Xero/QuickBooks owns this invoice's payments (a hook, so it sits
+  // above the early returns below).
+  const managedPayments = usePaymentsManaged(data);
   const qc = useQueryClient();
   const [pdfBusy, setPdfBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [payBusy, setPayBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [editPayment, setEditPayment] = useState<InvoicePayment | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
   // Which message is being previewed, and what happens after it is confirmed.
   // WhatsApp needs the public link, which only exists once the invoice has been
@@ -72,6 +107,10 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const [dueOpen, setDueOpen] = useState(false);
   const [dueBusy, setDueBusy] = useState(false);
   const [dueError, setDueError] = useState<string | null>(null);
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidBusy, setVoidBusy] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteBusy, setNoteBusy] = useState(false);
   const { colors } = useTheme();
 
   // A deleted or moved invoice is a 404, which is not worth retrying.
@@ -96,8 +135,12 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const inv = (data ?? {}) as Record<string, unknown>;
 
   const total = num(pick(inv, ['total', 'total_amount']));
+  // total - paid - credited, worked out by the server.
   const balance = num(pick(inv, ['balance', 'balance_due', 'amount_due']));
-  const paid = num(pick(inv, ['paid', 'amount_paid'])) || total - balance;
+  const credited = num(pick(inv, ['credited_amount']));
+  const paid = pick(inv, ['paid_amount', 'paid', 'amount_paid']) != null
+    ? num(pick(inv, ['paid_amount', 'paid', 'amount_paid']))
+    : total - balance - credited;
   const token = str(pick(inv, ['view_token', 'token']));
   // 'DRAFT' is the model default; the old 'UNPAID' fallback isn't a real status.
   const status = str(pick(inv, ['status']), 'DRAFT').toUpperCase();
@@ -105,37 +148,70 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   // sent, still has a balance, and its due date has passed. The server only
   // flips SENT to OVERDUE on a schedule, so the status string alone lags.
   const overdue = isInvoiceOverdue(inv);
-  const shownStatus = overdue && (status === 'SENT' || status === 'VIEWED') ? 'OVERDUE' : status;
+  // An invoice that has been cancelled is "Void" (loads and quotes keep "Cancelled").
+  const shownStatus =
+    overdue && (status === 'SENT' || status === 'VIEWED') ? 'OVERDUE' : status === 'CANCELLED' ? 'VOID' : status;
   const dueDate = str(pick(inv, ['due_date']));
   const issueDate = str(pick(inv, ['issue_date', 'created_at'])).slice(0, 10);
   const daysPastDue = dueDate ? saDaysBetween(dueDate.slice(0, 10), new Date()) : null;
   const daysLate = overdue && daysPastDue != null && daysPastDue > 0 ? daysPastDue : null;
   const draftPastDue = status === 'DRAFT' && daysPastDue != null && daysPastDue > 0;
   const canRemind = canSendReminder(inv);
+  const canEdit = !isInvoiceLocked(inv);
+  const lockReason = str(pick(inv, ['lock_reason']));
+  const voidReason = str(pick(inv, ['void_reason']));
+  const isVoid = status === 'CANCELLED' || !!str(pick(inv, ['voided_at']));
+  const isFinanced = inv.is_financed === true;
+  const notes = str(pick(inv, ['notes']));
+  // A draft shows as "Draft"; the real INV- number is allocated when it is sent.
+  const displayNumber = invoiceDisplayNumber(inv);
 
-  // The VAT rate comes from the invoice (stored as 0.15 or 15). Without one it is
-  // worked out from the VAT and subtotal, and with neither the label stays plain.
-  const subtotal = num(pick(inv, ['subtotal']));
-  const vatAmount = num(pick(inv, ['vat_amount', 'vat', 'tax_amount', 'tax']));
-  const rawRate = pick(inv, ['tax_rate', 'vat_rate']);
-  const ratePct =
-    rawRate != null && rawRate !== ''
-      ? num(rawRate) > 0 && num(rawRate) <= 1
-        ? num(rawRate) * 100
-        : num(rawRate)
-      : subtotal > 0 && vatAmount > 0
-        ? (vatAmount / subtotal) * 100
-        : null;
-  const vatLabel =
-    ratePct != null && ratePct > 0
-      ? `VAT (${formatPercent(ratePct, Math.abs(ratePct - Math.round(ratePct)) < 0.05 ? 0 : 1)})`
-      : 'VAT';
-  // Itemised charges, when the payload carries them.
-  const lineItems = (Array.isArray(inv.line_items) ? inv.line_items : []) as Record<string, unknown>[];
+  // The invoice's own lines. An invoice raised before lines existed (totals_source
+  // LEGACY) has none, and falls back to the old itemised mirror when it has one.
+  const lines = (Array.isArray(inv.lines) ? inv.lines : []) as InvoiceLine[];
+  const legacyItems = lines.length === 0 && Array.isArray(inv.line_items) ? (inv.line_items as Record<string, unknown>[]) : [];
+  const lineTotals = lines.length
+    ? sumLines(lines.map((l) => ({ net: l.net_amount, vat: l.vat_amount, discount: l.discount_amount, tax_code: l.tax_code })))
+    : null;
+  const subtotalStr = str(pick(inv, ['subtotal']), '0');
+  const vatStr = str(pick(inv, ['vat_amount', 'vat', 'tax_amount', 'tax']), '0');
+  const discountStr = str(pick(inv, ['discount']), lineTotals?.discount ?? '0');
+
+  const creditNotes = (Array.isArray(inv.credit_notes) ? inv.credit_notes : []) as CreditNoteSummary[];
+  const issuedCreditNotes = creditNotes.filter((c) => c.status === 'ISSUED');
+  const sync = (inv.accounting_sync ?? null) as AccountingSync | null;
+
+  // What can be done to an invoice that has gone out (web InvoiceDetail rules):
+  // credit what's left; void only one nothing has happened to yet.
+  const issued = status !== 'DRAFT' && !isVoid;
+  const canCredit = issued && !isFinanced && status !== 'CREDITED' && total - credited > 0.005;
+  const canVoid = issued && !isFinanced && paid === 0 && (payments?.length ?? 0) === 0 && issuedCreditNotes.length === 0;
+  const canDeleteDraft = status === 'DRAFT' && canEdit;
+  const canEditNote = issued && !isFinanced;
 
   // 'invoice' covers the detail + list + the Home dashboard and finance
   // reports; the shared map can't forget one the way hand-rolled lists did.
-  const refresh = () => invalidateFor(qc, 'invoice');
+  const refresh = () => invalidateFor(qc, 'invoice', 'payment');
+
+  // Where the payment has to be recorded while Xero/QuickBooks manages it.
+  const { managed, providerName, connection } = managedPayments;
+  const providerRecordUrl = sync?.url ?? connection?.web_url ?? null;
+
+  // Once Xero/QuickBooks manages this invoice's payments TruckWys won't record
+  // them: say so and offer the place that does.
+  const offerProviderPayment = ({ providerName: name, recordUrl }: { providerName: string; recordUrl: string | null }) => {
+    const message = `Payments on this invoice are recorded in ${name}. They appear here once ${name} syncs them.`;
+    Alert.alert(
+      'Record the payment in ' + name,
+      message,
+      recordUrl
+        ? [
+            { text: 'Not now', style: 'cancel' },
+            { text: `Open ${name}`, onPress: () => void WebBrowser.openBrowserAsync(recordUrl) },
+          ]
+        : [{ text: 'OK', style: 'cancel' }],
+    );
+  };
 
   // Per-action flags so each button spins independently.
   const run = async (setFlag: (v: boolean) => void, fn: () => Promise<unknown>, okMsg: string) => {
@@ -144,8 +220,12 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       await fn();
       refresh();
       toast.success(okMsg);
+      return true;
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed');
+      const m = paymentsManagedBy(e);
+      if (m) offerProviderPayment(m);
+      else toast.error(e instanceof Error ? e.message : 'Action failed');
+      return false;
     } finally {
       setFlag(false);
     }
@@ -168,7 +248,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   // Only reachable when `token` is set — the header hides Share otherwise.
   const share = async () => {
     await Share.share({
-      message: `Invoice ${str(pick(inv, ['invoice_number']), '')}: ${invoiceShareUrl(id, token)}`,
+      message: `Invoice ${displayNumber === 'Draft' ? '' : `${displayNumber}: `}${invoiceShareUrl(id, token)}`,
     });
   };
 
@@ -194,17 +274,20 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     setSendBusy(true);
     try {
       let link = token;
+      // Sending a draft is what allocates its INV- number, so after it the
+      // number has to be read fresh rather than from the draft on screen.
+      let current: Record<string, unknown> = inv;
       if (!link) {
         const res = (await sendInvoice(id)) as Record<string, unknown>;
         refresh();
         // send_email returns view_url; fall back to re-reading the invoice.
         link = str(pick(res, ['view_token', 'token']));
-        if (!link) {
-          const fresh = (await refetch()).data as Record<string, unknown> | undefined;
-          link = str(pick(fresh ?? {}, ['view_token', 'token']));
-        }
+        const fresh = (await refetch()).data as Record<string, unknown> | undefined;
+        if (fresh) current = fresh;
+        if (!link) link = str(pick(fresh ?? {}, ['view_token', 'token']));
       }
-      const number = str(pick(inv, ['invoice_number']), `#${id}`);
+      const shownNumber = invoiceDisplayNumber(current, `#${id}`);
+      const number = shownNumber === 'Draft' ? '' : shownNumber;
       const url = link ? invoiceShareUrl(id, link) : '';
       const name = str(pick(inv, ['customer_name', 'customer']));
       const message = [
@@ -246,7 +329,7 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       toast.success('Due date changed');
     } catch (e) {
       // Kept inside the sheet: e.g. "can't be before the issue date", or the
-      // invoice has been paid in the meantime.
+      // invoice has been sent in the meantime.
       setDueError(e instanceof Error ? e.message : "Couldn't change the due date");
     } finally {
       setDueBusy(false);
@@ -265,9 +348,65 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     );
   };
 
+  // Edits a payment recorded in TruckWys; the server re-derives the invoice.
+  const submitPaymentEdit = async (draft: PaymentDraft) => {
+    const p = editPayment;
+    if (!p) return;
+    setEditPayment(null);
+    await run(
+      setPayBusy,
+      () =>
+        updatePayment(p.id, {
+          amount: draft.amount.toFixed(2),
+          payment_date: draft.payment_date,
+          payment_method: draft.payment_method,
+          reference_number: draft.reference,
+        }),
+      'Payment updated',
+    );
+  };
+
+  const confirmDeletePayment = (p: InvoicePayment) =>
+    Alert.alert(
+      'Delete this payment?',
+      `${money(p.amount)} on ${formatDate(p.date)} will be removed and the invoice balance goes back up.`,
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => void run(setPayBusy, () => deletePayment(p.id), 'Payment deleted'),
+        },
+      ],
+    );
+
+  const confirmDeleteDraft = () =>
+    Alert.alert('Delete this draft?', 'It has not been sent, so nothing else is affected.', [
+      { text: 'Keep it', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () =>
+          void (async () => {
+            const ok = await run(setPayBusy, () => deleteInvoice(id), 'Draft deleted');
+            if (ok) navigation.goBack();
+          })(),
+      },
+    ]);
+
+  const submitVoid = async (reason: string) => {
+    const ok = await run(setVoidBusy, () => voidInvoice(id, reason), 'Invoice voided');
+    if (ok) setVoidOpen(false);
+  };
+
+  const submitNote = async (text: string) => {
+    const ok = await run(setNoteBusy, () => updateInvoice(id, { notes: text }), 'Note saved');
+    if (ok) setNoteOpen(false);
+  };
+
   // One primary action for the state the invoice is in; everything else sits in
   // the overflow menu. Overdue first (chase it), then send/resend, then record a
-  // payment, and a PDF when nothing else applies (paid, cancelled).
+  // payment, and a PDF when nothing else applies (paid, void, credited).
   type Primary = 'remind' | 'send' | 'pay' | 'pdf';
   const primary: Primary = canRemind
     ? 'remind'
@@ -278,14 +417,17 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
         : 'pdf';
   const doRemind = () => setSendPreview({ kind: 'reminder', then: 'email' });
   const doSend = () => setSendOpen(true);
-  const doPay = () => setPayOpen(true);
+  // While Xero/QuickBooks manages payments the button goes there instead.
+  const doPay = () =>
+    managed ? offerProviderPayment({ providerName, recordUrl: providerRecordUrl }) : setPayOpen(true);
   const doMarkPaid = () => run(setPayBusy, () => markInvoicePaid(id), 'Marked paid');
   const sendLabel = status === 'DRAFT' ? 'Send invoice' : 'Resend';
+  const payLabel = managed ? `Record payment in ${providerName}` : 'Record payment';
 
   const primaryButton = {
     remind: { label: 'Send reminder', icon: 'bell', busy: sendBusy, onPress: doRemind },
     send: { label: sendLabel, icon: 'send', busy: sendBusy, onPress: doSend },
-    pay: { label: 'Record payment', icon: 'banknote', busy: payBusy, onPress: doPay },
+    pay: { label: payLabel, icon: 'banknote', busy: payBusy, onPress: doPay },
     pdf: { label: 'Download PDF', icon: 'download', busy: pdfBusy, onPress: openPdf },
   }[primary] as { label: string; icon: 'bell' | 'send' | 'banknote' | 'download'; busy: boolean; onPress: () => void };
 
@@ -297,19 +439,47 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       ? [{ label: 'Send reminder', icon: 'bell' as const, onPress: doRemind }]
       : []),
     ...(primary !== 'pay' && CAN_PAY.includes(status)
-      ? [{ label: 'Record payment', icon: 'banknote' as const, onPress: doPay }]
+      ? [{ label: payLabel, icon: 'banknote' as const, onPress: doPay }]
       : []),
-    ...(CAN_PAY.includes(status)
+    // Marking paid records a payment, so it is the provider's job too.
+    ...(CAN_PAY.includes(status) && !managed
       ? [{ label: 'Mark as paid', icon: 'check' as const, onPress: doMarkPaid }]
       : []),
     ...(primary !== 'pdf'
       ? [{ label: 'Download PDF', icon: 'download' as const, onPress: openPdf }]
       : []),
+    ...(canEditNote
+      ? [{ label: 'Edit note', icon: 'edit' as const, onPress: () => setNoteOpen(true) }]
+      : []),
+    ...(canCredit
+      ? [
+          {
+            label: 'Issue credit note',
+            icon: 'receipt' as const,
+            onPress: () => navigation.navigate('CreateCreditNote', { invoiceId: id, preview: inv }),
+          },
+        ]
+      : []),
+    ...(sync?.url
+      ? [
+          {
+            label: `Open in ${sync.provider_name}`,
+            icon: 'externalLink' as const,
+            onPress: () => void WebBrowser.openBrowserAsync(sync.url as string),
+          },
+        ]
+      : []),
+    ...(canVoid
+      ? [{ label: 'Void invoice', icon: 'x' as const, destructive: true, onPress: () => setVoidOpen(true) }]
+      : []),
+    ...(canDeleteDraft
+      ? [{ label: 'Delete draft', icon: 'trash' as const, destructive: true, onPress: confirmDeleteDraft }]
+      : []),
   ];
 
   return (
     <SheetScreen
-      title={str(pick(inv, ['invoice_number', 'number']), 'Invoice')}
+      title={displayNumber}
       onBack={() => navigation.goBack()}
       // A draft has no business being shared — it isn't finalised, and its
       // view_token isn't minted until it's first sent, so the link wouldn't
@@ -321,10 +491,10 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       // paid without ever being emailed/reminded still has no view_token, and
       // there's no link to share. Hiding the button there (rather than
       // showing it and failing silently) matches the DRAFT case above.
-      actionLabel={CAN_EDIT.includes(status) ? 'Edit' : token ? 'Share' : undefined}
-      actionIcon={CAN_EDIT.includes(status) ? 'edit' : token ? 'share' : undefined}
+      actionLabel={canEdit ? 'Edit' : token ? 'Share' : undefined}
+      actionIcon={canEdit ? 'edit' : token ? 'share' : undefined}
       onAction={
-        CAN_EDIT.includes(status)
+        canEdit
           ? () => navigation.navigate('CreateInvoice', { id, preview: inv })
           : token
             ? share
@@ -348,6 +518,23 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
       <View className="mb-4 flex-row flex-wrap items-center gap-2.5">
         <StatusPill status={shownStatus} />
       </View>
+
+      {/* Why this invoice can't be changed: void, or financed through Fast Pay. */}
+      {isVoid && (
+        <View className="mb-5">
+          <Banner tone="warning" message={`Void${voidReason ? ` · ${voidReason}` : ''}`} />
+        </View>
+      )}
+      {!isVoid && status !== 'DRAFT' && !!lockReason && isFinanced && (
+        <View className="mb-5">
+          <Banner tone="warning" message={lockReason} />
+        </View>
+      )}
+      {sync && (
+        <View className="mb-5">
+          <AccountingSyncNotice sync={sync} />
+        </View>
+      )}
 
       {/* A draft whose due date has passed goes out already overdue. */}
       {draftPastDue && (
@@ -392,51 +579,124 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
               : undefined
           }
           editLabel="Change due date"
+          last={!notes}
         />
-        <DetailRow label="Paid" value={formatCurrency(paid)} last />
+        {!!notes && <DetailRow label="Note" value={notes} mono={false} last />}
       </Group>
 
-      {lineItems.length > 0 && (
+      {lines.length > 0 && (
         <Group label="Charges">
-          {lineItems.map((item, i) => {
-            const qty = num(pick(item, ['quantity'])) || 1;
-            const unit = num(pick(item, ['unit_price', 'price']));
+          {lines.map((l, i) => {
+            const discount = toNumber(l.discount_amount);
+            const hint = [
+              `${num(l.quantity)} × ${money(num(l.unit_price))}`,
+              discount > 0 ? `−${money(discount)}` : null,
+              l.tax_code !== 'STANDARD' ? taxCodeShort(l.tax_code) : null,
+              l.revenue_type && l.revenue_type !== 'FREIGHT' ? revenueTypeLabel(l.revenue_type) : null,
+            ]
+              .filter(Boolean)
+              .join(' · ');
             return (
               <DetailRow
-                key={String(pick(item, ['id']) ?? i)}
-                label={str(pick(item, ['description', 'item_description']), 'Charge')}
-                hint={`${qty} x ${formatCurrency(unit)}`}
-                value={formatCurrency(qty * unit)}
-                last={i === lineItems.length - 1}
+                key={String(l.id ?? i)}
+                label={l.description || 'Charge'}
+                hint={hint}
+                value={money(num(l.net_amount))}
+                last={i === lines.length - 1}
               />
             );
           })}
         </Group>
       )}
 
-      <Group label="Amounts">
-        <DetailRow label="Subtotal" value={formatCurrency(subtotal)} />
-        <DetailRow label={vatLabel} value={formatCurrency(vatAmount)} />
-        <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
-          <Txt className="text-callout font-semibold text-fg">Total</Txt>
-          <Mono className="text-heading font-semibold text-fg">
-            {formatCurrency(total)}
-          </Mono>
-        </View>
-      </Group>
+      {legacyItems.length > 0 && (
+        <Group label="Charges">
+          {legacyItems.map((item, i) => {
+            const qty = num(pick(item, ['quantity'])) || 1;
+            const unit = num(pick(item, ['unit_price', 'price']));
+            return (
+              <DetailRow
+                key={String(pick(item, ['id']) ?? i)}
+                label={str(pick(item, ['description', 'item_description']), 'Charge')}
+                hint={`${qty} × ${money(unit)}`}
+                value={money(qty * unit)}
+                last={i === legacyItems.length - 1}
+              />
+            );
+          })}
+        </Group>
+      )}
 
-      {payments && payments.length > 0 && (
-        <Group label="Payments">
-          {payments.map((p, i) => (
-            <DetailRow
-              key={p.id}
-              label={`${formatDate(p.date)} · ${paymentMethodLabel(p.method)}${p.reference ? ` · ${p.reference}` : ''}`}
-              value={formatCurrency(p.amount)}
-              last={i === payments.length - 1}
+      {/* Subtotal, VAT and total are the server's; once issued, what has been
+          paid and credited and the balance that is left follow. */}
+      <TotalsBreakdown
+        subtotal={subtotalStr}
+        discount={discountStr}
+        vat={vatStr}
+        total={str(pick(inv, ['total_amount', 'total']), '0')}
+        byCode={lineTotals?.byCode}
+        {...(status !== 'DRAFT' ? { paid, credited, balance } : {})}
+      />
+
+      {creditNotes.length > 0 && (
+        <Group label="Credit notes">
+          {creditNotes.map((c, i) => (
+            <ListRow
+              key={c.id}
+              title={c.credit_note_number}
+              subtitle={formatDate(c.issue_date)}
+              trailing={
+                <View className="items-end gap-1">
+                  <Mono
+                    className={`text-callout font-semibold ${c.status === 'VOID' ? 'text-faint line-through' : 'text-fg'}`}
+                  >
+                    {money(num(c.total_amount))}
+                  </Mono>
+                  <StatusPill status={c.status} />
+                </View>
+              }
+              onPress={() => navigation.navigate('CreditNoteDetail', { id: c.id })}
+              last={i === creditNotes.length - 1}
             />
           ))}
         </Group>
       )}
+
+      {payments && payments.length > 0 && (
+        <Group label="Payments">
+          {payments.map((p, i) => {
+            // Payments that came from Xero/QuickBooks belong to them; and while
+            // they manage payments TruckWys won't change any.
+            const editable = isManualPayment(p) && !managed;
+            const actions: OverflowAction[] = editable
+              ? [
+                  { label: 'Edit payment', icon: 'edit', onPress: () => setEditPayment(p) },
+                  { label: 'Delete payment', icon: 'trash', destructive: true, onPress: () => confirmDeletePayment(p) },
+                ]
+              : [];
+            return (
+              <ListRow
+                key={p.id}
+                title={`${formatDate(p.date)} · ${paymentMethodLabel(p.method)}`}
+                subtitle={p.reference || undefined}
+                detail={<PaymentSourceBadge source={p.source} />}
+                trailing={
+                  <View className="flex-row items-center gap-2.5">
+                    <Mono className="text-callout font-semibold text-fg">{money(p.amount)}</Mono>
+                    <OverflowMenu actions={actions} accessibilityLabel="Payment actions" title={money(p.amount)} />
+                  </View>
+                }
+                last={i === payments.length - 1}
+              />
+            );
+          })}
+        </Group>
+      )}
+
+      <AccountingSyncCard sync={sync} what="invoice" localNumber={displayNumber} />
+
+      {/* Fast Pay: this invoice's offer or request, once Fast Pay is live. */}
+      {CAPITAL_LAUNCHED && issued && <FastPayInvoicePanel invoiceId={id} />}
 
       {payOpen && (
         <RecordPaymentSheet
@@ -444,6 +704,22 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
           busy={payBusy}
           onConfirm={submitPayment}
           onCancel={() => setPayOpen(false)}
+        />
+      )}
+
+      {editPayment && (
+        <RecordPaymentSheet
+          // The most it can be raised to is what is still owed plus what it already covers.
+          balance={balance + editPayment.amount}
+          busy={payBusy}
+          initial={{
+            amount: editPayment.amount,
+            payment_date: editPayment.date,
+            payment_method: editPayment.method,
+            reference: editPayment.reference,
+          }}
+          onConfirm={submitPaymentEdit}
+          onCancel={() => setEditPayment(null)}
         />
       )}
 
@@ -459,13 +735,39 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
 
       {dueOpen && (
         <DueDateSheet
-          invoiceNumber={str(pick(inv, ['invoice_number', 'number']), 'Invoice')}
+          invoiceNumber={displayNumber}
           issueDate={issueDate}
           dueDate={dueDate}
           busy={dueBusy}
           error={dueError}
           onSave={saveDueDate}
           onCancel={() => setDueOpen(false)}
+        />
+      )}
+
+      {voidOpen && (
+        <ReasonDialog
+          title="Void this invoice?"
+          message="The customer will no longer owe it. This can't be undone; to correct an invoice that has been paid, issue a credit note instead."
+          confirmLabel="Void invoice"
+          busy={voidBusy}
+          onConfirm={submitVoid}
+          onCancel={() => !voidBusy && setVoidOpen(false)}
+        />
+      )}
+
+      {noteOpen && (
+        <ReasonDialog
+          title="Note on the invoice"
+          confirmLabel="Save note"
+          label="Note"
+          placeholder="Shown on the invoice"
+          initial={notes}
+          required={false}
+          destructive={false}
+          busy={noteBusy}
+          onConfirm={submitNote}
+          onCancel={() => !noteBusy && setNoteOpen(false)}
         />
       )}
 

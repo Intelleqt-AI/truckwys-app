@@ -32,6 +32,8 @@ import { num, str, pick, asArray } from '@/lib/api/list';
 import { mediaUrl } from '@/lib/api/client';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
+import type { CustomerPrice } from '@/lib/vat';
+import { invoiceDisplayNumber } from '@/lib/invoiceStatus';
 import { staleWork, staleLabel, staleAction } from '@/lib/staleWork';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
@@ -81,6 +83,14 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const rate = num(pick(l, ['rate']));
   const distance = num(pick(l, ['distance']));
   const total = num(pick(l, ['total_amount']));
+  // Price excl. VAT, VAT and total incl. VAT as the customer is shown them (same
+  // rule as the quote it came from: 15%, or 0% international; backend quote_vat).
+  const rawPrice = pick(l, ['customer_price']);
+  const customerPrice =
+    rawPrice && typeof rawPrice === 'object' && !Array.isArray(rawPrice)
+      ? (rawPrice as CustomerPrice)
+      : undefined;
+  const vatShown = !!customerPrice?.vat_registered;
   const ratePerKm = distance ? rate / distance : 0;
   const fuelSurcharge = num(pick(l, ['fuel_surcharge']));
   const additional = num(pick(l, ['additional_charges', 'additional']));
@@ -181,8 +191,12 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         };
       }
       case 'INVOICED': {
-        const invoiceNumber = str(pick(l, ['invoice_number', 'invoice']));
-        return { ...base, meta: invoiceNumber ? `Invoice ${invoiceNumber}` : undefined };
+        // A draft invoice carries a placeholder number until it is sent.
+        const invoiceNumber = invoiceDisplayNumber({ invoice_number: pick(l, ['invoice_number', 'invoice']) }, '');
+        return {
+          ...base,
+          meta: invoiceNumber === 'Draft' ? 'Invoice drafted' : invoiceNumber ? `Invoice ${invoiceNumber}` : undefined,
+        };
       }
       default:
         return base;
@@ -372,7 +386,12 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       {/* Metrics */}
       <View className="mb-5 flex-row flex-wrap gap-3">
         <View className="flex-row" style={{ width: '47.5%' }}>
-          <StatCard label="Total amount" value={formatCurrency(total, { maximumFractionDigits: 0 })} />
+          <StatCard
+            label={vatShown ? 'Total incl. VAT' : 'Total amount'}
+            value={formatCurrency(vatShown ? num(customerPrice?.total_incl_vat) : total, {
+              maximumFractionDigits: 0,
+            })}
+          />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Distance" value={`${formatNumber(distance)} km`} />
@@ -479,9 +498,23 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           />
         )}
         <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
-          <Txt className="text-callout font-semibold text-fg">Total</Txt>
+          <Txt className="text-callout font-semibold text-fg">{vatShown ? 'Total excl. VAT' : 'Total'}</Txt>
           <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
         </View>
+        {vatShown ? (
+          <>
+            <DetailRow
+              label={customerPrice?.vat_label || 'VAT'}
+              value={formatCurrency(num(customerPrice?.vat_amount))}
+            />
+            <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
+              <Txt className="text-callout font-semibold text-fg">Total incl. VAT</Txt>
+              <Mono className="text-heading font-semibold text-fg">
+                {formatCurrency(num(customerPrice?.total_incl_vat))}
+              </Mono>
+            </View>
+          </>
+        ) : null}
       </Group>
 
       {(fuelEst != null || fuelAct != null) && (

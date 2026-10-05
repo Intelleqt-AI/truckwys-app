@@ -1,5 +1,5 @@
 import { useState, type ComponentProps } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useForm, useWatch, Controller, type Control, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -15,11 +15,10 @@ import {
   SaveSuccessOverlay,
   type TextFieldProps,
 } from '@/components/ui';
-import { createVehicleType, updateVehicleType, deleteVehicleType } from './api';
+import { createVehicleType, updateVehicleType } from './api';
 import {
   vehicleTypeSchema,
   VEHICLE_TYPE_FIELD_ORDER,
-  vehicleTypeDeleteCopy,
   type VehicleTypeFormValues,
 } from './validation';
 import { num, str, pick } from '@/lib/api/list';
@@ -146,23 +145,19 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
   const editing = editId != null;
   const preview = (route.params?.preview ?? {}) as Record<string, unknown>;
   // Shared platform default (company: null — editable, backend copy-on-writes
-  // the PATCH into a new company-owned row; never deletable, the backend 403s
-  // it), this company's own override of one (overrides_shared_default: true —
-  // editable in place, "Reset" instead of "Delete"), or a fully custom type.
-  // Read straight off preview, not through pick() — pick() treats null the
-  // same as a missing key, which would erase the "shared" signal entirely
+  // the PATCH into a new company-owned row), or one of this company's own
+  // types. Read straight off preview, not through pick() — pick() treats null
+  // the same as a missing key, which would erase the "shared" signal entirely
   // (see normalizeVehicleType's comment in bookings/api.ts). Undefined
   // (pre-shared-catalogue backend) reads as not-shared, same reasoning.
   const isShared = preview.company === null;
-  const isOverride = !isShared && preview.overrides_shared_default === true;
   const qc = useQueryClient();
   const demo = useDemo();
 
   const [busy, setBusy] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const { control, handleSubmit, getValues, formState } = useForm<VehicleTypeFormValues>({
+  const { control, handleSubmit, formState } = useForm<VehicleTypeFormValues>({
     resolver: zodResolver(vehicleTypeSchema()),
     defaultValues: fromRecord(preview),
     mode: 'onBlur',
@@ -174,7 +169,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
 
   useUnsavedChangesGuard({
     navigation,
-    isDirty: () => formState.isDirty && !busy && !deleting && !saved,
+    isDirty: () => formState.isDirty && !busy && !saved,
     title: 'Discard changes?',
     message: editing
       ? "Your edits to this vehicle type haven't been saved."
@@ -239,35 +234,6 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
     triggerShake();
     const first = VEHICLE_TYPE_FIELD_ORDER.find((n) => errors[n]);
     if (first) anchors.scrollToField(first);
-  };
-
-  // Not offered at all for a shared default — see the button below, which
-  // never renders this while isShared, so `editing && isShared` can't reach
-  // here. Kept as a guard anyway rather than trusting the caller.
-  const confirmDelete = () => {
-    if (!editing || isShared) return;
-    if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
-    const copy = vehicleTypeDeleteCopy(getValues('name').trim() || 'this type', isOverride);
-    Alert.alert(copy.title, copy.message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: copy.confirmLabel,
-        style: 'destructive',
-        onPress: async () => {
-          setDeleting(true);
-          try {
-            await deleteVehicleType(editId);
-            invalidateFor(qc, 'vehicle-type');
-            toast.success();
-            navigation.goBack();
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : copy.errorMessage);
-          } finally {
-            setDeleting(false);
-          }
-        },
-      },
-    ]);
   };
 
   return (
@@ -390,20 +356,6 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                 anchors={anchors}
                 options={ACTIVE_OPTIONS}
               />
-              {/* Nothing to delete/reset yet on a shared default — the
-              backend's own perform_destroy 403s a tenant trying, so the
-              button is hidden rather than left to fail on tap (mirrors
-              SettingsScreen's SwipeRow, which disables the same gesture). */}
-              {!isShared && (
-                <Button
-                  label={isOverride ? 'Reset vehicle type' : 'Delete vehicle type'}
-                  variant="danger"
-                  icon="trash"
-                  loading={deleting}
-                  onPress={confirmDelete}
-                  fullWidth
-                />
-              )}
             </View>
           )}
         </Animated.View>

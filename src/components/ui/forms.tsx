@@ -198,7 +198,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
         <Input
           ref={ref as never}
           className="flex-1 text-fg"
-          placeholderTextColor={colors.faint}
+          placeholderTextColor={colors.placeholder}
           secureTextEntry={hidden}
           {...props}
           // After the spread, and merging props.style rather than being replaced
@@ -242,9 +242,12 @@ export function SearchField({
       <Icon name="search" size={17} color={colors.faint} />
       <TextInput
         className="flex-1 text-fg"
-        style={INPUT_TEXT}
+        // Same explicit padding as TextField: the platform default is uneven
+        // (Android adds its own top/bottom inset), which pushed typed text and
+        // the placeholder off the icon's centre line.
+        style={[INPUT_TEXT, { paddingVertical: 12, textAlignVertical: 'center' }]}
         placeholder={placeholder}
-        placeholderTextColor={colors.faint}
+        placeholderTextColor={colors.placeholder}
         value={value}
         onChangeText={onChangeText}
         returnKeyType="search"

@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { fetchData } from '@/lib/api/client';
+import { fetchAllRows } from '@/lib/api/fetchAllPages';
 import { SheetScreen, SelectField, Button, Txt, Mono, type Option } from '@/components/ui';
-import { asArray, str, pick } from '@/lib/api/list';
+import { str, pick } from '@/lib/api/list';
 import { assignLoadDriver, convertQuoteToLoad, seedLoad, updateLoadStatus } from './api';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { toast } from '@/lib/toast';
@@ -64,12 +64,12 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
 
   const { data: driversRaw, isLoading: driversLoading } = useQuery({
     queryKey: ['drivers-available-for-assign'],
-    queryFn: () => fetchData('drivers/?status=ACTIVE'),
+    queryFn: () => fetchAllRows<DriverOption>('drivers/?status=ACTIVE'),
   });
   const { data: vehiclesRaw, isLoading: vehiclesLoading } = useQuery({
     queryKey: ['vehicles-available-for-assign', vehicleType ?? ''],
     queryFn: () =>
-      fetchData(
+      fetchAllRows<VehicleOption>(
         `vehicles/?status=AVAILABLE${
           vehicleType ? `&vehicle_type__name=${encodeURIComponent(vehicleType)}` : ''
         }`,
@@ -82,7 +82,7 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
   const vehicleClearLabel = reassigning ? undefined : 'Assign later';
 
   const driverOptions: Option[] = useMemo(() => {
-    const rows = asArray<DriverOption>(driversRaw);
+    const rows = driversRaw ?? [];
     return [
       { label: driverClearLabel, value: '' },
       ...rows.map((d) => ({
@@ -93,7 +93,7 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
   }, [driversRaw, driverClearLabel]);
 
   const vehicleOptions: Option[] = useMemo(() => {
-    const rows = asArray<VehicleOption>(vehiclesRaw);
+    const rows = vehiclesRaw ?? [];
     const mapped = rows.map((v) => {
       const name = [v.make, v.model].filter(Boolean).join(' ');
       return {
@@ -169,7 +169,7 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
   };
 
   // Gated on isLoading so the "no options" warning doesn't flash before the
-  // query has actually resolved (asArray(undefined) === [] looks empty too).
+  // query has actually resolved (no data yet looks empty too).
   const noDrivers = !driversLoading && driverOptions.length === 1;
   // Reassign mode has no clear entry in vehicleOptions, so the "empty" baseline is 0 not 1.
   const noVehicles =

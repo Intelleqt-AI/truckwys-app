@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import { useInfiniteList } from '@/lib/api/useInfiniteList';
 import { fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import { asArray } from '@/lib/api/list';
-import { fetchAllRows } from '@/lib/api/fetchAllPages';
+import type { RevenueBasis } from '@/lib/ledger';
 import {
   normalizeInvoice,
   normalizeExpense,
@@ -11,17 +12,86 @@ import {
   type FinanceSummary,
 } from '@/types/domain';
 
-export function useInvoices() {
-  return useQuery<InvoiceLite[]>({
-    queryKey: ['invoices'],
-    queryFn: async () => (await fetchAllRows('invoices/')).map(normalizeInvoice),
+/**
+ * invoices/summary/ (core.services.invoice_list): the Invoices tab's tiles and
+ * status-chip counts over every invoice of the company, so the tab loads one
+ * page of rows plus this, not the whole ledger.
+ */
+export interface InvoicesSummary {
+  month: string;
+  invoiced_mtd: number;
+  collected_mtd: number;
+  collection_rate: number;
+  invoiced_last_month: number;
+  overdue_count: number;
+  overdue_amount: number;
+  paid_count: number;
+  avg_days_to_pay: number | null;
+  draft_count: number;
+  draft_amount: number;
+  /** All, OVERDUE, SENT, PAID, DRAFT. */
+  status_counts: Record<string, number>;
+}
+
+/**
+ * One server-filtered, newest-first list of invoices. `status` is a chip value
+ * (OVERDUE is the shared overdue rule, not a stored status); `search` matches
+ * the invoice number or customer. Keyed under 'invoices' so every invoice event
+ * reaches it.
+ */
+export function useInvoicesList(status: string, search: string) {
+  const params = new URLSearchParams();
+  if (status !== 'ALL') params.set('status', status);
+  if (search) params.set('search', search);
+  const qs = params.toString();
+  return useInfiniteList<InvoiceLite>(
+    ['invoices', 'list', status, search],
+    `invoices/${qs ? `?${qs}` : ''}`,
+    normalizeInvoice,
+    { pageSize: 20, keepPrevious: true },
+  );
+}
+
+export function useInvoicesSummary() {
+  return useQuery<InvoicesSummary>({
+    queryKey: ['invoices', 'summary'],
+    queryFn: () => fetchData<InvoicesSummary>('invoices/summary/'),
   });
 }
 
-export function useExpenses() {
-  return useQuery<ExpenseLite[]>({
-    queryKey: ['expenses'],
-    queryFn: async () => (await fetchAllRows('expenses/')).map(normalizeExpense),
+/** expenses/summary/ (core.services.expense_list): tiles, charts and chip counts over every expense. */
+export interface ExpensesSummary {
+  spend_total: number;
+  spend_count: number;
+  approved_year_amount: number;
+  approved_year_count: number;
+  pending_amount: number;
+  pending_count: number;
+  /** Spend per calendar month by expense date (13 months); month is 1-12. */
+  months: { year: number; month: number; amount: number; count: number }[];
+  /** All-time spend by category, biggest first. */
+  by_category: { category: string; amount: number; count: number }[];
+  status_counts: Record<string, number>;
+}
+
+/** Expenses, newest first, status and search done by the server. */
+export function useExpensesList(status: string, search: string) {
+  const params = new URLSearchParams();
+  if (status !== 'ALL') params.set('status', status);
+  if (search) params.set('search', search);
+  const qs = params.toString();
+  return useInfiniteList<ExpenseLite>(
+    ['expenses', 'list', status, search],
+    `expenses/${qs ? `?${qs}` : ''}`,
+    normalizeExpense,
+    { pageSize: 20, keepPrevious: true },
+  );
+}
+
+export function useExpensesSummary() {
+  return useQuery<ExpensesSummary>({
+    queryKey: ['expenses', 'summary'],
+    queryFn: () => fetchData<ExpensesSummary>('expenses/summary/'),
   });
 }
 
@@ -55,6 +125,9 @@ export interface InvoicePayment {
   method: string;
   reference: string;
   amount: number;
+  notes: string;
+  /** Where it was recorded: MANUAL (here or on the web), XERO, QBO or BANK. Only MANUAL payments can be changed here. */
+  source: string;
 }
 
 /** Payments recorded against one invoice — the web invoice page shows these. */
@@ -70,6 +143,8 @@ export function useInvoicePayments(id: string | number) {
           method: String(r.payment_method ?? r.method ?? ''),
           reference: String(r.reference_number ?? r.reference ?? ''),
           amount: Number(r.amount ?? 0),
+          notes: String(r.notes ?? ''),
+          source: String(r.source ?? 'MANUAL'),
         };
       }),
   });
@@ -111,7 +186,6 @@ export function useInvoiceAging() {
 
 export interface FinanceReports {
   summary: FinanceSummary;
-  marginByLane: { lane: string; margin: number }[];
   monthlyTrend: { label: string; revenue: number; expense: number }[];
 }
 
@@ -134,8 +208,37 @@ export const sendInvoiceReminder = (id: string | number) =>
 export const markInvoicePaid = (id: string | number) =>
   postData({ url: `invoices/${id}/mark_paid/`, data: {} });
 
+// The payment's reference is `reference_number` on the API; the app's sheet
+// calls it `reference`, so send it under both names (as the web does).
 export const recordPayment = (data: Record<string, unknown>) =>
-  postData({ url: 'payments/', data });
+  postData({
+    url: 'payments/',
+    data: data.reference != null && data.reference_number == null
+      ? { ...data, reference_number: data.reference }
+      : data,
+  });
+
+/**
+ * Once Xero or QuickBooks manages an invoice's payments, TruckWys refuses to
+ * record them itself: POST payments/ and mark_paid answer 409
+ * `payments_managed_by_accounting` with the provider and a link to record it
+ * there. Returns that detail, or null for any other error.
+ */
+export interface ManagedPayments {
+  providerName: string;
+  recordUrl: string | null;
+}
+
+export function paymentsManagedBy(e: unknown): ManagedPayments | null {
+  const err = e as { status?: number; data?: Record<string, unknown> } | null;
+  if (err?.status !== 409 || err.data?.code !== 'payments_managed_by_accounting') return null;
+  const name = err.data.provider_name;
+  const url = err.data.record_url;
+  return {
+    providerName: typeof name === 'string' && name ? name : 'your accounting system',
+    recordUrl: typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null,
+  };
+}
 
 // Expense category / status enums (authoritative — from the web create payload).
 export const EXPENSE_CATEGORIES = [
@@ -143,6 +246,7 @@ export const EXPENSE_CATEGORIES = [
   { label: 'Tolls', value: 'TOLLS' },
   { label: 'Maintenance', value: 'MAINTENANCE' },
   { label: 'Driver cost', value: 'DRIVER_COST' },
+  { label: 'Subcontractor', value: 'SUBCONTRACTOR' },
   { label: 'Insurance', value: 'INSURANCE' },
   { label: 'Overhead', value: 'OVERHEAD' },
   { label: 'Other', value: 'OTHER' },
@@ -166,17 +270,20 @@ export const rejectExpense = (id: string | number) =>
 
 export const deleteExpense = (id: string | number) => deleteData({ url: `expenses/${id}/` });
 
-export function useFinanceReports() {
+/**
+ * dashboard/finance/: every revenue, expense and margin figure is excl. VAT.
+ * `basis` is 'accrual' (issued invoices less credit notes, the server's default)
+ * or 'cash' (money received); receivables stay incl. VAT. Expenses are every one
+ * that isn't rejected, net of input VAT. The lane report has its own hook
+ * (lanes.ts useLaneMargin).
+ */
+export function useFinanceReports(basis: RevenueBasis = 'accrual') {
   return useQuery<FinanceReports>({
-    queryKey: ['finance-reports'],
+    queryKey: ['finance-reports', basis],
+    // The summary is the screen: when it fails that must show as an error, not
+    // as a normalised-null set of R 0 totals.
     queryFn: async () => {
-      const [finance, lanes] = await Promise.all([
-        // The summary is the screen: when it fails that must show as an error,
-        // not as a normalised-null set of R 0 totals. Lanes are supplementary,
-        // so a failure there just leaves that block empty.
-        fetchData('dashboard/finance/'),
-        fetchData('reports/margin-by-lane/').catch(() => []),
-      ]);
+      const finance = await fetchData(`dashboard/finance/?basis=${basis}`);
       const f = finance as Record<string, unknown> | null;
       const trend = asArray((f ?? {}).monthly_trend).map((m) => {
         const r = m as Record<string, unknown>;
@@ -186,11 +293,7 @@ export function useFinanceReports() {
           expense: Number(r.expense ?? r.expenses ?? 0),
         };
       });
-      const marginByLane = asArray(lanes).map((l) => {
-        const r = l as Record<string, unknown>;
-        return { lane: String(r.lane ?? r.route ?? '—'), margin: Number(r.margin ?? r.margin_percent ?? 0) };
-      });
-      return { summary: normalizeFinance(f), marginByLane, monthlyTrend: trend };
+      return { summary: normalizeFinance(f), monthlyTrend: trend };
     },
   });
 }

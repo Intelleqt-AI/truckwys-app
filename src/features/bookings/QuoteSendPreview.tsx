@@ -4,6 +4,7 @@ import { fetchData } from '@/lib/api/client';
 import { str } from '@/lib/api/list';
 import { formatCurrency, formatDate } from '@/lib/formatters';
 import { quoteLapsed } from '@/lib/quoteStage';
+import type { CustomerPrice } from '@/lib/vat';
 import { useAuthStore } from '@/stores/authStore';
 
 // Preview-and-confirm before a quote is emailed. Mirrors the server's quote
@@ -20,8 +21,11 @@ export interface QuotePreviewData {
   customer_email?: string | null;
   pickup_location?: string | null;
   delivery_location?: string | null;
-  /** The price the customer will see (excl. VAT). */
+  /** The price excl. VAT. */
   total_amount?: number | string | null;
+  /** VAT and total incl. VAT the customer is sent (backend quote_vat, or the
+   *  builder's own figure for an unsaved quote). Absent: only the excl. VAT price. */
+  customer_price?: CustomerPrice | null;
   valid_until?: string | null;
   pickup_date?: string | null;
 }
@@ -64,6 +68,8 @@ export function QuoteSendPreview({
           : null;
 
   const amount = quote.total_amount == null || quote.total_amount === '' ? null : Number(quote.total_amount);
+  const vat = quote.customer_price ?? null;
+  const money = (v: unknown) => formatCurrency(Number(v) || 0);
   const from = quote.pickup_location;
   const to = quote.delivery_location;
 
@@ -77,10 +83,18 @@ export function QuoteSendPreview({
     ...(quote.quote_number ? [{ label: 'Quote', value: String(quote.quote_number) }] : []),
     ...(from || to ? [{ label: 'Route', value: `${from || '—'} to ${to || '—'}` }] : []),
     ...(quote.pickup_date ? [{ label: 'Collection', value: formatDate(quote.pickup_date) }] : []),
-    {
-      label: 'Price',
-      value: amount == null || Number.isNaN(amount) ? '—' : `${formatCurrency(amount)} excl. VAT`,
-    },
+    // As in the email: price excl. VAT, the VAT, then the total incl. VAT.
+    ...(amount == null || Number.isNaN(amount)
+      ? [{ label: 'Price', value: '—' }]
+      : !vat
+        ? [{ label: 'Price', value: `${formatCurrency(amount)} excl. VAT` }]
+        : vat.vat_registered
+          ? [
+              { label: 'Price excl. VAT', value: formatCurrency(amount) },
+              { label: vat.vat_label || 'VAT', value: money(vat.vat_amount) },
+              { label: 'Total incl. VAT', value: money(vat.total_incl_vat) },
+            ]
+          : [{ label: 'Total', value: `${money(vat.total_incl_vat)} (no VAT charged)` }]),
     ...(validUntil
       ? [{ label: 'Valid until', value: expired ? `${validUntil} · expired` : validUntil, warn: expired }]
       : []),

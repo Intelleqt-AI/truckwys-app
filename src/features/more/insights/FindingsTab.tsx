@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { RefreshControl, ScrollView, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Badge, Button, Card, EmptyState, Icon, Mono, SectionLabel, Txt } from '@/components/ui';
+import { Button, Card, EmptyState, Icon, Mono, SectionLabel, Txt } from '@/components/ui';
 import { ErrorState, ListSkeleton } from '@/components/feedback';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { FindingCard } from './FindingCard';
+import { TabIntro } from './InsightCard';
 import { SummaryTiles } from './SummaryTiles';
 import { useFindings } from './useFindings';
 import { useOpenTarget } from './useOpenTarget';
@@ -58,6 +59,7 @@ export function FindingsTab() {
         />
       }
     >
+      <TabIntro text="Findings worth money, each with one next step" />
       {!hasRecords ? (
         <EmptyState
           icon="sparkle"
@@ -109,7 +111,10 @@ export function FindingsTab() {
                 className="mb-3 min-h-[44px] flex-row items-center gap-2"
               >
                 <Mono className="text-caption font-medium text-faint">Worth checking</Mono>
-                <Badge label={String(checking.length)} tone="neutral" />
+                {/* Compact count pill: <Badge> is self-start, so it sat at the top of this row. */}
+                <View className="min-w-[20px] items-center justify-center rounded-pill border border-line-active px-1.5 py-px">
+                  <Mono className="text-caption font-medium text-muted">{checking.length}</Mono>
+                </View>
                 <View className="flex-1" />
                 <Icon name={checkingOpen ? 'chevronUp' : 'chevronDown'} size={14} color={colors.faint} />
               </TouchableOpacity>

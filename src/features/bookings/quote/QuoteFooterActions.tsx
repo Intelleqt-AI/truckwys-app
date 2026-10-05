@@ -70,23 +70,6 @@ function QuoteFooterActionsImpl({
   // QuoteFooterBar's own padding animation around this component: the footer
   // already crowds the keyboard, a second row of text doesn't fit above it.
   const { animatedKeyboardState } = useBottomSheetInternal();
-  const stripStyle = useAnimatedStyle(() => {
-    const shown = animatedKeyboardState.value.status === KEYBOARD_STATUS.SHOWN;
-    return {
-      // 26, not 22: the total is text-callout, whose lineHeight is already 20,
-      // and this row is overflow-hidden — 2px of slack meant the OS text-size
-      // setting sliced the digits horizontally through the middle. Paired with
-      // maxFontSizeMultiplier below, which bounds how far that can go.
-      height: withTiming(shown ? 0 : 26, { duration: animatedKeyboardState.value.duration }),
-      opacity: withTiming(shown ? 0 : 1, { duration: animatedKeyboardState.value.duration }),
-      marginBottom: withTiming(shown ? 0 : 8, { duration: animatedKeyboardState.value.duration }),
-    };
-  });
-
-  // Status hues and faint are theme-aware, so the chevrons read them off the
-  // theme to match their own text colours.
-  const { colors } = useTheme();
-  const stripColor = strip?.tone === 'danger' ? colors.dangerDot : colors.warningDot;
 
   // The total used to be suppressed by *any* strip, which hid the price at the
   // one moment the user is watching for it — right after a Send attempt, while
@@ -100,6 +83,27 @@ function QuoteFooterActionsImpl({
   // transient state is unchanged (it shows R 0 next to the spinner, as it
   // ships today).
   const showTotal = ready && (!strip || (strip.tone === 'warning' && total > 0));
+  // Nothing to say (e.g. a fresh form, before any Save/Send attempt): collapse
+  // the row so there's no blank line above the buttons.
+  const hasRow = showTotal || !!strip || !!priceHint;
+
+  const stripStyle = useAnimatedStyle(() => {
+    const hidden = animatedKeyboardState.value.status === KEYBOARD_STATUS.SHOWN || !hasRow;
+    return {
+      // 26, not 22: the total is text-callout, whose lineHeight is already 20,
+      // and this row is overflow-hidden — 2px of slack meant the OS text-size
+      // setting sliced the digits horizontally through the middle. Paired with
+      // maxFontSizeMultiplier below, which bounds how far that can go.
+      height: withTiming(hidden ? 0 : 26, { duration: animatedKeyboardState.value.duration }),
+      opacity: withTiming(hidden ? 0 : 1, { duration: animatedKeyboardState.value.duration }),
+      marginBottom: withTiming(hidden ? 0 : 8, { duration: animatedKeyboardState.value.duration }),
+    };
+  }, [hasRow]);
+
+  // Status hues and faint are theme-aware, so the chevrons read them off the
+  // theme to match their own text colours.
+  const { colors } = useTheme();
+  const stripColor = strip?.tone === 'danger' ? colors.dangerDot : colors.warningDot;
 
   return (
     <View>

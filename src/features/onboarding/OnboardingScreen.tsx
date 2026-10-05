@@ -137,7 +137,7 @@ export function OnboardingScreen({ navigation }: Props) {
                   required
                   value={companyName}
                   onChangeText={setCompanyName}
-                  placeholder="ACME Logistics (Pty) Ltd"
+                  placeholder="e.g. ACME Logistics (Pty) Ltd"
                   autoFocus
                 />
                 <SelectField label="Industry" options={INDUSTRY_OPTIONS} value={industry} onSelect={setIndustry} />
@@ -145,7 +145,7 @@ export function OnboardingScreen({ navigation }: Props) {
                   label="Phone"
                   value={phone}
                   onChangeText={setPhone}
-                  placeholder="+27 11 123 4567"
+                  placeholder="e.g. +27 11 123 4567"
                   keyboardType="phone-pad"
                 />
                 <Button label="Continue" onPress={handleStep1Submit} loading={submitting} fullWidth />

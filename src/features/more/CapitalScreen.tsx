@@ -3,8 +3,9 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, SectionLabel, StatCard, Button, Badge, Card, Txt, Mono, EmptyState } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { useInvoiceAging } from '@/features/finance/api';
-import { useCapitalEligible, INVOICE_CHECKS, checksFor } from '@/features/finance/fastpay';
-import { CAPITAL_COMING_SOON } from '@/lib/features';
+import { useCapitalEligible, INVOICE_CHECKS, checksFor, isAccountLevel } from '@/features/finance/fastpay';
+import { CAPITAL_COMING_SOON, CAPITAL_LAUNCHED } from '@/lib/features';
+import { FastPayLaunched } from '@/features/capital/FastPayLaunched';
 import { num } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
 import type { AppStackParamList } from '@/navigation/types';
@@ -44,7 +45,24 @@ const STEPS = [
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
-export function CapitalScreen({ navigation }: Props) {
+/**
+ * Fast Pay. Before launch (lib/features.ts CAPITAL_LAUNCHED) this is the
+ * pre-launch page below; once launched it is the live page, with the line, the
+ * application, offers, requests and history (features/capital/FastPayLaunched).
+ */
+export function CapitalScreen(props: Props) {
+  return CAPITAL_LAUNCHED ? <CapitalLive {...props} /> : <CapitalPrelaunch {...props} />;
+}
+
+function CapitalLive({ navigation }: Props) {
+  return (
+    <SheetScreen title="Fast Pay" onBack={() => navigation.goBack()}>
+      <FastPayLaunched />
+    </SheetScreen>
+  );
+}
+
+function CapitalPrelaunch({ navigation }: Props) {
   const aging = useInvoiceAging();
   const eligible = useCapitalEligible();
 
@@ -149,9 +167,9 @@ function WaitingOnCustomers({ aging }: { aging: NonNullable<ReturnType<typeof us
 }
 
 function InvoiceChecks({ data }: { data: ReturnType<typeof useCapitalEligible>['data'] }) {
-  // "No active facility" is true of every invoice before launch, so it says
-  // nothing about the invoice itself.
-  const ineligible = (data?.ineligible_invoices ?? []).filter((i) => i.rule !== 'NO_FACILITY');
+  // Account-level blockers (no Fast Pay line, application not approved, ...) are
+  // true of every invoice before launch, so they say nothing about the invoice.
+  const ineligible = (data?.ineligible_invoices ?? []).filter((i) => !isAccountLevel(i));
   const passed = data?.invoices ?? [];
   const checked = ineligible.length + passed.length;
 

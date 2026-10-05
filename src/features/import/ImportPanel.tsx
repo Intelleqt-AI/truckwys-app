@@ -212,7 +212,7 @@ export function ImportPanel({
               value={text}
               onChangeText={setText}
               placeholder={sample.example}
-              placeholderTextColor={colors.faint}
+              placeholderTextColor={colors.placeholder}
               multiline
               numberOfLines={10}
               autoCapitalize="none"

@@ -468,7 +468,7 @@ export function CopilotScreen({ navigation }: Props) {
               ref={inputRef}
               className="text-fg"
               placeholder="Ask about your operation…"
-              placeholderTextColor={colors.faint}
+              placeholderTextColor={colors.placeholder}
               value={input}
               onChangeText={setInput}
               multiline

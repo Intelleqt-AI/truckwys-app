@@ -257,7 +257,7 @@ export function SignInField({
         <TextInput
           className="flex-1 text-fg"
           placeholder={label}
-          placeholderTextColor={colors.faint}
+          placeholderTextColor={colors.placeholder}
           secureTextEntry={hidden}
           accessibilityLabel={label}
           onFocus={(e) => {

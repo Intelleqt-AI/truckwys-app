@@ -4,7 +4,7 @@ import { fetchData } from '@/lib/api/client';
 import { num, pick, str } from '@/lib/api/list';
 import { saDaysBetween } from '@/lib/dates';
 import { formatCurrency, formatDate } from '@/lib/formatters';
-import { invoiceBalance } from '@/lib/invoiceStatus';
+import { invoiceBalance, invoiceDisplayNumber } from '@/lib/invoiceStatus';
 import { useAuthStore } from '@/stores/authStore';
 
 // Preview-and-confirm before an invoice or a payment reminder is emailed. The
@@ -64,7 +64,10 @@ export function InvoiceSendPreview({
       ? undefined
       : null;
 
-  const number = str(pick(invoice, ['invoice_number', 'number']), `#${str(invoice.id)}`);
+  // A draft carries a placeholder; the real number is allocated when it is sent,
+  // so the preview can't show it yet.
+  const unnumbered = invoiceDisplayNumber(invoice) === 'Draft';
+  const number = unnumbered ? 'Assigned when sent' : invoiceDisplayNumber(invoice, `#${str(invoice.id)}`);
   const customerName = str(pick(invoice, ['customer_name']), str(customerQ.data?.name)) || undefined;
   const total = num(pick(invoice, ['total_amount', 'total', 'amount']));
   const balance = invoiceBalance(invoice);
@@ -97,7 +100,9 @@ export function InvoiceSendPreview({
     ];
     note = 'The email links to the invoice so they can view and pay it.';
   } else {
-    subject = companyName ? `Invoice ${number} from ${companyName} — ${formatCurrency(total)}` : undefined;
+    subject = companyName
+      ? `Invoice ${unnumbered ? '' : `${number} `}from ${companyName} — ${formatCurrency(total)}`
+      : undefined;
     const passed = daysLate(due) > 0;
     rows = [
       { label: 'Invoice', value: number },

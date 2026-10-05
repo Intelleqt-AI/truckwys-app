@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, ScrollView, RefreshControl, TouchableOpacity, Alert } from 'react-native';
+import { View, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -12,8 +12,6 @@ import {
   StatCard,
   KpiRow,
   StatusPill,
-  Group,
-  DetailRow,
   Card,
   IconButton,
   OverflowMenu,
@@ -21,14 +19,19 @@ import {
   Button,
   Txt,
   Mono,
-  SectionLabel,
   EmptyState,
+  ListRow,
 } from '@/components/ui';
+import { ReportLibrary } from './reports/ReportLibrary';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
+import { useCreditNotesList } from '@/lib/finance/api';
+import { num, pick } from '@/lib/api/list';
 import {
-  useInvoices,
-  useExpenses,
-  useFinanceReports,
+  useInvoicesList,
+  useInvoicesSummary,
+  useInvoiceAging,
+  useExpensesList,
+  useExpensesSummary,
   approveExpense,
   rejectExpense,
   deleteExpense,
@@ -47,11 +50,10 @@ import {
   formatCurrency,
   formatCurrencyCompact,
   formatDate,
-  formatNumber,
-  formatPercent,
 } from '@/lib/formatters';
 import type { TabParamList, FinanceTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 
 type Props = BottomTabScreenProps<TabParamList, 'Finance'>;
 
@@ -63,6 +65,9 @@ export function FinanceScreen({ route }: Props) {
   // The manual action goes away while billing is blocked; invoice-on-delivery is
   // raised server-side and is deliberately unaffected.
   const hideCreate = subscription.blocked && tab !== 'expenses';
+  // Credit notes are issued from an invoice, not from here, and Reports has
+  // nothing to add.
+  const noAdd = tab === 'reports' || tab === 'credits' || hideCreate;
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
@@ -73,8 +78,8 @@ export function FinanceScreen({ route }: Props) {
             // Ghost slot on Reports keeps the header height identical across
             // tabs, so the pager never jumps vertically.
             <View
-              style={tab === 'reports' || hideCreate ? { opacity: 0 } : undefined}
-              pointerEvents={tab === 'reports' || hideCreate ? 'none' : 'auto'}
+              style={noAdd ? { opacity: 0 } : undefined}
+              pointerEvents={noAdd ? 'none' : 'auto'}
             >
               <IconButton
                 name="plus"
@@ -88,6 +93,7 @@ export function FinanceScreen({ route }: Props) {
       <SwipeTabs
         tabs={[
           { label: 'Invoices', value: 'invoices' },
+          { label: 'Credits', value: 'credits' },
           { label: 'Expenses', value: 'expenses' },
           { label: 'Reports', value: 'reports' },
         ]}
@@ -95,8 +101,9 @@ export function FinanceScreen({ route }: Props) {
         onChange={setTab}
       >
         <InvoicesTab />
+        <CreditNotesTab />
         <ExpensesTab />
-        <ReportsTab />
+        <ReportLibrary />
       </SwipeTabs>
     </View>
   );
@@ -107,18 +114,23 @@ export function FinanceScreen({ route }: Props) {
 // invoices never are. Same set as the backend's one "outstanding" rule.
 const OWED_STATUSES = new Set(['SENT', 'VIEWED', 'PARTIALLY_PAID', 'OVERDUE']);
 
-type InvoiceFilter = 'ALL' | 'SENT' | 'OVERDUE' | 'PAID' | 'DRAFT';
-
-function invoiceMatches(inv: InvoiceLite, filter: InvoiceFilter): boolean {
-  if (filter === 'ALL') return true;
-  // Overdue is the one shared definition (unpaid, sent, past due), whatever the
-  // status string says, so the chip, the tile and the row badge cannot disagree.
-  if (filter === 'OVERDUE') return isInvoiceOverdue(inv.raw);
-  return inv.status === filter;
+/** Under a server-paged list while the next page loads. */
+function MoreSpinner() {
+  const { colors } = useTheme();
+  return (
+    <View className="py-4">
+      <ActivityIndicator color={colors.faint} />
+    </View>
+  );
 }
+
+type InvoiceFilter = 'ALL' | 'SENT' | 'OVERDUE' | 'PAID' | 'DRAFT';
 
 // Whole rands in lists and tiles; cents live on the invoice itself.
 const wholeRands = (n: number) => formatCurrency(n, { maximumFractionDigits: 0 });
+
+/** Credit notes applied to an invoice (incl. VAT), when it has any. */
+const creditedOf = (inv: InvoiceLite): number => num(pick(inv.raw, ['credited_amount']));
 
 // Aging line for an invoice that is still owed: "12 days late" (danger, by the
 // shared overdue rule), "due today", "due in 3 days". Drafts, paid and cancelled
@@ -134,20 +146,28 @@ function dueAging(inv: InvoiceLite): { text: string; late: boolean } | null {
 }
 
 function InvoicesTab() {
-  // useInvoices follows every page (fetchAllRows), so the tiles and chip counts
-  // below are totals over the whole ledger, not the size of a first page.
-  const { data, isLoading, isError, refetch } = useInvoices();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
-  const { openInvoice, goTab } = useAppNavigation();
   const [filter, setFilter] = useState<InvoiceFilter>('ALL');
+  const [q, setQ] = useState('');
+  const search = useDebouncedValue(q.trim());
+  // Server-side: one page of rows (status chip and search done by the API), the
+  // tiles and chip counts from invoices/summary/ over every invoice, and what is
+  // owed in total from the aging report. Nothing here downloads the ledger.
+  const list = useInvoicesList(filter, search);
+  const summaryQ = useInvoicesSummary();
+  const agingQ = useInvoiceAging();
+  const { refreshing, onRefresh } = useManualRefresh(async () => {
+    await Promise.all([list.refresh(), summaryQ.refetch(), agingQ.refetch()]);
+  });
+  const { openInvoice, goTab } = useAppNavigation();
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load invoices." />;
+  if (list.isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (list.isError && list.combinedData.length === 0)
+    return <ErrorState onRetry={() => void list.refresh()} message="Couldn't load invoices." />;
 
-  const owed = data.filter((i) => OWED_STATUSES.has(i.status));
-  const outstanding = owed.reduce((s, i) => s + invoiceBalance(i.raw), 0);
-  const overdueList = data.filter((i) => isInvoiceOverdue(i.raw));
-  const overdueAmount = overdueList.reduce((s, i) => s + invoiceBalance(i.raw), 0);
+  const rows = list.combinedData;
+  const sum = summaryQ.data;
+  const aging = agingQ.data?.summary;
+  const overdueCount = sum?.overdue_count ?? 0;
 
   const FILTERS: { label: string; value: InvoiceFilter }[] = [
     { label: 'All', value: 'ALL' },
@@ -156,13 +176,11 @@ function InvoicesTab() {
     { label: 'Paid', value: 'PAID' },
     { label: 'Draft', value: 'DRAFT' },
   ];
-  // Counts use the same rule as the filter, over the full list, so a chip never
-  // disagrees with the rows it shows or with the tiles above.
+  // Counts are the server's, over every invoice, by the same rule as the filter.
   const options = FILTERS.map((f) => ({
     ...f,
-    count: data.filter((i) => invoiceMatches(i, f.value)).length,
+    count: sum?.status_counts?.[f.value === 'ALL' ? 'All' : f.value],
   }));
-  const rows = data.filter((i) => invoiceMatches(i, filter));
 
   return (
     <FlashList
@@ -170,7 +188,11 @@ function InvoicesTab() {
       keyExtractor={(i) => String(i.id)}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      showsVerticalScrollIndicator={false}
       extraData={filter}
+      onEndReached={() => list.hasMore && !list.isFetching && void list.loadMore()}
+      onEndReachedThreshold={1.5}
+      ListFooterComponent={list.isFetching ? <MoreSpinner /> : null}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
@@ -178,28 +200,37 @@ function InvoicesTab() {
             <KpiRow>
               <StatCard
                 label="Outstanding"
-                value={wholeRands(outstanding)}
-                note={`${owed.length} ${owed.length === 1 ? 'invoice' : 'invoices'} unpaid`}
+                value={aging ? wholeRands(aging.total_outstanding) : '—'}
+                note={
+                  aging
+                    ? `${aging.total_invoice_count} ${aging.total_invoice_count === 1 ? 'invoice' : 'invoices'} unpaid`
+                    : undefined
+                }
                 emphasis
               />
               <StatCard
                 label="Overdue"
-                value={wholeRands(overdueAmount)}
+                value={sum ? wholeRands(sum.overdue_amount) : '—'}
                 note={
-                  overdueList.length > 0
-                    ? `${overdueList.length} ${overdueList.length === 1 ? 'invoice' : 'invoices'} late`
-                    : 'Nothing late'
+                  !sum
+                    ? undefined
+                    : overdueCount > 0
+                      ? `${overdueCount} ${overdueCount === 1 ? 'invoice' : 'invoices'} late`
+                      : 'Nothing late'
                 }
-                tone={overdueList.length > 0 ? 'danger' : undefined}
+                tone={overdueCount > 0 ? 'danger' : undefined}
                 onPress={() => setFilter('OVERDUE')}
               />
             </KpiRow>
+          </View>
+          <View className="mb-3">
+            <SearchField value={q} onChangeText={setQ} placeholder="Search invoices…" />
           </View>
           <FilterChips options={options} value={filter} onChange={(v) => setFilter(v as InvoiceFilter)} />
         </View>
       }
       ListEmptyComponent={
-        filter === 'ALL' ? (
+        filter === 'ALL' && !search ? (
           <EmptyState
             icon="receipt"
             title="No invoices yet."
@@ -211,7 +242,7 @@ function InvoicesTab() {
             icon="receipt"
             title="No invoices here."
             body="No invoices match this filter."
-            action={<Button label="Show all" variant="secondary" onPress={() => setFilter('ALL')} />}
+            action={<Button label="Show all" variant="secondary" onPress={() => { setFilter('ALL'); setQ(''); }} />}
           />
         )
       }
@@ -245,11 +276,17 @@ function InvoicesTab() {
               </View>
               <View className="items-end gap-1">
                 <Mono className="text-callout font-semibold text-fg">{wholeRands(item.total)}</Mono>
+                {creditedOf(item) > 0 && (
+                  <Mono className="text-caption text-faint">{`${wholeRands(creditedOf(item))} credited`}</Mono>
+                )}
                 <StatusPill
                   status={
                     isInvoiceOverdue(item.raw) && (item.status === 'SENT' || item.status === 'VIEWED')
                       ? 'OVERDUE'
-                      : item.status
+                      // An invoice that has been cancelled is "Void" (loads and quotes keep "Cancelled").
+                      : item.status === 'CANCELLED'
+                        ? 'VOID'
+                        : item.status
                   }
                 />
               </View>
@@ -261,18 +298,112 @@ function InvoicesTab() {
   );
 }
 
+type CreditFilter = 'ALL' | 'ISSUED' | 'VOID';
+
+/** Credit notes, newest first: what was credited, against which invoice, and why. */
+function CreditNotesTab() {
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<CreditFilter>('ALL');
+  const search = useDebouncedValue(q.trim());
+  // Server-side: newest first, status and search done by the API; page 1 carries
+  // the chip counts over every credit note.
+  const list = useCreditNotesList(filter, search);
+  const { refreshing, onRefresh } = useManualRefresh(list.refresh);
+  const { nav } = useAppNavigation();
+
+  if (list.isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (list.isError && list.combinedData.length === 0)
+    return <ErrorState onRetry={() => void list.refresh()} message="Couldn't load credit notes." />;
+
+  const rows = list.combinedData;
+  const counts = list.extras?.status_counts;
+  const options = [
+    { label: 'All', value: 'ALL' as const, count: counts?.ALL },
+    { label: 'Issued', value: 'ISSUED' as const, count: counts?.ISSUED },
+    { label: 'Void', value: 'VOID' as const, count: counts?.VOID },
+  ];
+
+  return (
+    <FlashList
+      data={rows}
+      keyExtractor={(c) => String(c.id)}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      showsVerticalScrollIndicator={false}
+      extraData={filter}
+      onEndReached={() => list.hasMore && !list.isFetching && void list.loadMore()}
+      onEndReachedThreshold={1.5}
+      ListFooterComponent={list.isFetching ? <MoreSpinner /> : null}
+      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
+      ListHeaderComponent={
+        <View className="mb-3">
+          <View className="mb-3">
+            <SearchField value={q} onChangeText={setQ} placeholder="Search credit notes…" />
+          </View>
+          <FilterChips options={options} value={filter} onChange={setFilter} />
+        </View>
+      }
+      ListEmptyComponent={
+        <EmptyState
+          icon="receipt"
+          title={counts?.ALL === 0 ? 'No credit notes yet' : 'No credit notes here'}
+          body={
+            counts?.ALL === 0
+              ? 'To correct an invoice that has been sent, open it and choose Issue credit note.'
+              : 'No credit notes match this filter.'
+          }
+        />
+      }
+      renderItem={({ item }) => (
+        <Card className="mb-2.5">
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => nav.navigate('CreditNoteDetail', { id: item.id })}
+            accessibilityRole="button"
+            className="min-h-[56px] flex-row items-center gap-3 px-4 py-3"
+          >
+            <View className="flex-1">
+              <Txt className="text-body text-fg" numberOfLines={1}>
+                {item.customer_name}
+              </Txt>
+              <Mono className="mt-0.5 text-caption text-muted" numberOfLines={1}>
+                {`${item.credit_note_number} · ${item.invoice_number} · ${formatDate(item.issue_date)}`}
+              </Mono>
+            </View>
+            <View className="items-end gap-1">
+              <Mono
+                className={`text-callout font-semibold ${item.status === 'VOID' ? 'text-faint line-through' : 'text-fg'}`}
+              >
+                {wholeRands(num(item.total_amount))}
+              </Mono>
+              <StatusPill status={item.status} />
+            </View>
+          </TouchableOpacity>
+        </Card>
+      )}
+    />
+  );
+}
+
 const EXPENSE_STATUS_FILTERS = [
   { label: 'All', value: 'ALL' },
   ...EXPENSE_STATUSES.map((s) => ({ label: s.charAt(0) + s.slice(1).toLowerCase(), value: s })),
 ];
 
 function ExpensesTab() {
-  const { data, isLoading, isError, refetch } = useExpenses();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
-  const { nav } = useAppNavigation();
-  const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [statusF, setStatusF] = useState('ALL');
+  const search = useDebouncedValue(q.trim());
+  // Server-side: one page of rows (status and search done by the API, newest
+  // first) plus expenses/summary/ for the tiles and chip counts over every
+  // expense.
+  const list = useExpensesList(statusF, search);
+  const summaryQ = useExpensesSummary();
+  const { refreshing, onRefresh } = useManualRefresh(async () => {
+    await Promise.all([list.refresh(), summaryQ.refetch()]);
+  });
+  const { nav } = useAppNavigation();
+  const qc = useQueryClient();
 
   const refresh = () => invalidateFor(qc, 'expense');
   const act = async (fn: () => Promise<unknown>, errMsg: string) => {
@@ -307,59 +438,76 @@ function ExpensesTab() {
     },
   ];
 
-  if (isLoading) return <View className="p-screen"><ListSkeleton /></View>;
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load expenses." />;
+  if (list.isLoading) return <View className="p-screen"><ListSkeleton /></View>;
+  if (list.isError && list.combinedData.length === 0)
+    return <ErrorState onRetry={() => void list.refresh()} message="Couldn't load expenses." />;
 
-  // ── KPI cards (this calendar month, matching web) ──
-  // Compare the stored YYYY-MM against the local month. new Date('2026-10-01')
-  // is UTC midnight, which would put the 1st into the previous month for anyone
-  // west of UTC.
-  const thisMonthKey = localDateISO().slice(0, 7);
-  const thisMonth = data.filter((e) => !!e.date && e.date.slice(0, 7) === thisMonthKey);
-  const totalMtd = thisMonth.filter((e) => e.status === 'APPROVED').reduce((s, e) => s + e.amount, 0);
-  const pending = data.filter((e) => e.status === 'PENDING');
-  const pendingAmount = pending.reduce((s, e) => s + e.amount, 0);
-  const fuelMtd = thisMonth.filter((e) => e.category === 'FUEL').reduce((s, e) => s + e.amount, 0);
-  const catTotals = thisMonth.reduce<Record<string, number>>((acc, e) => {
-    acc[e.category] = (acc[e.category] ?? 0) + e.amount;
-    return acc;
-  }, {});
-  const topEntry = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0];
-
-  const list = data.filter(
-    (e) =>
-      (statusF === 'ALL' || e.status === statusF) &&
-      (!q ||
-        `${e.description} ${e.vendor} ${e.expenseNumber}`.toLowerCase().includes(q.toLowerCase())),
+  // ── Tiles: the server's summary over every expense ──
+  // Spend is approved and pending (rejected is not spend). "This month" is the
+  // current calendar month's entry; the local date, not UTC, names the month.
+  const sum = summaryQ.data;
+  const monthKey = localDateISO().slice(0, 7);
+  const thisMonth = sum?.months.find(
+    (m) => `${m.year}-${String(m.month).padStart(2, '0')}` === monthKey,
   );
+  const topCategory = sum?.by_category[0];
+  const statusCounts = sum?.status_counts;
+  const statusOptions = EXPENSE_STATUS_FILTERS.map((f) => ({
+    ...f,
+    count: statusCounts?.[f.value],
+  }));
+  const pendingCount = sum?.pending_count ?? 0;
+  const data = list.combinedData;
 
   return (
     <FlashList
-      data={list}
+      data={data}
       keyExtractor={(e) => String(e.id)}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      showsVerticalScrollIndicator={false}
+      extraData={statusF}
+      onEndReached={() => list.hasMore && !list.isFetching && void list.loadMore()}
+      onEndReachedThreshold={1.5}
+      ListFooterComponent={list.isFetching ? <MoreSpinner /> : null}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3">
             <KpiRow>
-              <StatCard label="Total (MTD)" value={formatCurrencyCompact(totalMtd)} />
+              <StatCard
+                label="This month"
+                value={sum ? formatCurrencyCompact(thisMonth?.amount ?? 0) : '—'}
+                note="Approved and pending"
+              />
               <StatCard
                 label="Pending approval"
-                value={formatCurrencyCompact(pendingAmount)}
-                note={`${pending.length} ${pending.length === 1 ? 'expense' : 'expenses'}`}
-                tone={pending.length > 0 ? 'warning' : undefined}
+                value={sum ? formatCurrencyCompact(sum.pending_amount) : '—'}
+                note={sum ? `${pendingCount} ${pendingCount === 1 ? 'expense' : 'expenses'}` : undefined}
+                tone={pendingCount > 0 ? 'warning' : undefined}
                 onPress={() => setStatusF('PENDING')}
               />
-              <StatCard label="Fuel (MTD)" value={formatCurrencyCompact(fuelMtd)} />
-              {topEntry && <StatCard label="Top category" value={expenseCategoryLabel(topEntry[0])} />}
+              <StatCard
+                label="Approved, 12 months"
+                value={sum ? formatCurrencyCompact(sum.approved_year_amount) : '—'}
+              />
+              {topCategory && (
+                <StatCard label="Top category" value={expenseCategoryLabel(topCategory.category)} note="All time" />
+              )}
             </KpiRow>
           </View>
+          <Card className="mb-3 overflow-hidden">
+            <ListRow
+              title="Suppliers"
+              subtitle="Who you buy from, linked to expenses"
+              onPress={() => nav.navigate('Suppliers')}
+              last
+            />
+          </Card>
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search expenses…" />
           </View>
-          <FilterChips options={EXPENSE_STATUS_FILTERS} value={statusF} onChange={setStatusF} />
+          <FilterChips options={statusOptions} value={statusF} onChange={setStatusF} />
         </View>
       }
       ItemSeparatorComponent={() => <View className="h-2.5" />}
@@ -367,7 +515,7 @@ function ExpensesTab() {
         <EmptyState
           icon="banknote"
           title="No expenses"
-          body={statusF === 'ALL' && !q ? 'Expenses you record appear here.' : 'No expenses match this filter.'}
+          body={statusF === 'ALL' && !search ? 'Expenses you record appear here.' : 'No expenses match this filter.'}
         />
       }
       renderItem={({ item }) => (
@@ -391,7 +539,12 @@ function ExpensesTab() {
               <Txt className="text-caption text-muted" numberOfLines={1}>
                 {[item.vendor, item.date ? formatDate(item.date) : ''].filter(Boolean).join(' · ') || '—'}
               </Txt>
-              <Mono className="text-body font-semibold text-fg">{formatCurrency(item.amount)}</Mono>
+              <View className="items-end">
+                <Mono className="text-body font-semibold text-fg">{formatCurrency(item.amount)}</Mono>
+                {item.vat > 0 && (
+                  <Mono className="text-caption text-faint">{`VAT ${formatCurrency(item.vat)}`}</Mono>
+                )}
+              </View>
             </View>
           </TouchableOpacity>
           <View className="py-3 pr-3">
@@ -414,84 +567,3 @@ function ExpensesTab() {
   );
 }
 
-function ReportsTab() {
-  const { data, isLoading, isError, refetch } = useFinanceReports();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
-  const { colors } = useTheme();
-  if (isLoading) return <View className="p-screen"><ListSkeleton rows={4} /></View>;
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load reports." />;
-  const { summary: f, monthlyTrend, marginByLane } = data;
-
-  const maxTrend = Math.max(1, ...monthlyTrend.flatMap((m) => [m.revenue, m.expense]));
-
-  return (
-    <ScrollView
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.faint}
-          colors={[colors.faint]}
-          progressBackgroundColor={colors.surface}
-        />
-      }
-    >
-      <View className="mb-5">
-        <KpiRow>
-          <StatCard label="Total revenue" value={formatCurrencyCompact(f.totalRevenue)} />
-          <StatCard label="Net margin" value={formatPercent(f.netMarginPct)} />
-          <StatCard label="Outstanding" value={formatCurrencyCompact(f.outstanding)} />
-          <StatCard label="DSO" value={`${formatNumber(f.dso, { maximumFractionDigits: 1 })}d`} />
-        </KpiRow>
-      </View>
-
-      {monthlyTrend.length > 0 && (
-        <View className="mb-5">
-          <SectionLabel>Revenue vs expense</SectionLabel>
-          <Card className="p-4">
-            {monthlyTrend.map((m) => (
-              <View key={m.label} className="mb-3">
-                <View className="mb-1 flex-row justify-between">
-                  <Mono className="text-caption text-faint">{m.label}</Mono>
-                  <Mono className="text-caption text-muted">{formatCurrencyCompact(m.revenue)}</Mono>
-                </View>
-                <Bar value={m.revenue} max={maxTrend} tone="accent" />
-                <View className="h-1" />
-                <Bar value={m.expense} max={maxTrend} tone="muted" />
-              </View>
-            ))}
-          </Card>
-        </View>
-      )}
-
-      {marginByLane.length > 0 && (
-        <Group label="Margin by lane">
-          {marginByLane.slice(0, 8).map((l) => (
-            <DetailRow key={l.lane} label={l.lane} value={formatPercent(l.margin)} mono={false} />
-          ))}
-        </Group>
-      )}
-
-      {monthlyTrend.length === 0 && marginByLane.length === 0 && (
-        <EmptyState icon="chart" title="No report data" body="Reports populate as you invoice and record expenses." />
-      )}
-    </ScrollView>
-  );
-}
-
-function Bar({ value, max, tone }: { value: number; max: number; tone: 'accent' | 'muted' }) {
-  const { colors } = useTheme();
-  const pct = Math.max(2, Math.round((value / max) * 100));
-  return (
-    <View className="h-2 overflow-hidden rounded-pill" style={{ backgroundColor: colors.chartBar }}>
-      <View
-        style={{
-          width: `${pct}%`,
-          height: '100%',
-          backgroundColor: tone === 'accent' ? colors.accent : colors.chartMuted,
-        }}
-      />
-    </View>
-  );
-}

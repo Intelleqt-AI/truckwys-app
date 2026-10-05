@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,9 +26,11 @@ import {
 } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
 import { StaleDataNotice } from '@/features/home/StaleDataNotice';
-import { useVehicles, useDrivers, bulkDeleteVehicles } from './api';
-import { activeLoadByVehicle, doingNow, type DoingNow } from './doingNow';
-import { useLedger } from '@/lib/useLedger';
+import { useVehiclesFleet, useDriversFleet, bulkDeleteVehicles, type VehicleTile } from './api';
+import { doingNow, type DoingNow } from './doingNow';
+import type { Load } from '@/lib/ledger';
+import { pick } from '@/lib/api/list';
+import { formatDate } from '@/lib/formatters';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useDemo } from '@/hooks/useDemo';
@@ -38,19 +40,21 @@ import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import type { TabParamList, FleetTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
-import { useAutoRefreshStale } from '@/hooks/useAutoRefreshStale';
+import { STALE_MS, useAutoRefreshStale } from '@/hooks/useAutoRefreshStale';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 
 type Props = BottomTabScreenProps<TabParamList, 'Fleet'>;
 
 const VEHICLE_NOUNS = { singular: 'vehicle', plural: 'vehicles' };
 
-const VEHICLE_FILTERS = [
+// The server's tiles are the filters (vehicles/?view=fleet&tile=): the figure on
+// a tile is the number of rows you land on when you tap it.
+const VEHICLE_FILTERS: { label: string; value: 'ALL' | VehicleTile }[] = [
   { label: 'All', value: 'ALL' },
-  { label: 'Available', value: 'AVAILABLE' },
-  { label: 'In use', value: 'IN_USE' },
-  { label: 'Maintenance', value: 'MAINTENANCE' },
-  { label: 'Out of service', value: 'OUT_OF_SERVICE' },
-  { label: 'Inactive', value: 'INACTIVE' },
+  { label: 'In use', value: 'job' },
+  { label: 'Available', value: 'free' },
+  { label: 'Maintenance', value: 'shop' },
+  { label: 'To review', value: 'mismatch' },
 ];
 
 const DRIVER_FILTERS = [
@@ -59,14 +63,6 @@ const DRIVER_FILTERS = [
   { label: 'On leave', value: 'ON_LEAVE' },
   { label: 'Inactive', value: 'INACTIVE' },
 ];
-
-// Chip counts come from the full list (fetchAllRows), so they are real totals.
-function withCounts(options: { label: string; value: string }[], items: { status: string }[]) {
-  return options.map((o) => ({
-    ...o,
-    count: o.value === 'ALL' ? items.length : items.filter((i) => i.status === o.value).length,
-  }));
-}
 
 // The "Doing now" line under a truck: what its open order says it is doing.
 // Amber dot when the status and the orders disagree or the order was left open.
@@ -210,6 +206,16 @@ export function FleetScreen({ route }: Props) {
   );
 }
 
+/** Under a server-paged list while the next page loads. */
+function MoreSpinner() {
+  const { colors } = useTheme();
+  return (
+    <View className="py-4">
+      <ActivityIndicator color={colors.faint} />
+    </View>
+  );
+}
+
 function VehiclesTab({
   selection,
   onListChange,
@@ -221,36 +227,30 @@ function VehiclesTab({
   onListChange: (total: number, visibleIds: (string | number)[]) => void;
 }) {
   const { selectMode, selected, toggle, enter } = selection;
-  const { data, isLoading, isError, refetch, dataUpdatedAt, isRefetchError, isFetching } = useVehicles();
-  // Every load, for "Doing now". Shares Home's cached ledger, and never blocks
-  // the list: while it loads or if it fails the rows simply have no such line.
-  const ledger = useLedger(['loads']);
-  const refetchAll = () => Promise.all([refetch(), ledger.refetch()]);
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<'ALL' | VehicleTile>('ALL');
+  const search = useDebouncedValue(q.trim());
+  // Server-side: search and the tile filter go to the API, which sends one page
+  // of trucks (each with its open order and delivered work) and the tiles. No
+  // download of every truck and every load.
+  const list = useVehiclesFleet(filter === 'ALL' ? null : filter, search);
+  const { isLoading, isError, dataUpdatedAt, isRefetchError, isFetchingAny } = list;
+  const data = list.combinedData;
+  const sum = list.extras?.summary;
+  const refetchAll = () => list.refresh();
   const { refreshing, onRefresh } = useManualRefresh(refetchAll);
   const notice = useManualRefresh(refetchAll);
-  useAutoRefreshStale([['vehicles'], ['ledger-loads']], dataUpdatedAt);
+  useAutoRefreshStale([['vehicles']], dataUpdatedAt);
   const { openVehicle, nav, openImport } = useAppNavigation();
   const { colors } = useTheme();
   const demo = useDemo();
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState('ALL');
 
-  const loads = ledger.data?.loads;
-  const loadByVehicle = useMemo(() => (loads ? activeLoadByVehicle(loads) : null), [loads]);
-
-  const list = useMemo(
-    () =>
-      (data ?? []).filter(
-        (v) =>
-          (filter === 'ALL' || v.status === filter) &&
-          (!q || `${v.name} ${v.plate}`.toLowerCase().includes(q.toLowerCase())),
-      ),
-    [data, filter, q],
-  );
-
+  // The whole fleet's size (not the filtered rows), so the header offers
+  // "Select" whenever there are trucks.
+  const everyTruck = sum?.total ?? data.length;
   useEffect(() => {
-    onListChange(data?.length ?? 0, list.map((v) => v.id));
-  }, [data, list, onListChange]);
+    onListChange(everyTruck, data.map((v) => v.id));
+  }, [everyTruck, data, onListChange]);
 
   if (isLoading)
     return (
@@ -258,105 +258,137 @@ function VehiclesTab({
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load vehicles." />;
+  if (isError && data.length === 0)
+    return <ErrorState onRetry={() => void list.refresh()} message="Couldn't load vehicles." />;
 
   // Web's status tiles. Each is also the list filter, so the figure on a tile is
   // the number of rows you land on when you tap it.
-  const inUse = data.filter((v) => v.status === 'IN_USE').length;
-  const available = data.filter((v) => v.status === 'AVAILABLE').length;
-  const maint = data.filter((v) => v.status === 'MAINTENANCE').length;
-  const outOfService = data.filter((v) => v.status === 'OUT_OF_SERVICE').length;
-  const toggleFilter = (value: string) => setFilter((f) => (f === value ? 'ALL' : value));
+  const inUse = sum?.job ?? 0;
+  const available = sum?.free ?? 0;
+  const maint = sum?.shop ?? 0;
+  const outOfService = sum?.out_of_service ?? 0;
+  const mismatches = sum ? sum.job_no_order + sum.free_on_order + sum.shop_on_order : 0;
+  const toggleFilter = (value: VehicleTile) => setFilter((f) => (f === value ? 'ALL' : value));
+  const options = VEHICLE_FILTERS.map((o) => ({
+    ...o,
+    count: !sum
+      ? undefined
+      : o.value === 'ALL'
+        ? sum.total
+        : o.value === 'job'
+          ? sum.job
+          : o.value === 'free'
+            ? sum.free
+            : o.value === 'shop'
+              ? sum.shop
+              : mismatches,
+  }));
 
   return (
     <FlashList
-      data={list}
+      data={data}
       keyExtractor={(v) => String(v.id)}
-      extraData={loadByVehicle}
+      showsVerticalScrollIndicator={false}
+      extraData={selectMode ? selected : filter}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      onEndReached={() => list.hasMore && !list.isFetching && void list.loadMore()}
+      onEndReachedThreshold={1.5}
+      ListFooterComponent={list.isFetching ? <MoreSpinner /> : null}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
           {/* An automatic refresh in progress isn't news; only a manual one is shown. */}
-          {(notice.refreshing || !isFetching) && (
+          {(notice.refreshing || !isFetchingAny) && (
             <StaleDataNotice
               className="mb-3"
               updatedAt={dataUpdatedAt}
               refreshFailed={isRefetchError}
               refreshing={notice.refreshing}
               onRetry={notice.onRefresh}
+              staleAfterMs={STALE_MS + 60_000}
             />
           )}
-          <View className="mb-3">
-            <KpiRow>
-              <StatCard
-                label="Marked in use"
-                value={String(inUse)}
-                note={`of ${data.length}`}
-                onPress={() => toggleFilter('IN_USE')}
-              />
-              <StatCard
-                label="Available"
-                value={String(available)}
-                note={available > 0 ? 'Free to take a load' : 'Every truck is busy'}
-                onPress={() => toggleFilter('AVAILABLE')}
-              />
-              <StatCard
-                label="In maintenance"
-                value={String(maint)}
-                note={
-                  outOfService > 0
-                    ? `${outOfService} out of service`
-                    : maint > 0
-                      ? 'In the workshop'
-                      : 'None in the workshop'
-                }
-                onPress={() => toggleFilter('MAINTENANCE')}
-              />
-            </KpiRow>
-          </View>
+          {sum && (
+            <View className="mb-3">
+              <KpiRow>
+                <StatCard
+                  label="Marked in use"
+                  value={String(inUse)}
+                  note={`of ${sum.total}`}
+                  onPress={() => toggleFilter('job')}
+                />
+                <StatCard
+                  label="Available"
+                  value={String(available)}
+                  note={
+                    available === 0
+                      ? 'Every truck is busy'
+                      : sum.free_holding > 0
+                        ? `${sum.free_holding} holding orders left open`
+                        : 'Free to take a load'
+                  }
+                  onPress={() => toggleFilter('free')}
+                />
+                <StatCard
+                  label="In maintenance"
+                  value={String(maint)}
+                  note={
+                    outOfService > 0
+                      ? `${outOfService} out of service`
+                      : maint > 0
+                        ? 'In the workshop'
+                        : 'None in the workshop'
+                  }
+                  onPress={() => toggleFilter('shop')}
+                />
+              </KpiRow>
+            </View>
+          )}
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search vehicles…" />
           </View>
-          <FilterChips
-            options={withCounts(VEHICLE_FILTERS, data)}
-            value={filter}
-            onChange={setFilter}
-          />
+          <FilterChips options={options} value={filter} onChange={setFilter} />
         </View>
       }
       ListEmptyComponent={
-        <EmptyState
-          icon="truck"
-          title="No vehicles"
-          body="Already have your fleet in a spreadsheet? Import the list, or add your first vehicle."
-          action={
-            <View className="flex-row gap-2.5">
-              <Button
-                label="Import list"
-                icon="import"
-                variant="secondary"
-                onPress={() => {
-                  if (demo.block()) return;
-                  openImport('vehicles');
-                }}
-              />
-              <Button
-                label="Add vehicle"
-                icon="plus"
-                onPress={() => {
-                  if (demo.block()) return;
-                  nav.navigate('AddVehicle');
-                }}
-              />
-            </View>
-          }
-        />
+        search || filter !== 'ALL' ? (
+          <EmptyState icon="truck" title="No vehicles match" body="Try another search or filter." />
+        ) : (
+          <EmptyState
+            icon="truck"
+            title="No vehicles"
+            body="Already have your fleet in a spreadsheet? Import the list, or add your first vehicle."
+            action={
+              <View className="flex-row gap-2.5">
+                <Button
+                  label="Import list"
+                  icon="import"
+                  variant="secondary"
+                  onPress={() => {
+                    if (demo.block()) return;
+                    openImport('vehicles');
+                  }}
+                />
+                <Button
+                  label="Add vehicle"
+                  icon="plus"
+                  onPress={() => {
+                    if (demo.block()) return;
+                    nav.navigate('AddVehicle');
+                  }}
+                />
+              </View>
+            }
+          />
+        )
       }
       renderItem={({ item }) => {
         const isSelected = selectMode && selected.has(item.id);
-        const now = loadByVehicle ? doingNow(item, loadByVehicle.get(Number(item.id))) : null;
+        // The server picks the open order to show (a current one beats one left
+        // open) and sends it compact on the row.
+        const active = pick(item.raw, ['active_load']) as Load | null | undefined;
+        const now = doingNow(item, active ?? undefined);
         return (
           <View
             className={`mb-2.5 overflow-hidden rounded-card border ${
@@ -398,26 +430,20 @@ function VehiclesTab({
 }
 
 function DriversTab() {
-  const { data, isLoading, isError, refetch, dataUpdatedAt, isRefetchError, isFetching } = useDrivers();
-  const { refreshing, onRefresh } = useManualRefresh(refetch);
-  const notice = useManualRefresh(refetch);
-  useAutoRefreshStale([['drivers']], dataUpdatedAt);
-  const { openDriver } = useAppNavigation();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('ALL');
-
-  const list = useMemo(
-    () =>
-      (data ?? []).filter(
-        (d) =>
-          (filter === 'ALL' || d.status === filter) &&
-          (!q ||
-            `${d.name} ${d.phone ?? ''} ${d.licenseNumber ?? ''}`
-              .toLowerCase()
-              .includes(q.toLowerCase())),
-      ),
-    [data, filter, q],
-  );
+  const search = useDebouncedValue(q.trim());
+  // Server-side: status and search (name, username, licence number) go to the
+  // API, one page at a time; page 1 carries the counts and licence tiles over
+  // every searched driver.
+  const list = useDriversFleet(filter, search);
+  const { isLoading, isError, dataUpdatedAt, isRefetchError, isFetchingAny } = list;
+  const data = list.combinedData;
+  const sum = list.extras?.summary;
+  const { refreshing, onRefresh } = useManualRefresh(list.refresh);
+  const notice = useManualRefresh(list.refresh);
+  useAutoRefreshStale([['drivers']], dataUpdatedAt);
+  const { openDriver } = useAppNavigation();
 
   if (isLoading)
     return (
@@ -425,67 +451,96 @@ function DriversTab() {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refetch} message="Couldn't load drivers." />;
+  if (isError && data.length === 0)
+    return <ErrorState onRetry={() => void list.refresh()} message="Couldn't load drivers." />;
+
+  const counts = sum?.status_counts;
+  const options = DRIVER_FILTERS.map((o) => ({ ...o, count: counts?.[o.value] }));
+  const expired = sum?.expired_count ?? 0;
 
   return (
     <FlashList
-      data={list}
+      data={data}
       keyExtractor={(d) => String(d.id)}
+      showsVerticalScrollIndicator={false}
+      extraData={filter}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      onEndReached={() => list.hasMore && !list.isFetching && void list.loadMore()}
+      onEndReachedThreshold={1.5}
+      ListFooterComponent={list.isFetching ? <MoreSpinner /> : null}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListHeaderComponent={
         <View className="mb-3">
-          {(notice.refreshing || !isFetching) && (
+          {(notice.refreshing || !isFetchingAny) && (
             <StaleDataNotice
               className="mb-3"
               updatedAt={dataUpdatedAt}
               refreshFailed={isRefetchError}
               refreshing={notice.refreshing}
               onRetry={notice.onRefresh}
+              staleAfterMs={STALE_MS + 60_000}
             />
           )}
-          <View className="mb-3 flex-row gap-3">
-            <StatCard label="Drivers" value={String(data.length)} onPress={() => setFilter('ALL')} />
-            <StatCard
-              label="Active"
-              value={String(data.filter((d) => d.status === 'ACTIVE').length)}
-              onPress={() => setFilter((f) => (f === 'ACTIVE' ? 'ALL' : 'ACTIVE'))}
-            />
-          </View>
+          {sum && (
+            <View className="mb-3">
+              <KpiRow>
+                <StatCard label="Drivers" value={String(counts?.ALL ?? 0)} onPress={() => setFilter('ALL')} />
+                <StatCard
+                  label="Active"
+                  value={String(counts?.ACTIVE ?? 0)}
+                  onPress={() => setFilter((f) => (f === 'ACTIVE' ? 'ALL' : 'ACTIVE'))}
+                />
+                <StatCard
+                  label="Licences"
+                  value={String(expired)}
+                  note={
+                    expired > 0
+                      ? `Expired: ${sum.expired_names.join(', ')}${expired > sum.expired_names.length ? '…' : ''}`
+                      : sum.renew_soon > 0
+                        ? `${sum.renew_soon} renew within 90 days`
+                        : sum.next_renewal
+                          ? `Next: ${sum.next_renewal.name}, ${formatDate(sum.next_renewal.date)}`
+                          : 'All in date'
+                  }
+                  tone={expired > 0 ? 'danger' : undefined}
+                />
+              </KpiRow>
+            </View>
+          )}
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search drivers…" />
           </View>
-          <FilterChips
-            options={withCounts(DRIVER_FILTERS, data)}
-            value={filter}
-            onChange={setFilter}
-          />
+          <FilterChips options={options} value={filter} onChange={setFilter} />
         </View>
       }
       ListEmptyComponent={
         <EmptyState icon="users" title="No drivers" body="No drivers match this filter." />
       }
-      renderItem={({ item }) => (
-        <View className="mb-2.5 overflow-hidden rounded-card border border-line bg-surface">
-          <ListRow
-            leading={<Avatar name={item.name} uri={item.avatar} size={36} />}
-            title={item.name}
-            subtitle={item.phone || item.licenseNumber}
-            subtitleIcon={item.phone ? 'phone' : 'idCardLanyard'}
-            trailing={
-              <View className="items-end gap-1">
-                {item.safetyScore != null && (
-                  <Mono className="text-caption text-muted">Safety {item.safetyScore}</Mono>
-                )}
-                <StatusPill status={item.status} />
-              </View>
-            }
-            onPress={() => openDriver(item.id, item.raw)}
-            last
-          />
-        </View>
-      )}
+      renderItem={({ item }) => {
+        const openLoad = String(pick(item.raw, ['open_load_number']) ?? '');
+        const base = item.phone || item.licenseNumber;
+        return (
+          <View className="mb-2.5 overflow-hidden rounded-card border border-line bg-surface">
+            <ListRow
+              leading={<Avatar name={item.name} uri={item.avatar} size={36} />}
+              title={item.name}
+              subtitle={openLoad ? `${base ? `${base} · ` : ''}on ${openLoad}` : base}
+              subtitleIcon={item.phone ? 'phone' : 'idCardLanyard'}
+              trailing={
+                <View className="items-end gap-1">
+                  {item.safetyScore != null && (
+                    <Mono className="text-caption text-muted">Safety {item.safetyScore}</Mono>
+                  )}
+                  <StatusPill status={item.status} />
+                </View>
+              }
+              onPress={() => openDriver(item.id, item.raw)}
+              last
+            />
+          </View>
+        );
+      }}
     />
   );
 }

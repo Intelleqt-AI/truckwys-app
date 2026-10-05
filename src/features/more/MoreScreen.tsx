@@ -5,6 +5,7 @@ import Constants from 'expo-constants';
 import { Screen, Group, Card, Avatar, Txt, Mono, Label, Icon, type IconName } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { useRole, canSeeInsights, canSeeFinanceFeatures, canAccessSettings } from '@/lib/access';
+import { CAPITAL_LAUNCHED } from '@/lib/features';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { mediaUrl } from '@/lib/api/client';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -21,7 +22,12 @@ const SECTIONS: MenuItem[][] = [
   [
     { icon: 'users', label: 'Customers', route: 'Customers', allow: canSeeInsights },
     { icon: 'sparkle', label: 'Insights', route: 'Insights', allow: canSeeInsights },
-    { icon: 'banknote', label: 'Fast Pay (coming soon)', route: 'Capital', allow: canSeeFinanceFeatures },
+    {
+      icon: 'banknote',
+      label: CAPITAL_LAUNCHED ? 'Fast Pay' : 'Fast Pay (coming soon)',
+      route: 'Capital',
+      allow: canSeeFinanceFeatures,
+    },
   ],
   [
     { icon: 'clock', label: 'Activity', route: 'Activity' },

@@ -33,6 +33,7 @@ function toVars(p: Palette) {
     '--text-primary': p.fg,
     '--text-secondary': p.muted,
     '--text-tertiary': p.faint,
+    '--text-placeholder': p.placeholder,
     '--text-disabled': p.disabled,
     '--text-on-accent': p.onAccent,
     '--btn-primary-bg': p.btnPrimaryBg,

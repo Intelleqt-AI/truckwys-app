@@ -20,7 +20,9 @@ import { quoteStage } from '@/lib/quoteStage';
 import { useCustomer, useCustomerQuotes, deleteCustomer, updateCustomer } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { num, str, pick } from '@/lib/api/list';
+import { countryLabel } from '@/lib/finance/validation';
 import { formatCurrency, formatDate } from '@/lib/formatters';
+import { priceInclVat, type CustomerPrice } from '@/lib/vat';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useDemo } from '@/hooks/useDemo';
@@ -181,6 +183,12 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
         />
       </Group>
 
+      <Group label="Tax">
+        <DetailRow label="Country" value={countryLabel(str(pick(c, ['country']), 'ZA'))} mono={false} />
+        <DetailRow label="VAT number" value={str(pick(c, ['vat_number']), '—')} />
+        <DetailRow label="Registration number" value={str(pick(c, ['registration_number']), '—')} last />
+      </Group>
+
       <Group label="Account">
         <DetailRow label="Payment terms" value={PAYMENT_TERMS[terms] ?? terms} mono={false} />
         <DetailRow
@@ -215,7 +223,13 @@ export function CustomerDetailScreen({ route, navigation }: Props) {
                 trailing={
                   <View className="items-end gap-1">
                     <Mono className="text-callout font-semibold text-fg">
-                      {formatCurrency(num(pick(q, ['total_amount', 'quote_price'])), { maximumFractionDigits: 0 })}
+                      {formatCurrency(
+                        priceInclVat({
+                          total_amount: num(pick(q, ['total_amount', 'quote_price'])),
+                          customer_price: pick(q, ['customer_price']) as CustomerPrice | undefined,
+                        }),
+                        { maximumFractionDigits: 0 },
+                      )}
                     </Mono>
                     <StatusPill status={quoteStage(q) ?? str(pick(q, ['status']), 'DRAFT').toUpperCase()} />
                   </View>

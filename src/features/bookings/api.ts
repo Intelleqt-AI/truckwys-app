@@ -3,7 +3,7 @@ import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/clien
 import type { AllPages } from '@/lib/api/fetchAllPages';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { useInfiniteList } from '@/lib/api/useInfiniteList';
-import { normalizeQuote, normalizeLoad } from '@/types/domain';
+import { normalizeQuote, normalizeLoad, type LoadLite } from '@/types/domain';
 import { roundTo } from '@/lib/formatters';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
@@ -34,15 +34,47 @@ export const useQuotes = (status?: string) => {
     },
   );
 };
-export const useLoads = () => {
-  const qc = useQueryClient();
-  // Page size stays at the default: Orders and History each filter this one
-  // list by status on the device and don't auto-fill, so a smaller page would
-  // leave one of them looking emptier than it is.
-  return useInfiniteList('loads', 'loads/', normalizeLoad, {
-    seed: () => qc.getQueryData<AllPages<Record<string, unknown>>>(['ledger-loads'])?.rows,
-  });
-};
+/** The Orders tab's tiles, as the API sends them (core.services.load_list). */
+export interface OrdersSummary {
+  open_count: number;
+  need_vehicle: number;
+  need_vehicle_overdue: number;
+  moving_no_vehicle: number;
+  in_transit: number;
+  in_transit_overdue: number;
+  left_open: number;
+  open_total_incl_vat: number;
+  any_loads: boolean;
+}
+/** The History tab's tiles. */
+export interface HistorySummary {
+  history_count: number;
+  delivered_not_invoiced: number;
+  invoiced: number;
+  invoiced_total_incl_vat: number;
+  completed: number;
+  completed_total_incl_vat: number;
+  any_loads: boolean;
+}
+
+/**
+ * One tab of loads, server-side: `?tab=orders|history` limits it to that tab's
+ * statuses, `status` narrows to one, `q` searches customer, load, route, driver
+ * and truck, History comes newest first, and page 1 carries the tab's tiles as
+ * `summary`. Keyed under 'loads' so invalidating ['loads'] reaches every variant.
+ */
+export function useLoadsTab<S>(tab: 'orders' | 'history', status: string, q: string) {
+  const params = new URLSearchParams({ tab });
+  if (status !== 'ALL') params.set('status', status);
+  if (q) params.set('q', q);
+  return useInfiniteList<LoadLite, { summary?: S }>(
+    ['loads', 'list', tab, status, q],
+    `loads/?${params.toString()}`,
+    normalizeLoad,
+    // A new status or search keeps the current rows until its own land.
+    { pageSize: 20, keepPrevious: true },
+  );
+}
 
 // ── Details ──────────────────────────────────────────────────────────────────
 export function useQuote(id: string | number, preview?: Record<string, unknown>) {
@@ -95,8 +127,11 @@ function cachedLoadRow(qc: QueryClient, id: string | number): Record<string, unk
   const ledger = qc.getQueryData<AllPages<Record<string, unknown>>>(['ledger-loads'])?.rows;
   const fromLedger = ledger?.find(same);
   if (fromLedger) return fromLedger;
-  const pages = qc.getQueryData<InfiniteData<unknown>>(['loads'])?.pages;
-  return pages?.flatMap((p) => asArray<Record<string, unknown>>(p)).find(same);
+  for (const [, data] of qc.getQueriesData<InfiniteData<unknown>>({ queryKey: ['loads'] })) {
+    const hit = data?.pages?.flatMap((p) => asArray<Record<string, unknown>>(p)).find(same);
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 export function useLoad(id: string | number, preview?: Record<string, unknown>) {

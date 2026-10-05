@@ -10,6 +10,10 @@ export const INSIGHTS_ROLES = [...FINANCE_ROLES, 'VIEWER'] as const;
 // Settings sub-sections the web app restricts to admins.
 export const ADMIN_ONLY_SETTINGS = ['company', 'users', 'billing', 'integrations', 'risk'] as const;
 
+// Sections for the finance roles: readable by any of them, though only an admin
+// can change what is in them (the server answers 403 to anyone else).
+export const FINANCE_ONLY_SETTINGS = ['invoice-numbering'] as const;
+
 // Roles with no access to Settings at all (web: OSLayout canAccessSettings).
 const NO_SETTINGS_ROLES = ['VIEWER', 'DRIVER'];
 
@@ -41,9 +45,17 @@ export const canSeeInsights = (role: string) =>
 
 export const canAccessSettings = (role: string) => !NO_SETTINGS_ROLES.includes(role);
 
+// Fast Pay (backend core/views_fastpay.py): requesting and cancelling an advance
+// is open to every role except these; the application (details and submit) is for
+// admins and managers only. The server answers 403 either way.
+const NO_FAST_PAY_ROLES = ['VIEWER', 'DRIVER', 'CUSTOMER'];
+export const canRequestFastPay = (role: string) => !NO_FAST_PAY_ROLES.includes(role);
+export const canEditFastPayApplication = (role: string) => role === 'ADMIN' || role === 'MANAGER';
+
 export const canAccessSettingsSection = (role: string, section: string) =>
   canAccessSettings(role) &&
-  (!(ADMIN_ONLY_SETTINGS as readonly string[]).includes(section) || role === 'ADMIN');
+  (!(ADMIN_ONLY_SETTINGS as readonly string[]).includes(section) || role === 'ADMIN') &&
+  (!(FINANCE_ONLY_SETTINGS as readonly string[]).includes(section) || canSeeFinanceFeatures(role));
 
 const VIEWER_TABS = ['Home', 'Bookings', 'Fleet'];
 

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
-import { View } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { View, TouchableOpacity } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useForm, Controller, type Control, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -12,10 +12,15 @@ import {
   DateField,
   Button,
   Label,
+  Txt,
   SaveSuccessOverlay,
   type TextFieldProps,
 } from '@/components/ui';
 import { createExpense, updateExpense, useExpense, EXPENSE_CATEGORIES } from './api';
+import { SupplierPicker } from './components/SupplierPicker';
+import { useTaxCodes } from '@/lib/finance/api';
+import { normaliseDecimalInput, subtractDecimals, toNumber, vatFromGross } from '@/lib/finance/tax';
+import type { TaxCode } from '@/lib/finance/types';
 import { useVehicles } from '@/features/fleet/api';
 import {
   expenseSchema,
@@ -24,7 +29,7 @@ import {
   type ExpenseFormValues,
 } from './validation';
 import { num, str, pick } from '@/lib/api/list';
-import { parseNum, formatPlain, round2 } from '@/lib/formatters';
+import { parseNum, formatPlain, formatCurrency, round2 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -53,6 +58,18 @@ const asFieldValue = (v: string | null | undefined): string => {
   return n == null ? '' : formatPlain(n);
 };
 
+/**
+ * Whether the saved VAT is a figure the person typed rather than amount x 15/115.
+ * A saved figure that differs from the calculation was typed, so it stays typed.
+ */
+function savedVatWasTyped(r: Record<string, unknown>): boolean {
+  const code = str(pick(r, ['tax_code']), 'STANDARD');
+  const vat = pick(r, ['vat_amount']);
+  if (code !== 'STANDARD' || vat == null || vat === '') return false;
+  const calculated = toNumber(vatFromGross(String(pick(r, ['amount']) ?? 0), code));
+  return Math.abs(toNumber(String(vat)) - calculated) > 0.004;
+}
+
 function fromExpenseRecord(r: Record<string, unknown>): ExpenseFormValues {
   const rawNotes = str(pick(r, ['notes']));
   const fuelMatch = rawNotes.match(FUEL_NOTE);
@@ -60,10 +77,15 @@ function fromExpenseRecord(r: Record<string, unknown>): ExpenseFormValues {
     category: str(pick(r, ['category']), 'FUEL').toUpperCase(),
     description: str(pick(r, ['description'])),
     amount: pick(r, ['amount']) != null ? formatPlain(num(pick(r, ['amount'])), 2) : '',
+    // '' until the tenant default is known (see the screen); a saved code is kept.
+    tax_code: str(pick(r, ['tax_code'])),
+    // Filled in from the amount unless the saved figure was typed by hand.
+    vat_amount: savedVatWasTyped(r) ? formatPlain(num(pick(r, ['vat_amount'])), 2) : '',
     date: str(pick(r, ['expense_date', 'date'])) || today(),
     litres: asFieldValue(fuelMatch?.[1]),
     pricePerLitre: asFieldValue(fuelMatch?.[2]),
     vehicle: str(pick(r, ['vehicle'])),
+    supplier: str(pick(r, ['supplier'])),
     vendor: str(pick(r, ['vendor'])),
     receipt: str(pick(r, ['receipt_number'])),
     notes: rawNotes.replace(FUEL_NOTE, '').trim(),
@@ -81,12 +103,15 @@ function EText({
   name,
   anchors,
   warning,
+  onChangeExtra,
   ...rest
 }: {
   control: Control<ExpenseFormValues>;
   name: keyof ExpenseFormValues;
   anchors: EAnchors;
   warning?: string;
+  /** Side-effect after the value commits (typing in "VAT included" stops it being calculated). */
+  onChangeExtra?: (text: string) => void;
 } & Omit<TextFieldProps, 'value' | 'onChangeText' | 'onBlur' | 'error' | 'warning'>) {
   return (
     <Controller
@@ -97,7 +122,10 @@ function EText({
           <TextField
             ref={anchors.registerInput(name)}
             value={value ?? ''}
-            onChangeText={onChange}
+            onChangeText={(t) => {
+              onChange(t);
+              onChangeExtra?.(t);
+            }}
             onBlur={onBlur}
             error={fieldState.error?.message}
             warning={warning}
@@ -191,6 +219,18 @@ export function AddExpenseScreen({ route, navigation }: Props) {
   const { data: full } = useExpense(editId ?? '', editing ? preview : undefined, editing);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const { data: taxData } = useTaxCodes();
+  const taxCodes = taxData?.codes;
+  const taxOptions = useMemo(
+    () => (taxCodes ?? []).map((c) => ({ label: c.label, value: c.code })),
+    [taxCodes],
+  );
+  // VAT follows the amount (gross x 15 / 115 at the standard rate) until the
+  // person types their own figure.
+  const [vatTyped, setVatTyped] = useState(() => editing && savedVatWasTyped(preview));
+  // A new expense starts in the chosen supplier's usual category, until the
+  // category has been picked by hand.
+  const categoryTouched = useRef(editing);
 
   const vehicleOptions = useMemo(
     () => [
@@ -221,8 +261,31 @@ export function AddExpenseScreen({ route, navigation }: Props) {
   useEffect(() => {
     if (!editing || !full || formState.isDirty) return;
     reset(fromExpenseRecord(full));
+    setVatTyped(savedVatWasTyped(full));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, full]);
+
+  // The tax code the expense carries: the saved one, else the company's default
+  // (NO_VAT when it isn't VAT-registered).
+  const taxCodeW = watch('tax_code');
+  const taxCode = (taxCodeW || taxData?.default_tax_code || 'STANDARD') as TaxCode;
+  const amountW = watch('amount');
+  const vatW = watch('vat_amount');
+  const calculatedVat = useMemo(
+    () => vatFromGross(normaliseDecimalInput(amountW ?? '') || '0', taxCode, taxCodes),
+    [amountW, taxCode, taxCodes],
+  );
+  // Show the calculation while nothing has been typed (comma decimal, as the
+  // other amount fields do).
+  useEffect(() => {
+    if (vatTyped) return;
+    const shown = calculatedVat.replace('.', ',');
+    // Compared against what is showing, so a reset() that blanked the field
+    // (re-hydrating an edit) is put right even when the calculation hasn't moved.
+    if (vatW !== shown) setValue('vat_amount', shown, { shouldValidate: false });
+  }, [vatTyped, calculatedVat, vatW, setValue]);
+  const vatNormalised = normaliseDecimalInput(vatW ?? '') || '0';
+  const netAmount = subtractDecimals(normaliseDecimalInput(amountW ?? '') || '0', vatNormalised);
 
   // Auto-calc amount for fuel when litres × price are both present (Amount
   // becomes read-only then). Re-homed into RHF's setValue with
@@ -281,8 +344,15 @@ export function AddExpenseScreen({ route, navigation }: Props) {
       // focused when Save is tapped can still carry more than 2 decimals.
       amount: round2(parseNum(v.amount) ?? 0),
       expense_date: v.date,
-      // vehicle is a nullable FK, so null is right for "no vehicle".
+      // vehicle is a nullable FK, so null is right for "no vehicle". supplier
+      // likewise (company-scoped; a stranger's id is refused).
       vehicle: v.vehicle || null,
+      supplier: v.supplier ? Number(v.supplier) : null,
+      tax_code: taxCode,
+      // Left out, the server works VAT out from the amount; a typed figure is
+      // sent. Only standard-rated expenses carry input VAT (the server refuses
+      // VAT on any other code).
+      ...(vatTyped && taxCode === 'STANDARD' ? { vat_amount: vatNormalised } : {}),
       // vendor/receipt_number are blank=True but NOT null=True, so DRF sets
       // allow_null=False on them — sending null 400s ("may not be null"),
       // which meant an expense only saved if BOTH were filled in. '' is the
@@ -340,6 +410,7 @@ export function AddExpenseScreen({ route, navigation }: Props) {
             required
             options={EXPENSE_CATEGORIES}
             onSelectExtra={(v) => {
+              categoryTouched.current = true;
               if (v !== 'FUEL') {
                 setValue('litres', '', { shouldValidate: true });
                 setValue('pricePerLitre', '', { shouldValidate: true });
@@ -386,7 +457,7 @@ export function AddExpenseScreen({ route, navigation }: Props) {
             control={control}
             name="amount"
             anchors={anchors}
-            label="Amount (ZAR)"
+            label="Amount incl. VAT (ZAR)"
             required
             placeholder="0,00"
             prefix="R"
@@ -397,6 +468,54 @@ export function AddExpenseScreen({ route, navigation }: Props) {
             decimals={2}
             editable={!autoAmount}
           />
+          <Controller
+            control={control}
+            name="tax_code"
+            render={({ field: { onChange } }) => (
+              <View onLayout={anchors.registerY('tax_code')}>
+                <SelectField
+                  label="Tax code"
+                  value={taxCode}
+                  options={taxOptions}
+                  onSelect={(v) => {
+                    onChange(v);
+                    // Only the standard rate carries input VAT.
+                    if (v !== 'STANDARD') setVatTyped(false);
+                  }}
+                />
+              </View>
+            )}
+          />
+          <View>
+            <EText
+              control={control}
+              name="vat_amount"
+              anchors={anchors}
+              label={vatTyped ? 'VAT included (ZAR)' : 'VAT included (ZAR) · calculated'}
+              placeholder="0,00"
+              prefix="R"
+              keyboardType="decimal-pad"
+              editable={taxCode === 'STANDARD'}
+              onChangeExtra={() => setVatTyped(true)}
+            />
+            <View className="mt-1.5 flex-row flex-wrap items-center gap-x-1.5">
+              <Txt className="text-caption text-muted">
+                {`Excl. VAT ${formatCurrency(toNumber(netAmount))}.`}
+                {!vatTyped &&
+                  (taxCode === 'STANDARD' ? ' Amount × 15 ÷ 115; type to change it.' : ' No VAT on this code.')}
+              </Txt>
+              {vatTyped && (
+                <TouchableOpacity
+                  onPress={() => setVatTyped(false)}
+                  hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                >
+                  <Txt className="text-caption text-link">Use the calculated VAT</Txt>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
           <EDate
             control={control}
             name="date"
@@ -416,7 +535,26 @@ export function AddExpenseScreen({ route, navigation }: Props) {
             options={vehicleOptions}
             placeholder="None"
           />
-          <EText control={control} name="vendor" anchors={anchors} label="Vendor" placeholder="e.g. Shell, BP" />
+          <Controller
+            control={control}
+            name="supplier"
+            render={({ field: { onChange, value } }) => (
+              <View onLayout={anchors.registerY('supplier')}>
+                <SupplierPicker
+                  value={value ?? ''}
+                  fallbackName={str(watch('vendor'))}
+                  category={category}
+                  onChange={(id, supplier) => {
+                    onChange(id);
+                    // A new expense starts in the supplier's usual category.
+                    if (supplier?.category && !categoryTouched.current) {
+                      setValue('category', supplier.category, { shouldDirty: true, shouldValidate: true });
+                    }
+                  }}
+                />
+              </View>
+            )}
+          />
           <EText control={control} name="receipt" anchors={anchors} label="Receipt #" placeholder="Optional" />
           <EText
             control={control}

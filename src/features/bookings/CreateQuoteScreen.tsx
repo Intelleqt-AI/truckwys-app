@@ -67,6 +67,8 @@ import { reverseGeocode } from '@/lib/geocode';
 import { VoiceQuoteSheet } from './VoiceQuoteSheet';
 import { WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
+import { useFinanceSettings } from '@/lib/finance/api';
+import { previewQuoteVat } from '@/lib/vat';
 import { formatDuration, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
 import { localDateISO } from '@/lib/dates';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -94,6 +96,7 @@ import {
 } from './quote/types';
 import { computeCosts } from './quote/costs';
 import { buildQuotePayload } from './quote/payload';
+import { compactStoredSnapshot } from './quote/routeSnapshot';
 import { LocationField } from './quote/LocationField';
 import { StopLocationRow } from './quote/StopLocationRow';
 import { NaturalLanguageBar, type NaturalLanguageBarHandle } from './quote/NaturalLanguageBar';
@@ -140,7 +143,7 @@ type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
 //
 // Module-level rather than useMemo([]) — the values never change, so there's
 // no reason to spend two hooks re-confirming that every render.
-const SNAP_FRACTIONS = [0.36, 0.7] as const;
+const SNAP_FRACTIONS = [0.45, 0.75] as const;
 const SNAP = SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`);
 
 // Section order for the jump bar and for the scroll-position → active-chip
@@ -206,6 +209,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const { data: customers } = useCustomers();
   const { data: vtypes } = useVehicleTypes();
   const { data: company } = useCompanyProfileData();
+  const { data: financeSettings } = useFinanceSettings();
   // Live diesel price for the company's zone (quotes are priced off it unless
   // the fleet set its own price). See lib/dieselPrice.ts.
   const { data: liveFuel } = useFuelPrice();
@@ -664,7 +668,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             }
           : null,
       );
-      setTollEdited(str(snap.toll_charges_source) === 'manual' && pick(q, ['toll_charges']) != null);
+      setTollEdited(
+        str(snap.toll_charges_source) === 'manual' && pick(q, ['toll_charges']) != null,
+      );
       setAiToll(
         fromMarket(snap.toll_charges_source) &&
           num(snap.ai_toll_one_way) > 0 &&
@@ -772,8 +778,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const vehicleCapacityTons =
     Number((vtypes ?? []).find((v) => v.name === vehicleType)?.capacity) || 0;
   const weightBlockedMessage = useMemo(() => {
-    if (!vehicleCapacityTons || weightTons == null || weightTons <= vehicleCapacityTons)
-      return '';
+    if (!vehicleCapacityTons || weightTons == null || weightTons <= vehicleCapacityTons) return '';
     if (weightTons <= vehicleCapacityTons * OVERLOAD_TOLERANCE) {
       return `${weightTons}t exceeds the ${vehicleType}'s rated capacity of ${vehicleCapacityTons}t. Even within the legal 5% tolerance this is an overload. Pick a larger vehicle or reduce the weight.`;
     }
@@ -1264,9 +1269,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         : items.fuel.detail?.your_price_per_litre,
     );
     const rateDetail = Number(
-      pickAi('base_rate') ? items.base_rate.detail?.ai_rate_per_km : items.base_rate.detail?.your_rate_per_km,
+      pickAi('base_rate')
+        ? items.base_rate.detail?.ai_rate_per_km
+        : items.base_rate.detail?.your_rate_per_km,
     );
-    const rate = Number.isFinite(rateDetail) && rateDetail > 0 ? rateDetail : combo.base_rate_per_km;
+    const rate =
+      Number.isFinite(rateDetail) && rateDetail > 0 ? rateDetail : combo.base_rate_per_km;
     const next: AiInputs = {
       ...current,
       aiFuel:
@@ -1278,8 +1286,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       serviceCharge: 0,
     };
     if (pickAi('tolls')) {
-      const oneWay = Number(items.tolls.detail?.market_one_way_zar) || combo.values.tolls / costs.legs;
-      Object.assign(next, { aiToll: { oneWay, routeKey: tollRouteKey }, tollEdited: false, tollOverride: '' });
+      const oneWay =
+        Number(items.tolls.detail?.market_one_way_zar) || combo.values.tolls / costs.legs;
+      Object.assign(next, {
+        aiToll: { oneWay, routeKey: tollRouteKey },
+        tollEdited: false,
+        tollOverride: '',
+      });
     } else if (Math.abs(combo.values.tolls - costs.tollCost) >= 0.005) {
       // Back to the figure the check saw as yours: the route's own tolls, or the
       // amount that was typed in.
@@ -1543,13 +1556,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // applied market figure survives a reload. Merged into whatever is already
   // stored (a PATCH replaces the field wholesale, and the web keeps the raw
   // route request and response in it). Only for a route calculated for these
-  // inputs.
+  // inputs. The stored copy is slimmed first: the API caps the field at 200 KB
+  // and a web-made quote can carry every route's full map path.
   const existingSnapshot = pick(existing ?? {}, ['route_snapshot']);
   const routeSnapshot: Record<string, unknown> | null = routeIsCurrent
     ? (() => {
         const base =
-          existingSnapshot && typeof existingSnapshot === 'object' && !Array.isArray(existingSnapshot)
-            ? { ...(existingSnapshot as Record<string, unknown>) }
+          existingSnapshot &&
+          typeof existingSnapshot === 'object' &&
+          !Array.isArray(existingSnapshot)
+            ? compactStoredSnapshot(existingSnapshot as Record<string, unknown>)
             : {};
         // The previous market toll figure no longer applies unless set again below.
         delete base.ai_toll_one_way;
@@ -1568,10 +1584,28 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           ...(costs.tollFromMarketCheck && aiToll && !tollEdited
             ? { ai_toll_one_way: aiToll.oneWay, ai_toll_route_key: aiToll.routeKey }
             : {}),
-          ai_price_analysis: aiApplied ? { log_id: aiApplied.logId, choice_key: aiApplied.key } : null,
+          ai_price_analysis: aiApplied
+            ? { log_id: aiApplied.logId, choice_key: aiApplied.key }
+            : null,
         };
       })()
     : null;
+
+  // The trip leaves South Africa: the route crossed a border or names a foreign
+  // country, or the pickup, delivery or a stop is outside SA. Known only once a
+  // calculated route or a point's country is in hand (an edited quote's route is
+  // a stub until recalculated), else the saved quote keeps whatever it had.
+  const international = (() => {
+    const pointCodes = [pickup?.cc, delivery?.cc, ...stops.map((s) => s.loc?.cc)];
+    const hasRouteFlags = routeData != null && ('cross_border' in routeData || 'countries' in routeData);
+    const value =
+      !!pick(routeData ?? {}, ['cross_border']) ||
+      asArray<string>(pick(routeData ?? {}, ['countries'])).some((c) => isForeignCc(c)) ||
+      pointCodes.some((c) => isForeignCc(c));
+    return { known: hasRouteFlags || pointCodes.some(Boolean), value };
+  })();
+
+  const existingInternational = pick(existing ?? {}, ['is_international']) === true;
 
   const buildPayload = (status: 'DRAFT' | 'SENT') =>
     buildQuotePayload(
@@ -1597,6 +1631,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         baseRateNum,
         aiApplied,
         routeSnapshot,
+        international: international.known ? international.value : null,
       },
       status,
     );
@@ -1609,8 +1644,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // pickup/dropoff, which the backend requires unconditionally (no
     // draft-specific relaxation for pickup_location/delivery_location).
     if (!customerId) return 'Select a client';
-    if (!pickup?.lat || !delivery?.lat)
-      return 'Set a collection point and delivery first';
+    if (!pickup?.lat || !delivery?.lat) return 'Set a collection point and delivery first';
     if (routeBlockedMessage) return routeBlockedMessage;
     if (weightBlockedMessage) return weightBlockedMessage;
     // Unlike weightInvalid (an unparseable weight quietly sends as 0 and only
@@ -1626,7 +1660,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // of them at once rather than bounding each input separately.
     const QUOTE_MONEY_MAX = decimalMax(10, 2);
     if (costs.baseCost > QUOTE_MONEY_MAX || costs.total > QUOTE_MONEY_MAX) {
-      return "That price is too large. Check the rate and overrides";
+      return 'That price is too large. Check the rate and overrides';
     }
     // A negative driver/toll override isn't just an "unexplained discount"
     // (applyRecommended's own comment on serviceCharge) — it can also drag
@@ -1845,7 +1879,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // applyMarket/undoMarket read the form at call time; the inputs that decide
     // what to offer are listed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, costs.total, weightBlockedMessage, routeBlockedMessage, pc.offer, pc.unavailable, aiApplied, jumpTo]);
+  }, [
+    ready,
+    costs.total,
+    weightBlockedMessage,
+    routeBlockedMessage,
+    pc.offer,
+    pc.unavailable,
+    aiApplied,
+    jumpTo,
+  ]);
 
   // What the customer will be sent, for the preview. The recipient's email is
   // looked up from the customer record.
@@ -1857,6 +1900,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     pickup_location: pickup?.label ?? '',
     delivery_location: delivery?.label ?? '',
     total_amount: costs.total,
+    // VAT as the backend will show the customer (core quote_vat), so this
+    // matches the email the save sends. International is zero-rated.
+    customer_price: previewQuoteVat({
+      totalExcl: costs.total,
+      vatRegistered: financeSettings?.vat_registered !== false,
+      international: international.known ? international.value : !!existingInternational,
+    }),
     valid_until: validUntil || null,
     pickup_date: pickupDate || null,
   };
@@ -1867,8 +1917,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // strip's single 26px line, and implied one field was the last thing needed
   // right after it was filled. The Price section below still names every gap
   // since it has room to wrap. Kept as two primitives + a callback so
-  // QuoteFooterActions stays memo-safe.
-  const priceHint = priceGaps.length ? 'Complete the form to see the price' : '';
+  // QuoteFooterActions stays memo-safe. Hidden until a Save/Send attempt, like
+  // the field issues: a blank form on first landing isn't something to flag yet.
+  const priceHint =
+    submitAttempted && priceGaps.length ? 'Complete the form to see the price' : '';
   const priceHintSection = priceGaps[0]?.section ?? null;
   const onPriceHintPress = useCallback(() => {
     if (priceHintSection) jumpTo(priceHintSection);
@@ -2102,9 +2154,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           onMomentumScrollEnd={handleScrollSettled}
         >
           <View className="gap-6">
-            {subscription.notice && (
-              <Banner tone="danger" message={subscription.notice} />
-            )}
+            {subscription.notice && <Banner tone="danger" message={subscription.notice} />}
             {/* AI voice / natural-language quick fill — stays outside the
             sections below and always at the top; it's the fast path and the
             one thing on this screen that fills several sections at once. */}
@@ -2334,7 +2384,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     guard={guardInfo}
                     onChoose={chooseMarket}
                     routeError={ready && !routeBusy && !routeData}
-                    onOpenFuelSettings={() => navigation.navigate('Settings', { section: 'company' })}
+                    onOpenFuelSettings={() =>
+                      navigation.navigate('Settings', { section: 'company' })
+                    }
                   />
                   <CostBreakdownCard
                     costs={costs}

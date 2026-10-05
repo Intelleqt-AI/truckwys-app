@@ -381,7 +381,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
                 anchors={anchors}
                 label="First name"
                 required
-                placeholder="Jane"
+                placeholder="e.g. Jane"
                 icon="user"
                 autoCapitalize="words"
               />
@@ -393,7 +393,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
                 anchors={anchors}
                 label="Last name"
                 required
-                placeholder="Dlamini"
+                placeholder="e.g. Dlamini"
                 autoCapitalize="words"
               />
             </View>
@@ -459,7 +459,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
             name="email"
             anchors={anchors}
             label="Email"
-            placeholder="jane@company.co.za"
+            placeholder="e.g. jane@company.co.za"
             icon="send"
             autoCapitalize="none"
             keyboardType="email-address"
@@ -477,7 +477,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
             name="phone"
             anchors={anchors}
             label="Phone"
-            placeholder="+27 82 123 4567"
+            placeholder="e.g. +27 82 123 4567"
             icon="phone"
             keyboardType="phone-pad"
           />

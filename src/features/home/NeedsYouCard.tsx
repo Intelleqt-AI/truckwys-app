@@ -61,20 +61,18 @@ export function NeedsYouCard({
               >
                 <Icon name={ICON[row.kind]} size={18} color={colors.muted} />
                 <View className="flex-1">
-                  <View className="flex-row items-center justify-between gap-2">
-                    <Txt className="flex-1 text-body text-fg" numberOfLines={1}>
-                      {row.title}
-                    </Txt>
-                    {row.amount && (
-                      <Mono className="text-callout font-semibold text-fg">{row.amount}</Mono>
-                    )}
-                  </View>
+                  <Txt className="text-body text-fg" numberOfLines={1}>
+                    {row.title}
+                  </Txt>
                   {!!row.detail && (
                     <Txt className="mt-0.5 text-caption text-muted" numberOfLines={2}>
                       {row.detail}
                     </Txt>
                   )}
                 </View>
+                {!!row.amount && (
+                  <Mono className="text-callout font-semibold text-fg">{row.amount}</Mono>
+                )}
                 {actionable && row.actionLabel && (
                   <View className="min-h-[36px] justify-center rounded-control border border-line-active px-2.5">
                     <Mono className="text-caption font-medium text-fg">{row.actionLabel}</Mono>

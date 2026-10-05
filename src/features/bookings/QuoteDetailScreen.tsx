@@ -50,6 +50,7 @@ import {
   round2,
   decimalMax,
 } from '@/lib/formatters';
+import { customerPriceLines, type CustomerPrice } from '@/lib/vat';
 import { toast } from '@/lib/toast';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useDemo } from '@/hooks/useDemo';
@@ -140,6 +141,13 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   }
 
   const total = num(pick(q, ['total_amount', 'price']));
+  // Price excl. VAT, VAT and total incl. VAT as the customer is shown them
+  // (backend quote_vat; same figures as the PDF, email and quote page).
+  const rawPrice = pick(q, ['customer_price']);
+  const customerPrice =
+    rawPrice && typeof rawPrice === 'object' && !Array.isArray(rawPrice)
+      ? (rawPrice as CustomerPrice)
+      : undefined;
   const marginPct = num(pick(q, ['margin_percentage', 'margin_percent', 'margin']));
   const confidence = str(pick(q, ['confidence']));
   const roundTrip = str(pick(q, ['trip_type'])).toUpperCase() === 'ROUND_TRIP';
@@ -292,6 +300,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     pickup_location: origin === '—' ? '' : origin,
     delivery_location: dest === '—' ? '' : dest,
     total_amount: total,
+    customer_price: customerPrice,
     valid_until: validUntil,
     pickup_date: str(pick(q, ['pickup_date'])),
   };
@@ -376,13 +385,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       }
       const ref = str(pick(q, ['quote_number']));
       const name = str(pick(q, ['customer_name', 'customer']));
+      const priceLines = customerPriceLines(total, customerPrice, formatCurrency);
       const message = [
-        `Hi${name ? ` ${name}` : ''}, here's your freight quote${ref ? ` (${ref})` : ''} from Truckwys`,
-        total > 0 ? formatCurrency(total) : '',
-        link ?? '',
+        `Hi${name ? ` ${name}` : ''}, here's your freight quote${ref ? ` (${ref})` : ''} from Truckwys.`,
+        priceLines.join('\n'),
+        link ? `View and respond: ${link}` : '',
       ]
         .filter(Boolean)
-        .join(' · ');
+        .join('\n\n');
       await openWhatsApp(str(pick(q, ['customer_phone'])), message);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not open WhatsApp');
@@ -725,10 +735,29 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
               {roundTrip ? 'Total, both legs' : 'Total'}
+              {customerPrice?.vat_registered ? ' excl. VAT' : ''}
               {marginPct && costsItemised ? ` · ${marginPct}% margin` : ''}
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
+          {customerPrice ? (
+            customerPrice.vat_registered ? (
+              <>
+                <DetailRow
+                  label={customerPrice.vat_label || 'VAT'}
+                  value={formatCurrency(num(customerPrice.vat_amount))}
+                />
+                <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
+                  <Txt className="text-callout font-semibold text-fg">Total incl. VAT</Txt>
+                  <Mono className="text-heading font-semibold text-fg">
+                    {formatCurrency(num(customerPrice.total_incl_vat))}
+                  </Mono>
+                </View>
+              </>
+            ) : (
+              <DetailRow label="VAT" value="Not charged (not VAT-registered)" mono={false} last />
+            )
+          ) : null}
         </Group>
       )}
 

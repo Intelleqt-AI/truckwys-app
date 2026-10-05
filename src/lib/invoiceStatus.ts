@@ -10,7 +10,7 @@
 
 type InvoiceLike = Record<string, unknown>;
 
-const NOT_SENT = new Set(['DRAFT', 'CANCELLED', 'VOID']);
+const NOT_SENT = new Set(['DRAFT', 'CANCELLED', 'VOID', 'CREDITED']);
 
 /** Statuses the backend's send_reminder endpoint accepts. */
 export const REMINDER_STATUSES = new Set(['SENT', 'VIEWED', 'OVERDUE', 'PARTIALLY_PAID']);
@@ -21,15 +21,40 @@ const toNumber = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** Unpaid balance incl. VAT: the API's `balance`, else total minus paid. */
+/**
+ * Unpaid balance incl. VAT: the API's `balance` (total - paid - credited), else
+ * worked out from those. Nothing is owed on a paid, fully credited or void
+ * invoice.
+ */
 export function invoiceBalance(inv: InvoiceLike): number {
   const status = String(inv.status ?? '').toUpperCase();
-  if (status === 'PAID') return 0;
+  if (status === 'PAID' || status === 'CREDITED' || status === 'CANCELLED' || status === 'VOID') return 0;
   const balance = toNumber(inv.balance);
   if (balance !== null) return balance;
   const total = toNumber(inv.total_amount ?? inv.amount) ?? 0;
   const paid = toNumber(inv.paid_amount) ?? 0;
-  return total - paid;
+  const credited = toNumber(inv.credited_amount) ?? 0;
+  return total - paid - credited;
+}
+
+/**
+ * What to call an invoice. The server numbers a draft "DRAFT-1A2B3C4D" and only
+ * allocates the real number (INV-00001) when the invoice is sent, so a draft
+ * shows as "Draft" rather than as a code that will change.
+ */
+export function invoiceDisplayNumber(inv: InvoiceLike, fallback = 'Invoice'): string {
+  const raw = String(inv.invoice_number ?? inv.number ?? '').trim();
+  if (inv.has_provisional_number === true || /^DRAFT-/i.test(raw)) return 'Draft';
+  return raw || fallback;
+}
+
+/**
+ * Only a draft can be changed freely; once sent the amounts, lines and due date
+ * are locked (the server answers 400 "invoice_locked"), and a financed invoice
+ * is locked entirely. `is_locked` comes from the API.
+ */
+export function isInvoiceLocked(inv: InvoiceLike): boolean {
+  return String(inv.status ?? '').toUpperCase() !== 'DRAFT' || inv.is_locked === true;
 }
 
 function parseDue(d: unknown): number | null {
@@ -56,8 +81,7 @@ export function canSendReminder(inv: InvoiceLike, now: Date = new Date()): boole
   return isInvoiceOverdue(inv, now) && REMINDER_STATUSES.has(String(inv.status ?? '').toUpperCase());
 }
 
-/** The due date can still be changed (not paid, not cancelled). */
+/** The due date can still be changed: drafts only, the server locks it at SENT. */
 export function canEditDueDate(inv: InvoiceLike): boolean {
-  const status = String(inv.status ?? '').toUpperCase();
-  return status !== 'PAID' && status !== 'CANCELLED' && status !== 'VOID';
+  return !isInvoiceLocked(inv);
 }

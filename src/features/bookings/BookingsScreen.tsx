@@ -23,8 +23,7 @@ import {
   Button,
 } from '@/components/ui';
 import { ListSkeleton, ErrorState, Skeleton } from '@/components/feedback';
-import { assignedIds } from './AssignDriverVehicleScreen';
-import { useQuotes, useLoads } from './api';
+import { useQuotes, useLoadsTab, type OrdersSummary, type HistorySummary } from './api';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { bookedLoadOf, quoteStage, type QuoteStage } from '@/lib/quoteStage';
@@ -33,14 +32,12 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 
 type Props = BottomTabScreenProps<TabParamList, 'Bookings'>;
 
-const ACTIVE = ['PENDING', 'ASSIGNED', 'LOADING', 'IN_TRANSIT'];
-const DONE = ['DELIVERED', 'INVOICED', 'CANCELLED'];
-const ON_THE_MOVE = ['LOADING', 'IN_TRANSIT'];
 
 // Same per-tab title and one-line description as the web's Bookings header.
 const TAB_TITLES: Record<BookingsTab, string> = {
@@ -85,7 +82,6 @@ export function BookingsScreen({ route }: Props) {
         <OrdersTab onViewQuotes={() => setTab('quotes')} />
         <HistoryTab />
       </SwipeTabs>
-      {tab !== 'quotes' && <LoadsDrain />}
       {/* Long-press for the voice/AI entry point — undiscoverable alone, so
           it's a second path onto the same screen, not the only one. */}
       <Fab
@@ -283,7 +279,7 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
           {[quote.origin, ...quote.stopLabels, quote.destination].join(' → ')}
         </Txt>
         <View className="mt-3 flex-row items-center justify-between">
-          <Mono className="text-body font-semibold text-fg">{wholeRand(quote.amount)}</Mono>
+          <Mono className="text-body font-semibold text-fg">{wholeRand(quote.amountInclVat)}</Mono>
           {/* A quote has no live margin once it is booked or expired. */}
           {quote.marginPct != null && stage !== 'EXPIRED' && stage !== 'BOOKED' && (
             <Mono className="text-caption text-faint">Margin {formatPercent(quote.marginPct)}</Mono>
@@ -319,41 +315,26 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
 });
 
 // ── Orders / History (loads) ───────────────────────────────────────────────
-// The tiles and chip counts here are totals ("3 need a vehicle"), so they need
-// every load, not the first page. The web fetches all pages for the same reason;
-// this does it in the background while Orders or History is open, and the tiles
-// stay a skeleton (and the chips uncounted) until the last page is in.
-const MAX_LOAD_PAGES = 100;
-function LoadsDrain() {
-  const { hasMore, isFetching, isError, loadMore } = useLoads();
-  const pages = useRef(0);
-  useEffect(() => {
-    if (!hasMore || isFetching || isError || pages.current >= MAX_LOAD_PAGES) return;
-    pages.current += 1;
-    void loadMore();
-  }, [hasMore, isFetching, isError, loadMore]);
-  return null;
-}
-
-// No vehicle on the order, by id or by the name the API sends back.
-const hasNoVehicle = (raw: Record<string, unknown>) =>
-  !assignedIds(raw).vehicleId && !str(pick(raw, ['vehicle_info']));
-
-const sumAmount = (rows: LoadLite[]) => rows.reduce((s, l) => s + l.amount, 0);
+// Server-side (backend `loads/?tab=`): the API sends one page of the tab's
+// loads, does the status filter and search, and sends the tiles with page 1, so
+// nothing here downloads every load to count them.
 
 function OrdersTab({ onViewQuotes }: { onViewQuotes: () => void }) {
+  const [filter, setFilter] = useState('ALL');
+  const [q, setQ] = useState('');
+  const search = useDebouncedValue(q.trim());
   const {
-    combinedData: data,
+    combinedData: list,
+    extras,
     isLoading,
     isError,
     refresh,
     loadMore,
     hasMore,
     isFetching,
-  } = useLoads();
+    isPlaceholderData,
+  } = useLoadsTab<OrdersSummary>('orders', filter, search);
   const { refreshing, onRefresh } = useManualRefresh(refresh);
-  const [filter, setFilter] = useState('ALL');
-  const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();
 
   if (isLoading)
@@ -362,26 +343,14 @@ function OrdersTab({ onViewQuotes }: { onViewQuotes: () => void }) {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load orders." />;
+  if (isError && list.length === 0) return <ErrorState onRetry={refresh} message="Couldn't load orders." />;
 
-  const complete = !hasMore;
-  const active = data.filter((l) => ACTIVE.includes(l.status));
-  const list = active.filter(
-    (l) =>
-      (filter === 'ALL' || l.status === filter) &&
-      (!q || `${l.loadNumber} ${l.customer}`.toLowerCase().includes(q.toLowerCase())),
-  );
+  const s = extras?.summary;
+  const open = s?.open_count ?? 0;
   // Past its delivery date, or open for over 30 days: said as "left open",
   // never counted as current work.
-  const leftOpen = active.filter((l) => staleOf(l.raw)).length;
-  const current = active.length - leftOpen;
-  // Only orders that can still get a vehicle (Pending, Assigned). One already
-  // loading or in transit can't, so it isn't counted.
-  const needVehicle = active.filter((l) => hasNoVehicle(l.raw) && !ON_THE_MOVE.includes(l.status));
-  const needVehiclePast = needVehicle.filter((l) => staleOf(l.raw)?.overdue).length;
-  const inTransit = active.filter((l) => l.status === 'IN_TRANSIT');
-  const inTransitLate = inTransit.filter((l) => staleOf(l.raw)?.overdue).length;
-  const countOf = (status: string) => (complete ? active.filter((l) => l.status === status).length : undefined);
+  const current = open - (s?.left_open ?? 0);
+  const filtering = filter !== 'ALL' || search !== '';
 
   return (
     <LoadList
@@ -391,62 +360,65 @@ function OrdersTab({ onViewQuotes }: { onViewQuotes: () => void }) {
       refreshing={refreshing}
       onEndReached={() => hasMore && !isFetching && loadMore()}
       isFetchingMore={isFetching}
+      searching={q.trim() !== search || isPlaceholderData}
       search={{ value: q, onChange: setQ, placeholder: 'Search orders…' }}
       stats={
-        !complete
+        !s
           ? null
-          : active.length === 0
+          : open === 0
             ? []
             : [
                 {
                   label: 'Need a vehicle',
-                  value: String(needVehicle.length),
+                  value: String(s.need_vehicle),
+                  // Only Pending/Assigned orders can still get one; one already
+                  // loading or in transit without one is not counted.
                   note:
-                    needVehicle.length === 0
+                    s.need_vehicle === 0
                       ? 'All have a vehicle'
-                      : needVehiclePast === needVehicle.length
+                      : s.need_vehicle_overdue === s.need_vehicle
                         ? 'All past delivery date'
-                        : needVehiclePast > 0
-                          ? `${needVehiclePast} past delivery date`
+                        : s.need_vehicle_overdue > 0
+                          ? `${s.need_vehicle_overdue} past delivery date`
                           : 'Assign a vehicle',
                 },
                 {
                   label: 'In transit',
-                  value: String(inTransit.length),
+                  value: String(s.in_transit),
                   note:
-                    inTransit.length === 0
+                    s.in_transit === 0
                       ? 'None on the road'
-                      : inTransitLate === inTransit.length
-                        ? inTransit.length === 1
+                      : s.in_transit_overdue === s.in_transit
+                        ? s.in_transit === 1
                           ? 'Past its delivery date'
                           : 'All past delivery date'
-                        : inTransitLate > 0
-                          ? `${inTransitLate} past delivery date`
+                        : s.in_transit_overdue > 0
+                          ? `${s.in_transit_overdue} past delivery date`
                           : 'All on schedule',
                 },
                 {
                   label: 'Open order value',
-                  value: wholeRand(sumAmount(active)),
+                  value: wholeRand(s.open_total_incl_vat),
                   note:
-                    leftOpen === 0
+                    s.left_open === 0
                       ? plural(current, 'active order', 'active orders')
                       : current === 0
-                        ? `${plural(leftOpen, 'order', 'orders')}, all left open`
-                        : `${current} active · ${leftOpen} left open`,
+                        ? `${plural(s.left_open, 'order', 'orders')}, all left open`
+                        : `${current} active · ${s.left_open} left open`,
                 },
               ]
       }
       filters={[
-        { label: 'All', value: 'ALL', count: complete ? active.length : undefined },
-        { label: 'Pending', value: 'PENDING', count: countOf('PENDING') },
-        { label: 'Assigned', value: 'ASSIGNED', count: countOf('ASSIGNED') },
-        { label: 'Loading', value: 'LOADING', count: countOf('LOADING') },
-        { label: 'In transit', value: 'IN_TRANSIT', count: countOf('IN_TRANSIT') },
+        { label: 'All', value: 'ALL', count: s && !filtering ? open : undefined },
+        { label: 'Pending', value: 'PENDING' },
+        { label: 'Assigned', value: 'ASSIGNED' },
+        { label: 'Loading', value: 'LOADING' },
+        { label: 'In transit', value: 'IN_TRANSIT' },
       ]}
       filter={filter}
       onFilter={setFilter}
       empty={
-        active.length === 0 ? (
+        !filtering && open === 0 ? (
           <EmptyState
             icon="truck"
             title="No orders are in progress"
@@ -462,18 +434,21 @@ function OrdersTab({ onViewQuotes }: { onViewQuotes: () => void }) {
 }
 
 function HistoryTab() {
+  const [filter, setFilter] = useState('ALL');
+  const [q, setQ] = useState('');
+  const search = useDebouncedValue(q.trim());
   const {
-    combinedData: data,
+    combinedData: list,
+    extras,
     isLoading,
     isError,
     refresh,
     loadMore,
     hasMore,
     isFetching,
-  } = useLoads();
+    isPlaceholderData,
+  } = useLoadsTab<HistorySummary>('history', filter, search);
   const { refreshing, onRefresh } = useManualRefresh(refresh);
-  const [filter, setFilter] = useState('ALL');
-  const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();
 
   if (isLoading)
@@ -482,19 +457,11 @@ function HistoryTab() {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load history." />;
+  if (isError && list.length === 0) return <ErrorState onRetry={refresh} message="Couldn't load history." />;
 
-  const complete = !hasMore;
-  const done = data.filter((l) => DONE.includes(l.status));
-  const list = done.filter(
-    (l) =>
-      (filter === 'ALL' || l.status === filter) &&
-      (!q || `${l.loadNumber} ${l.customer}`.toLowerCase().includes(q.toLowerCase())),
-  );
-  const completed = done.filter((l) => l.status !== 'CANCELLED');
-  const invoiced = done.filter((l) => l.status === 'INVOICED');
-  const notInvoiced = done.filter((l) => l.status === 'DELIVERED').length;
-  const countOf = (status: string) => (complete ? done.filter((l) => l.status === status).length : undefined);
+  const s = extras?.summary;
+  const total = s?.history_count ?? 0;
+  const filtering = filter !== 'ALL' || search !== '';
 
   return (
     <LoadList
@@ -504,40 +471,41 @@ function HistoryTab() {
       refreshing={refreshing}
       onEndReached={() => hasMore && !isFetching && loadMore()}
       isFetchingMore={isFetching}
+      searching={q.trim() !== search || isPlaceholderData}
       search={{ value: q, onChange: setQ, placeholder: 'Search history…' }}
       stats={
-        !complete
+        !s
           ? null
-          : done.length === 0
+          : total === 0
             ? []
             : [
                 {
                   label: 'Delivered, not invoiced',
-                  value: String(notInvoiced),
-                  note: notInvoiced > 0 ? 'Invoice to get paid' : 'All invoiced',
+                  value: String(s.delivered_not_invoiced),
+                  note: s.delivered_not_invoiced > 0 ? 'Invoice to get paid' : 'All invoiced',
                 },
                 {
                   label: 'Invoiced',
-                  value: String(invoiced.length),
-                  note: `${wholeRand(sumAmount(invoiced))} billed`,
+                  value: String(s.invoiced),
+                  note: `${wholeRand(s.invoiced_total_incl_vat)} billed`,
                 },
                 {
                   label: 'Delivered revenue',
-                  value: wholeRand(sumAmount(completed)),
-                  note: plural(completed.length, 'load', 'loads'),
+                  value: wholeRand(s.completed_total_incl_vat),
+                  note: plural(s.completed, 'load', 'loads'),
                 },
               ]
       }
       filters={[
-        { label: 'All', value: 'ALL', count: complete ? done.length : undefined },
-        { label: 'Delivered', value: 'DELIVERED', count: countOf('DELIVERED') },
-        { label: 'Invoiced', value: 'INVOICED', count: countOf('INVOICED') },
-        { label: 'Cancelled', value: 'CANCELLED', count: countOf('CANCELLED') },
+        { label: 'All', value: 'ALL', count: s && !filtering ? total : undefined },
+        { label: 'Delivered', value: 'DELIVERED' },
+        { label: 'Invoiced', value: 'INVOICED' },
+        { label: 'Cancelled', value: 'CANCELLED' },
       ]}
       filter={filter}
       onFilter={setFilter}
       empty={
-        done.length === 0 ? (
+        !filtering && total === 0 ? (
           <EmptyState
             icon="truck"
             title="No past loads yet"
@@ -572,6 +540,7 @@ function LoadList({
   refreshing,
   onEndReached,
   isFetchingMore,
+  searching,
 }: {
   list: LoadLite[];
   onOpen: (id: string | number, preview?: Record<string, unknown>) => void;
@@ -586,11 +555,14 @@ function LoadList({
   refreshing?: boolean;
   onEndReached?: () => void;
   isFetchingMore?: boolean;
+  /** A new search or filter is loading; the previous rows stay until it lands. */
+  searching?: boolean;
 }) {
   const { colors } = useTheme();
   return (
     <FlashList
       data={list}
+      extraData={searching}
       keyExtractor={(l) => String(l.id)}
       onRefresh={onRefresh}
       refreshing={refreshing}
@@ -647,7 +619,7 @@ function LoadList({
             subtitle={`${item.customer} · ${item.pickupState}→${item.deliveryState}${staleNote(item.raw)}`}
             trailing={
               <View className="items-end gap-1">
-                <Mono className="text-callout font-semibold text-fg">{wholeRand(item.amount)}</Mono>
+                <Mono className="text-callout font-semibold text-fg">{wholeRand(item.amountInclVat)}</Mono>
                 <StatusPill status={item.status} />
               </View>
             }

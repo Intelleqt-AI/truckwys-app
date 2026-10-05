@@ -1,22 +1,25 @@
 import {
   MONTHS,
+  expenseNet,
   inPeriod,
-  isApproved,
   isOpen,
   isPending,
+  isRejected,
   monthLabel,
   monthsIn,
   num,
   priorPeriod,
   resolvePeriod,
+  revenueByMonth,
   todayISO,
-  vatShare,
   ymOf,
+  type CreditNoteRec,
   type Expense,
   type Invoice,
   type Load,
   type Payment,
   type Quote,
+  type RevenueBasis,
   type Vehicle,
 } from '@/lib/ledger';
 import { isOpenLoad, staleWork } from '@/lib/staleWork';
@@ -28,19 +31,28 @@ import { bookedLoadOf, isBookedQuote, quoteStage } from '@/lib/quoteStage';
 // Reports agree.
 
 // ── Money ───────────────────────────────────────────────────────────────────
+// Revenue and costs are excl. VAT, on the shared rules in lib/ledger.ts
+// (revenueByMonth / expenseNet), which mirror the backend's accounting_reports:
+//   revenue  accrual: issued invoices less credit notes; cash: money received,
+//            each payment less its invoice's VAT share (an overpayment is not revenue)
+//   costs    every expense that is not rejected (approved and pending), net of input VAT
 export interface HomeMoney {
+  /** Which revenue the figures are on: invoiced (accrual) or received (cash). */
+  basis: RevenueBasis;
   /** Payments received in the last 12 months, incl. VAT, by payment date. */
   received: number;
   /** The 12 months before that; null when there were no payments in them. */
   receivedPrior: number | null;
-  /** Received revenue excl. VAT (each payment less its invoice's VAT share). */
+  /** Revenue excl. VAT over the last 12 months, on `basis`. */
   revenueExcl: number;
-  /** Approved expenses dated in the last 12 months. */
+  /** The 12 months before that; null when there was no revenue in them. */
+  revenuePrior: number | null;
+  /** Expenses dated in the last 12 months that are not rejected, excl. VAT. */
   costs: number;
   /** (revenueExcl - costs) / revenueExcl as a percentage; null with no revenue. */
   margin: number | null;
   marginPrior: number | null;
-  /** Expenses still pending approval in the period (not deducted). */
+  /** The part of `costs` still awaiting approval (already deducted; for information). */
   pending: number;
   pendingCount: number;
   /** Open balances of issued, unpaid invoices, incl. VAT. */
@@ -51,33 +63,17 @@ export interface HomeMoney {
   months: { ym: string; revenue: number; costs: number }[];
 }
 
-function revenueOf(
-  invoices: Invoice[],
-  payments: Payment[],
-  range: { from: string; to: string },
-) {
-  const byId = new Map(invoices.map((i) => [i.id, i]));
+function receivedOf(payments: Payment[], range: { from: string; to: string }) {
   const paid = payments.filter((p) => inPeriod(p.payment_date, range));
-  let incl = 0;
-  let excl = 0;
-  const byMonth = new Map<string, number>();
-  for (const p of paid) {
-    const amount = num(p.amount);
-    const ex = amount * (1 - vatShare(p.invoice != null ? byId.get(p.invoice) : undefined));
-    incl += amount;
-    excl += ex;
-    const m = ymOf(p.payment_date);
-    byMonth.set(m, (byMonth.get(m) ?? 0) + ex);
-  }
-  return { incl, excl, count: paid.length, byMonth };
+  return { incl: paid.reduce((s, p) => s + num(p.amount), 0), count: paid.length };
 }
 
 function costsOf(expenses: Expense[], range: { from: string; to: string }) {
   const byMonth = new Map<string, number>();
   let total = 0;
   for (const e of expenses) {
-    if (!isApproved(e) || !inPeriod(e.expense_date, range)) continue;
-    const a = num(e.amount);
+    if (isRejected(e) || !inPeriod(e.expense_date, range)) continue;
+    const a = expenseNet(e);
     total += a;
     const m = ymOf(e.expense_date);
     byMonth.set(m, (byMonth.get(m) ?? 0) + a);
@@ -98,15 +94,21 @@ function shownMonths(months: string[], hasEntry: (ym: string) => boolean): strin
   return last < 0 ? months : months.slice(first, last + 1);
 }
 
-export function computeHomeMoney(src: {
-  invoices: Invoice[];
-  payments: Payment[];
-  expenses: Expense[];
-}): HomeMoney {
+export function computeHomeMoney(
+  src: {
+    invoices: Invoice[];
+    payments: Payment[];
+    expenses: Expense[];
+    creditNotes?: CreditNoteRec[];
+  },
+  basis: RevenueBasis = 'cash',
+): HomeMoney {
   const period = resolvePeriod('last-12');
   const prior = priorPeriod(period);
-  const now = revenueOf(src.invoices, src.payments, period);
-  const before = revenueOf(src.invoices, src.payments, prior);
+  const now = revenueByMonth(src, basis, period);
+  const before = revenueByMonth(src, basis, prior);
+  const got = receivedOf(src.payments, period);
+  const gotBefore = receivedOf(src.payments, prior);
   const costs = costsOf(src.expenses, period);
   const costsPrior = costsOf(src.expenses, prior);
   const margin = now.excl > 0.005 ? ((now.excl - costs.total) / now.excl) * 100 : null;
@@ -117,7 +119,7 @@ export function computeHomeMoney(src: {
   let pendingCount = 0;
   for (const e of src.expenses) {
     if (isPending(e) && inPeriod(e.expense_date, period)) {
-      pending += num(e.amount);
+      pending += expenseNet(e);
       pendingCount += 1;
     }
   }
@@ -132,9 +134,11 @@ export function computeHomeMoney(src: {
   const all = monthsIn(period.from, period.to);
   const shown = shownMonths(all, (m) => now.byMonth.has(m) || costs.byMonth.has(m));
   return {
-    received: now.incl,
-    receivedPrior: before.count > 0 ? before.incl : null,
+    basis,
+    received: got.incl,
+    receivedPrior: gotBefore.count > 0 ? gotBefore.incl : null,
     revenueExcl: now.excl,
+    revenuePrior: before.entries.length > 0 ? before.excl : null,
     costs: costs.total,
     margin,
     marginPrior,

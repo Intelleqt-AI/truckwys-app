@@ -4,6 +4,7 @@ import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyb
 import { Txt, Mono, Button, TextField, DateField, SelectField, type Option } from '@/components/ui';
 import { formatCurrency, formatPlain, parseNum, round2 } from '@/lib/formatters';
 import { localDateISO } from '@/lib/dates';
+import { paymentMethodLabel } from './api';
 
 // Records a payment against an invoice — the mobile counterpart of the web
 // invoice page's inline payment form.
@@ -41,19 +42,32 @@ export function RecordPaymentSheet({
   busy,
   onConfirm,
   onCancel,
+  initial,
 }: {
-  /** Outstanding balance — caps the amount and backs the "Full" shortcut. */
+  /**
+   * The most the amount can be, and what the "Full balance" shortcut fills in:
+   * the outstanding balance when recording, or the balance plus this payment's
+   * own amount when editing it.
+   */
   balance: number;
   busy?: boolean;
   onConfirm: (draft: PaymentDraft) => void;
   onCancel: () => void;
+  /** Editing an existing payment: its current values. Omit to record a new one. */
+  initial?: PaymentDraft;
 }) {
-  const [amount, setAmount] = useState('');
+  const editing = !!initial;
+  const [amount, setAmount] = useState(initial ? formatPlain(initial.amount, 2) : '');
   // Web leaves this blank and makes the user pick; defaulting to today matches
   // the expense form and is one less tap for the overwhelmingly common case.
-  const [date, setDate] = useState(todayISO());
-  const [method, setMethod] = useState('EFT');
-  const [reference, setReference] = useState('');
+  const [date, setDate] = useState(initial?.payment_date.slice(0, 10) || todayISO());
+  const [method, setMethod] = useState(initial?.payment_method || 'EFT');
+  const [reference, setReference] = useState(initial?.reference ?? '');
+  // A payment can have a method that isn't pickable by hand (EARLY_PAY, BANK_TRANSFER):
+  // keep showing it rather than a blank field.
+  const methods: Option[] = PAYMENT_METHODS.some((m) => m.value === method)
+    ? PAYMENT_METHODS
+    : [...PAYMENT_METHODS, { label: paymentMethodLabel(method), value: method }];
 
   // parseNum, not Number: with `|| 0` a comma amount left RECORD permanently
   // disabled and told the user nothing about why.
@@ -81,9 +95,13 @@ export function RecordPaymentSheet({
         />
         <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
           <View className="rounded-panel border border-line bg-elevated p-5">
-            <Txt className="text-heading font-semibold text-fg">Record payment</Txt>
+            <Txt className="text-heading font-semibold text-fg">
+              {editing ? 'Edit payment' : 'Record payment'}
+            </Txt>
             <Txt className="mb-4 mt-1.5 text-sub text-muted">
-              Outstanding balance {formatCurrency(balance)}
+              {editing
+                ? `Up to ${formatCurrency(balance)}, including this payment`
+                : `Outstanding balance ${formatCurrency(balance)}`}
             </Txt>
 
             <KeyboardAwareScrollView
@@ -126,7 +144,7 @@ export function RecordPaymentSheet({
                 <SelectField
                   label="Method"
                   icon="banknote"
-                  options={PAYMENT_METHODS}
+                  options={methods}
                   value={method}
                   onSelect={setMethod}
                 />
@@ -152,7 +170,7 @@ export function RecordPaymentSheet({
               </View>
               <View className="flex-1">
                 <Button
-                  label={busy ? 'Recording…' : 'Record'}
+                  label={busy ? (editing ? 'Saving…' : 'Recording…') : editing ? 'Save' : 'Record'}
                   loading={busy}
                   disabled={!canSubmit}
                   onPress={() =>

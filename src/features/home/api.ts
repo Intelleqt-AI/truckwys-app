@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
 import { STALE_MS, useAutoRefreshStale } from '@/hooks/useAutoRefreshStale';
 import type { AllPages } from '@/lib/api/fetchAllPages';
-import type { Customer, Expense, Invoice, Load, Payment, Quote, Vehicle } from '@/lib/ledger';
+import type { CreditNoteRec, Customer, Expense, Invoice, Load, Payment, Quote, Vehicle } from '@/lib/ledger';
+import { useRevenueBasisStore } from '@/stores/revenueBasisStore';
 import { useLedger, type Ledger, type SourceName } from '@/lib/useLedger';
 import { normalizeLoad, normalizeQuote } from '@/types/domain';
 import { computeFunnel, computeHomeMoney, summariseFleet, summariseLoads } from './derive';
@@ -42,7 +43,10 @@ function useHomeLedger(need: SourceName[]): HomeLedger {
   const rows = <T,>(n: SourceName) => (qc.getQueryData<AllPages<T>>([`ledger-${n}`])?.rows ?? []) as T[];
   const partial = need.flatMap((n, i) => {
     const p = pages[i];
-    return p && !p.complete ? [`first ${p.rows.length} of ${p.count} ${n}`] : [];
+    if (!p || p.complete) return [];
+    return n === 'creditNotes' && p.count === 0
+      ? ['invoices without credit notes (credit notes couldn’t load)']
+      : [`first ${p.rows.length} of ${p.count} ${n === 'creditNotes' ? 'credit notes' : n}`];
   });
   const data: Ledger = {
     invoices: rows<Invoice>('invoices'),
@@ -52,21 +56,35 @@ function useHomeLedger(need: SourceName[]): HomeLedger {
     quotes: rows<Quote>('quotes'),
     customers: rows<Customer>('customers'),
     vehicles: rows<Vehicle>('vehicles'),
+    creditNotes: rows<CreditNoteRec>('creditNotes'),
     partial,
     loadedAt: Math.min(...need.map((n) => qc.getQueryState([`ledger-${n}`])?.dataUpdatedAt || Date.now())),
   };
   return { ...ledger, data, error: false, refreshFailed: true };
 }
 
-/** Owed to you, revenue received, net margin and the monthly chart: invoices, payments and expenses. */
+/**
+ * Owed to you, revenue, net margin and the monthly chart: invoices, payments,
+ * expenses and credit notes, on the revenue basis the person chose (cash by
+ * default; the choice is remembered).
+ */
 export function useHomeMoney() {
-  const l = useHomeLedger(['invoices', 'payments', 'expenses']);
+  const l = useHomeLedger(['invoices', 'payments', 'expenses', 'creditNotes']);
+  const basis = useRevenueBasisStore((s) => s.basis);
+  const hydrate = useRevenueBasisStore((s) => s.hydrate);
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
   const invoices = l.data?.invoices;
   const payments = l.data?.payments;
   const expenses = l.data?.expenses;
+  const creditNotes = l.data?.creditNotes;
   const money = useMemo(
-    () => (invoices && payments && expenses ? computeHomeMoney({ invoices, payments, expenses }) : null),
-    [invoices, payments, expenses],
+    () =>
+      invoices && payments && expenses
+        ? computeHomeMoney({ invoices, payments, expenses, creditNotes }, basis)
+        : null,
+    [invoices, payments, expenses, creditNotes, basis],
   );
   return { ...l, money, partial: l.data?.partial ?? [] };
 }
@@ -130,6 +148,7 @@ const HOME_KEYS: QueryKey[] = [
   ['ledger-loads'],
   ['ledger-quotes'],
   ['ledger-vehicles'],
+  ['ledger-creditNotes'],
   ['overview', 'signals'],
 ];
 

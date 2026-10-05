@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { View, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -34,7 +33,6 @@ import { asArray, num, str, pick } from '@/lib/api/list';
 import { useAuthStore } from '@/stores/authStore';
 import { useRole, canAccessSettingsSection, canSeeInsights, visibleTabs } from '@/lib/access';
 import { INDUSTRY_OPTIONS } from '@/lib/companyOptions';
-import { WEB_APP_URL } from '@/lib/legal';
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore';
 import {
   useCompanyProfile,
@@ -68,6 +66,10 @@ import {
   type NotificationPrefs,
 } from './api';
 import { normalizeVehicleType } from '@/features/bookings/api';
+import { InvoiceNumberingSection } from '@/features/finance/InvoiceNumberingSection';
+import { ComingSoonNote, ProviderCards } from '@/features/accounting/components/ProviderCards';
+import { FleetTrackingCards } from '@/features/integrations/FleetTrackingCards';
+import { ApiKeysCard, WebhooksCard } from '@/features/integrations/DeveloperCards';
 import { vehicleTypeDeleteCopy } from './validation';
 import {
   formatCurrency,
@@ -97,6 +99,7 @@ const SECTIONS: { key: string; label: string; icon: IconName }[] = [
   { key: 'vehicle-types', label: 'Vehicle types', icon: 'truck' },
   { key: 'users', label: 'Users and permissions', icon: 'users' },
   { key: 'billing', label: 'Billing', icon: 'card' },
+  { key: 'invoice-numbering', label: 'Invoice numbering', icon: 'receipt' },
   { key: 'integrations', label: 'Integrations', icon: 'plug' },
   { key: 'risk', label: 'Payment risk API', icon: 'shield' },
 ];
@@ -141,6 +144,7 @@ export function SettingsScreen({ route, navigation }: Props) {
       {section === 'vehicle-types' && <VehicleTypesSection />}
       {section === 'users' && <UsersSection />}
       {section === 'billing' && <BillingSection navigation={navigation} />}
+      {section === 'invoice-numbering' && <InvoiceNumberingSection />}
       {section === 'integrations' && <IntegrationsSection />}
       {section === 'risk' && (
         <Txt className="text-callout text-muted">
@@ -365,7 +369,7 @@ function ProfileSection() {
         <View className="flex-1">
           <TextField
             label="First name"
-            placeholder="Jane"
+            placeholder="e.g. Jane"
             autoCapitalize="words"
             value={firstName}
             onChangeText={setFirstName}
@@ -374,7 +378,7 @@ function ProfileSection() {
         <View className="flex-1">
           <TextField
             label="Last name"
-            placeholder="Dlamini"
+            placeholder="e.g. Dlamini"
             autoCapitalize="words"
             value={lastName}
             onChangeText={setLastName}
@@ -383,7 +387,7 @@ function ProfileSection() {
       </View>
       <TextField
         label="Email"
-        placeholder="you@company.co.za"
+        placeholder="e.g. you@company.co.za"
         icon="send"
         autoCapitalize="none"
         keyboardType="email-address"
@@ -398,7 +402,7 @@ function ProfileSection() {
       />
       <TextField
         label="Phone"
-        placeholder="+27 82 123 4567"
+        placeholder="e.g. +27 82 123 4567"
         icon="phone"
         keyboardType="phone-pad"
         value={phone}
@@ -2045,7 +2049,7 @@ function UsersSection() {
         <Label className="text-muted">Invite a teammate</Label>
         <TextField
           label="Email"
-          placeholder="colleague@company.co.za"
+          placeholder="e.g. colleague@company.co.za"
           icon="send"
           autoCapitalize="none"
           keyboardType="email-address"
@@ -2295,33 +2299,39 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   );
 }
 
+// Same three groups as the web's Integrations page. Accounting (Xero,
+// QuickBooks Online): one card per provider to connect, and Manage opens the
+// full Accounting screen (features/accounting); the old integrations/xero/
+// endpoints are gone, everything is under integrations/accounting/. Fleet
+// tracking and Developers live in features/integrations.
 function IntegrationsSection() {
-  const { data } = useQuery({
-    queryKey: ['xero-status'],
-    queryFn: () => fetchData('integrations/xero/status/') as Promise<Record<string, unknown>>,
-    retry: false,
-  });
-  const connected = Boolean(pick(data ?? {}, ['connected', 'is_connected']));
   return (
-    <View className="gap-4">
-      <Group>
-        <View className="flex-row items-center justify-between px-4 py-3.5">
-          <View>
-            <Txt className="text-callout text-fg">Xero</Txt>
-            <Txt className="mt-0.5 text-caption text-faint">Accounting sync</Txt>
-          </View>
-          <Mono className={`text-caption font-medium ${connected ? 'text-success' : 'text-faint'}`}>
-            {connected ? 'Connected' : 'Not connected'}
-          </Mono>
+    <View className="gap-6">
+      <View className="gap-3">
+        <View className="gap-1">
+          <Label className="text-muted">Accounting</Label>
+          <Txt className="text-sub text-muted">
+            Send invoices and bills to your books. Payments recorded there come back automatically.
+          </Txt>
         </View>
-      </Group>
-      <Button
-        label={connected ? 'Manage on web' : 'Connect on web'}
-        variant="secondary"
-        icon="link"
-        onPress={() => WebBrowser.openBrowserAsync(`${WEB_APP_URL}/settings/integrations/xero`)}
-        fullWidth
-      />
+        <ProviderCards />
+        <ComingSoonNote />
+      </View>
+      <View className="gap-3">
+        <View className="gap-1">
+          <Label className="text-muted">Fleet tracking</Label>
+          <Txt className="text-sub text-muted">Live vehicle positions and status.</Txt>
+        </View>
+        <FleetTrackingCards />
+      </View>
+      <View className="gap-3">
+        <View className="gap-1">
+          <Label className="text-muted">Developers</Label>
+          <Txt className="text-sub text-muted">Connect your own systems to TruckWys.</Txt>
+        </View>
+        <ApiKeysCard />
+        <WebhooksCard />
+      </View>
     </View>
   );
 }

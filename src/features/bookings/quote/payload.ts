@@ -6,7 +6,8 @@ import { extractCode, roundCoord, round2, type Loc, type StopEntry } from './typ
 // Moved out of CreateQuoteScreen.tsx's buildPayload (Phase 0 extraction) —
 // same object literal, same key order, no behaviour change. This is the DRF
 // contract: key order and field set must stay byte-identical to what the
-// backend already accepts.
+// backend already accepts. (`is_international` is the one addition, 2026-10;
+// it is left out entirely when the route/points don't say either way.)
 
 export interface BuildQuotePayloadInput {
   customerId: string;
@@ -37,6 +38,12 @@ export interface BuildQuotePayloadInput {
    * replaces the field wholesale.
    */
   routeSnapshot: Record<string, unknown> | null;
+  /**
+   * The trip leaves South Africa (zero-rated for VAT). Null when neither the
+   * route nor a point's country says either way: nothing is sent, so a stored
+   * value is kept.
+   */
+  international: boolean | null;
 }
 
 export function buildQuotePayload(
@@ -62,6 +69,7 @@ export function buildQuotePayload(
     baseRateNum,
     aiApplied,
     routeSnapshot,
+    international,
   }: BuildQuotePayloadInput,
   status: 'DRAFT' | 'SENT',
 ) {
@@ -100,6 +108,9 @@ export function buildQuotePayload(
     base_rate: round2(costs.baseCost),
     fuel_surcharge: round2(costs.fuelCost),
     toll_charges: round2(costs.tollCost),
+    // International transport is zero-rated: the customer is shown VAT 0% and
+    // the delivery invoice follows. Only the builder can set it.
+    ...(international != null ? { is_international: international } : {}),
     driver_allowance: round2(costs.driver),
     additional_charges: round2(costs.crossBorderCost + serviceCharge),
     total_amount: round2(costs.total),

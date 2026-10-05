@@ -7,6 +7,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, TextField, SelectField, Button, Label } from '@/components/ui';
 import { createCustomer, updateCustomer } from './api';
+import { customerTaxFrom, customerTaxPayload } from '@/lib/finance/customerTax';
+import { COUNTRIES, registrationNumberProblem, vatNumberProblem } from '@/lib/finance/validation';
 import { str, num, pick } from '@/lib/api/list';
 import { parseNum, round2, decimalMax } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
@@ -90,6 +92,19 @@ export function AddCustomerScreen({ route, navigation }: Props) {
   const [busy, setBusy] = useState(false);
   const [paymentTerms, setPaymentTerms] = useState(str(pick(preview, ['payment_terms_default']), 'NET30'));
   const [status, setStatus] = useState(str(pick(preview, ['status'])).toUpperCase() || 'ACTIVE');
+  // Country, VAT number and company registration number: printed on invoices,
+  // and used to match the customer in Xero/QuickBooks and to identify the debtor
+  // for Fast Pay. South African numbers are checked here; the server normalises.
+  const [tax, setTax] = useState(() => customerTaxFrom(preview as Parameters<typeof customerTaxFrom>[0]));
+  const vatError = vatNumberProblem(tax.vat_number, tax.country) ?? undefined;
+  const regError = registrationNumberProblem(tax.registration_number, tax.country) ?? undefined;
+  const countryOptions = useMemo(
+    () =>
+      COUNTRIES.some((c) => c.code === tax.country)
+        ? COUNTRIES.map((c) => ({ label: c.label, value: c.code }))
+        : [...COUNTRIES.map((c) => ({ label: c.label, value: c.code })), { label: tax.country, value: tax.country }],
+    [tax.country],
+  );
   // A record can carry any NET<n> (invoicing reads the number, not a fixed
   // table — see invoice_generator.py's _calculate_due_date), so a value
   // outside the offered list is added as its own option rather than silently
@@ -123,8 +138,11 @@ export function AddCustomerScreen({ route, navigation }: Props) {
     // block, but customers are fixed seeded data in the demo company, so this
     // is the actual save.
     if (demo.block()) return;
+    // The server would refuse these anyway; say which field in words first.
+    if (vatError || regError) return toast.error(vatError ?? regError ?? 'Check the tax details');
     setBusy(true);
     const payload: Record<string, unknown> = {
+      ...customerTaxPayload(tax),
       name: v.name.trim(),
       company_name: v.company_name?.trim() || undefined,
       contact_person: v.contact_person?.trim() || undefined,
@@ -179,6 +197,31 @@ export function AddCustomerScreen({ route, navigation }: Props) {
         {FIELDS.filter((f) => f.section === 'address').map((f) => (
           <Field key={f.name} control={control} field={f} />
         ))}
+
+        <Label className="mt-1 text-muted">Tax</Label>
+        <SelectField
+          label="Country"
+          options={countryOptions}
+          value={tax.country}
+          onSelect={(v) => setTax((t) => ({ ...t, country: v }))}
+        />
+        <TextField
+          label="VAT number"
+          placeholder="10 digits, starting with 4"
+          keyboardType="number-pad"
+          value={tax.vat_number}
+          onChangeText={(t) => setTax((s) => ({ ...s, vat_number: t }))}
+          error={vatError}
+          maxLength={20}
+        />
+        <TextField
+          label="Company registration number"
+          placeholder="e.g. 2015/123456/07"
+          value={tax.registration_number}
+          onChangeText={(t) => setTax((s) => ({ ...s, registration_number: t }))}
+          error={regError}
+          maxLength={20}
+        />
 
         <Label className="mt-1 text-muted">Account</Label>
         <SelectField label="Payment terms" options={paymentTermsOptions} value={paymentTerms} onSelect={setPaymentTerms} />

@@ -15,6 +15,7 @@ import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
 import { saDaysBetween } from '@/lib/dates';
 import { resolveDieselPrice } from '@/lib/dieselPrice';
 import {
+  expenseNet,
   isDraft,
   isOpen as ledgerIsOpen,
   isPaid,
@@ -445,26 +446,30 @@ export function computeFindings(input: FindingInputs, now: Date = new Date()): F
     }
   }
 
-  // 6. Costs waiting for approval distort the margin ---------------------------
+  // 6. Costs waiting for approval --------------------------------------------
   // The margin is the Margin tab's (margin.ts: last 12 months, excl. VAT, cash
-  // basis), so both print the same percentage and the same "with pending" figure.
+  // basis), so both print the same percentage. Costs are every expense that is not
+  // rejected, so an expense still Pending is already deducted: what is at stake is
+  // that a cost nobody has looked at drags the margin down until it is approved or
+  // rejected.
   {
     const pending = input.expenses
       .filter(
         (e) =>
           up(e.status) === 'PENDING' &&
-          num(e.amount) > 0 &&
+          expenseNet(e) > 0 &&
           days(e.created_at || e.expense_date, now) >= 7,
       )
-      .sort((a, b) => num(b.amount) - num(a.amount));
-    const pendingTotal = pending.reduce((s, e) => s + num(e.amount), 0);
+      .sort((a, b) => expenseNet(b) - expenseNet(a));
+    const pendingTotal = pending.reduce((s, e) => s + expenseNet(e), 0);
     const period = resolvePeriod('last-12');
     const m = marginFromLedger(
       { invoices, payments: input.payments, expenses: input.expenses },
       period,
     );
-    const withPending = m.net - m.pending;
-    const flips = m.net >= 0 && withPending < 0;
+    const withoutPending = m.net + m.pending;
+    // Without them the business would be in profit; with them it is not.
+    const flips = m.net < 0 && withoutPending >= 0;
     if (pending.length && pendingTotal >= THRESHOLD && (flips || pendingTotal > 0.05 * m.costs)) {
       out.push({
         id: 'pending_costs',
@@ -474,19 +479,19 @@ export function computeFindings(input: FindingInputs, now: Date = new Date()): F
         confidence: 'high',
         severity: flips ? 'high' : 'medium',
         amount: pendingTotal,
-        headline: 'Costs left out of profit',
+        headline: 'Costs waiting for approval',
         line:
           flips && m.pct != null
-            ? `Counted, your ${formatPercent(m.pct)} margin becomes a ${randWhole(Math.abs(withPending))} loss.`
-            : `${plural(pending.length, 'expense')} waiting for approval, not in your margin yet.`,
+            ? `They are in your ${formatPercent(m.pct)} margin, which is a loss. Without them it is a ${randWhole(withoutPending)} profit.`
+            : `${plural(pending.length, 'expense')} waiting for approval, already counted in your margin.`,
         action: { label: `Review ${plural(pending.length, 'expense')}`, target: { kind: 'expenses' } },
-        method: `Expenses still Pending 7 or more days after they were entered. Reports count approved expenses only. Margin, ${periodText(period)}, excl. VAT, cash basis (as on the Margin tab): revenue ${randWhole(m.revenue)} less approved costs ${randWhole(m.costs)} is ${randWhole(m.net)}; less the ${randWhole(m.pending)} pending in those months it is ${randWhole(withPending)}.${partialNote(input.partial, 'expenses')}`,
+        method: `Expenses still Pending 7 or more days after they were entered, excl. VAT. Reports count every expense that is not rejected, so these are already costs until they are rejected. Margin, ${periodText(period)}, excl. VAT, cash basis (as on the Margin tab): revenue ${randWhole(m.revenue)} less costs ${randWhole(m.costs)} is ${randWhole(m.net)}, of which ${randWhole(m.pending)} is still pending in those months.${partialNote(input.partial, 'expenses')}`,
         evidence: pending.map((e) => ({
           id: `exp-${e.id}`,
           ref: e.expense_number || `#${e.id}`,
           label: (e.category || '').charAt(0) + (e.category || '').slice(1).toLowerCase().replace(/_/g, ' '),
           note: `dated ${formatDate(e.expense_date)}`,
-          amount: num(e.amount),
+          amount: expenseNet(e),
           target: { kind: 'expenses' },
         })),
         evidenceNoun: ['expense', 'expenses'],

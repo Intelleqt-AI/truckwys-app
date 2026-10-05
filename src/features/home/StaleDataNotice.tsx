@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { View, TouchableOpacity } from 'react-native';
+import { onlineManager } from '@tanstack/react-query';
 import { Icon, Mono, Txt } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 
@@ -62,15 +63,22 @@ export function StaleDataNotice({
     return () => clearInterval(id);
   }, []);
 
+  // While offline React Query pauses refetches, so "Refresh now" can't do anything;
+  // say why instead. Coming back online refetches on its own and clears this.
+  const online = useSyncExternalStore(onlineManager.subscribe, () => onlineManager.isOnline());
+
   if (!updatedAt) return null;
   const stale = now - updatedAt > staleAfterMs;
   if (!refreshing && !refreshFailed && !stale) return null;
 
+  const offline = !online && !refreshing;
   const lead = refreshing
     ? 'Refreshing the figures…'
-    : refreshFailed
-      ? "Couldn't refresh."
-      : 'These figures may be out of date.';
+    : offline
+      ? "You're offline."
+      : refreshFailed
+        ? "Couldn't refresh."
+        : 'These figures may be out of date.';
 
   return (
     <View
@@ -82,7 +90,7 @@ export function StaleDataNotice({
       <Txt className="flex-1 text-sub text-muted">
         {lead} Showing data from {formatTime(updatedAt)}.
       </Txt>
-      {onRetry && (
+      {onRetry && !offline && (
         <TouchableOpacity
           onPress={onRetry}
           disabled={refreshing}

@@ -154,7 +154,7 @@ export async function presentForeground(
     android: {
       channelId,
       smallIcon: 'ic_launcher',
-      color: '#4D9EFF',
+      color: '#2563EB',
       pressAction: { id: 'default' },
     },
     ios: { sound: 'default' },

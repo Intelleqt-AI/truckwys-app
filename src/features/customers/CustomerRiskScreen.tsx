@@ -3,6 +3,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   SheetScreen,
   StatCard,
+  KpiRow,
+  Card,
   Group,
   ListRow,
   SectionLabel,
@@ -11,7 +13,7 @@ import {
   Mono,
 } from '@/components/ui';
 import type { BadgeTone } from '@/components/ui/primitives';
-import { ListSkeleton, ErrorState } from '@/components/feedback';
+import { DetailSkeleton, ErrorState, NotFoundState } from '@/components/feedback';
 import { useCustomerRisk } from './api';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
@@ -27,17 +29,19 @@ const BAND_TONE: Record<string, BadgeTone> = {
   CRITICAL: 'danger',
   NEW: 'neutral',
 };
-const BAND_COLOR: Record<string, string> = {
-  LOW: '#22C55E',
-  MEDIUM: '#F59E0B',
-  HIGH: '#FF4949',
-  CRITICAL: '#FF4949',
-  NEW: '#888888',
+// Risk tiers map onto the status tones; the key indexes `useTheme().colors`.
+const BAND_COLOR_KEY: Record<string, 'success' | 'warning' | 'danger' | 'faint'> = {
+  LOW: 'success',
+  MEDIUM: 'warning',
+  HIGH: 'danger',
+  CRITICAL: 'danger',
+  NEW: 'faint',
 };
 
 export function CustomerRiskScreen({ route, navigation }: Props) {
   const { id } = route.params;
-  const { data, isLoading, isError, refetch } = useCustomerRisk(id);
+  const { data, isLoading, isError, error, refetch } = useCustomerRisk(id);
+  const { colors } = useTheme();
 
   const r = (data ?? {}) as Record<string, unknown>;
   const band = str(pick(r, ['band']), 'NEW').toUpperCase();
@@ -49,47 +53,45 @@ export function CustomerRiskScreen({ route, navigation }: Props) {
 
   return (
     <RiskBody
-      title={str(pick(r, ['customer_name']), 'AI analysis')}
+      title={str(pick(r, ['customer_name']), 'Payment risk')}
       onBack={() => navigation.goBack()}
     >
       {isLoading ? (
-        <ListSkeleton rows={4} />
+        <DetailSkeleton />
       ) : isError ? (
-        <ErrorState onRetry={refetch} message="Couldn't load the risk profile." />
+        (error as { status?: number } | null)?.status === 404 ? (
+          <NotFoundState what="Risk profile" onBack={() => navigation.goBack()} />
+        ) : (
+          <ErrorState onRetry={refetch} message="Couldn't load the risk profile." />
+        )
       ) : (
         <>
           <RiskBadge band={band} riskPct={riskPct} />
 
-          <View className="mb-5 flex-row flex-wrap gap-3">
-            <View className="flex-row" style={{ width: '47.5%' }}>
-              <StatCard label="AI risk" value={formatPercent(riskPct, 0)} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
+          <View className="mb-5">
+            <KpiRow>
+              <StatCard label="Payment risk" value={formatPercent(riskPct, 0)} />
               <StatCard label="Avg days to pay" value={`${num(pick(stats, ['avg_days_to_pay']))}d`} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="On-time rate" value={formatPercent(num(pick(stats, ['on_time_pct'])))} />
-            </View>
-            <View className="flex-row" style={{ width: '47.5%' }}>
               <StatCard label="Overdue >30d" value={formatCurrency(num(pick(stats, ['overdue_30_total'])), { maximumFractionDigits: 0 })} />
-            </View>
+            </KpiRow>
           </View>
 
           {summary ? (
             <>
-              <SectionLabel>AI summary</SectionLabel>
-              <View className="mb-5 rounded-card border border-line bg-surface p-4">
+              <SectionLabel>Summary</SectionLabel>
+              <Card className="mb-5 p-4">
                 <Txt className="text-sub text-muted">{summary}</Txt>
-              </View>
+              </Card>
             </>
           ) : null}
 
           {insufficient ? (
-            <View className="rounded-card border border-line bg-surface p-4">
+            <Card className="p-4">
               <Txt className="text-sub text-muted">
-                Not enough payment history yet — the risk profile sharpens as invoices are paid.
+                Not enough payment history yet. The risk profile sharpens as invoices are paid.
               </Txt>
-            </View>
+            </Card>
           ) : (
             <Group label={`Payment behavior (${rows.length})`}>
               {rows.length === 0 ? (
@@ -114,7 +116,7 @@ export function CustomerRiskScreen({ route, navigation }: Props) {
                       trailing={
                         <Mono
                           className="text-callout font-semibold"
-                          style={{ color: late > 30 ? '#FF4949' : late > 0 ? '#F59E0B' : '#22C55E' }}
+                          style={{ color: late > 30 ? colors.danger : late > 0 ? colors.warning : colors.success }}
                         >
                           {formatCurrency(num(pick(o, ['amount'])), { maximumFractionDigits: 0 })}
                         </Mono>
@@ -143,7 +145,7 @@ function RiskBody({
   children: React.ReactNode;
 }) {
   return (
-    <SheetScreen eyebrow="Risk profile" title={title} onBack={onBack}>
+    <SheetScreen title={title} onBack={onBack}>
       {children}
     </SheetScreen>
   );
@@ -151,14 +153,15 @@ function RiskBody({
 
 function RiskBadge({ band, riskPct }: { band: string; riskPct: number }) {
   const { colors } = useTheme();
-  const color = BAND_COLOR[band] ?? colors.muted;
+  const color = colors[BAND_COLOR_KEY[band] ?? 'muted'];
   const tone = BAND_TONE[band] ?? 'neutral';
+  const bandLabel = band.charAt(0) + band.slice(1).toLowerCase();
   return (
-    <View className="mb-5 items-center rounded-card border border-line bg-surface py-6">
-      <Mono style={{ fontSize: 44, fontWeight: '700', color }}>{formatPercent(riskPct, 0)}</Mono>
+    <Card className="mb-5 items-center py-6">
+      <Mono className="text-figure font-semibold" style={{ color }}>{formatPercent(riskPct, 0)}</Mono>
       <View className="mt-2">
-        <Badge label={`${band} risk`} tone={tone} />
+        <Badge label={`${bandLabel} risk`} tone={tone} />
       </View>
-    </View>
+    </Card>
   );
 }

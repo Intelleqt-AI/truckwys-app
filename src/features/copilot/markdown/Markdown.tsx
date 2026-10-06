@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { View, Text, ScrollView } from 'react-native';
-import { MONO_FONT } from '@/theme/tokens';
+import { CODE_FONT } from '@/theme/tokens';
 import { useTheme } from '@/theme/ThemeProvider';
 import { renderInline } from './InlineText';
 import { MarkdownTable } from './MarkdownTable';
@@ -53,7 +53,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
       return <View className="mb-2">{body(block.inline)}</View>;
 
     case 'h': {
-      const size = block.level === 1 ? 17 : block.level === 2 ? 16 : 15;
+      const size = block.level === 1 ? 20 : 15;
       return (
         <View className="mb-1.5 mt-1">
           <Text
@@ -87,7 +87,9 @@ export const MarkdownBlock = memo(function MarkdownBlock({
                   fontSize: BODY_SIZE,
                   lineHeight: BODY_LINE,
                   color: colors.faint,
-                  ...(block.ordered ? { fontFamily: MONO_FONT, fontSize: 13 } : null),
+                  ...(block.ordered
+                    ? { fontVariant: ['tabular-nums' as const], fontSize: 13 }
+                    : null),
                   width: block.ordered ? 22 : 14,
                 }}
               >
@@ -109,7 +111,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
             <Text
               selectable
               style={{
-                fontFamily: MONO_FONT,
+                fontFamily: CODE_FONT,
                 fontSize: 12,
                 lineHeight: 18,
                 color: colors.fg,

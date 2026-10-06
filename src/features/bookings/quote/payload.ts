@@ -1,12 +1,13 @@
 import { num, pick } from '@/lib/api/list';
 import type { CostBreakdown } from './costs';
 import type { GeoPoint } from '@/lib/routeGeometry';
-import { extractCode, roundCoord, type Loc, type StopEntry } from './types';
+import { extractCode, roundCoord, round2, type Loc, type StopEntry } from './types';
 
 // Moved out of CreateQuoteScreen.tsx's buildPayload (Phase 0 extraction) —
 // same object literal, same key order, no behaviour change. This is the DRF
 // contract: key order and field set must stay byte-identical to what the
-// backend already accepts.
+// backend already accepts. (`is_international` is the one addition, 2026-10;
+// it is left out entirely when the route/points don't say either way.)
 
 export interface BuildQuotePayloadInput {
   customerId: string;
@@ -27,6 +28,22 @@ export interface BuildQuotePayloadInput {
   winProb: number;
   stops: StopEntry[];
   routeGeometry: GeoPoint[];
+  /** The R/km the base rate was priced at (blank or zero saves nothing). */
+  baseRateNum: number;
+  /** The market price check applied to this quote, if any. */
+  aiApplied: { logId: number | null; key: string; winProbability: number | null } | null;
+  /**
+   * route_snapshot to save (an object; the API caps it at 200 KB and rejects
+   * anything else). Null leaves whatever is already stored alone: a PATCH
+   * replaces the field wholesale.
+   */
+  routeSnapshot: Record<string, unknown> | null;
+  /**
+   * The trip leaves South Africa (zero-rated for VAT). Null when neither the
+   * route nor a point's country says either way: nothing is sent, so a stored
+   * value is kept.
+   */
+  international: boolean | null;
 }
 
 export function buildQuotePayload(
@@ -49,6 +66,10 @@ export function buildQuotePayload(
     winProb,
     stops,
     routeGeometry,
+    baseRateNum,
+    aiApplied,
+    routeSnapshot,
+    international,
   }: BuildQuotePayloadInput,
   status: 'DRAFT' | 'SENT',
 ) {
@@ -75,23 +96,42 @@ export function buildQuotePayload(
     // so Quote Detail / a converted Load could never show the real road path.
     route_geometry: routeGeometry.map((p) => ({ lat: roundCoord(p.lat), lon: roundCoord(p.lon) })),
     cargo_description: cargo || `${weight}t ${vehicleType}`.trim(),
-    weight: weightKg,
-    distance: costs.distance,
+    // All of the below are DecimalField(max_digits=10, decimal_places=2) on
+    // the backend. weightTons * 1000, and every cost.ts figure derived from
+    // it, is plain JS float arithmetic — round2 keeps the float noise (e.g.
+    // 16100.000000000002) from blowing past max_digits/decimal_places and
+    // getting the save rejected. See round2's own comment in ./types.
+    weight: round2(weightKg),
+    distance: round2(costs.distance),
     estimated_duration_minutes: costs.duration,
     vehicle_type: vehicleType,
-    base_rate: costs.baseCost,
-    fuel_surcharge: costs.fuelCost,
-    toll_charges: costs.tollCost,
-    driver_allowance: costs.driver,
-    additional_charges: costs.crossBorderCost + serviceCharge,
-    total_amount: costs.total,
-    margin_percentage: costs.marginPct,
+    base_rate: round2(costs.baseCost),
+    fuel_surcharge: round2(costs.fuelCost),
+    toll_charges: round2(costs.tollCost),
+    // International transport is zero-rated: the customer is shown VAT 0% and
+    // the delivery invoice follows. Only the builder can set it.
+    ...(international != null ? { is_international: international } : {}),
+    driver_allowance: round2(costs.driver),
+    additional_charges: round2(costs.crossBorderCost + serviceCharge),
+    total_amount: round2(costs.total),
+    // An applied market price has no markup and no known margin, so it sends
+    // none: the stored value is kept (0 on create) rather than a made-up one.
+    ...(aiApplied === null ? { margin_percentage: costs.marginPct } : {}),
     notes,
     status,
     confidence: 'MEDIUM',
     sla_hours: num(pick(company ?? {}, ['default_sla_hours'])) || 48,
     valid_until: validUntil,
     trip_type: tripType,
-    win_probability: winProb ? Math.round(winProb * 100) : null,
+    // The win chance shown for an applied market price, else the analysis's.
+    win_probability:
+      aiApplied?.winProbability != null
+        ? Math.round(aiApplied.winProbability * 100)
+        : winProb
+          ? Math.round(winProb * 100)
+          : null,
+    // The per-km rate the base was priced at (a Quote field since 2026-09).
+    base_rate_per_km: baseRateNum > 0 ? round2(baseRateNum) : null,
+    ...(routeSnapshot ? { route_snapshot: routeSnapshot } : {}),
   };
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Pressable, Text } from 'react-native';
+import { View, TouchableOpacity, Text } from 'react-native';
 import { useTheme } from '@/theme/ThemeProvider';
 import { parseBlocks } from '../markdown/parseBlocks';
 import { sliceInline } from '../markdown/parseInline';
@@ -48,7 +48,7 @@ function Caret() {
     const id = setInterval(() => setOn((v) => !v), 530);
     return () => clearInterval(id);
   }, []);
-  return <Text style={{ color: on ? colors.accent : 'transparent' }}>▍</Text>;
+  return <Text style={{ color: on ? colors.faint : 'transparent' }}>▍</Text>;
 }
 
 export function RevealingMessage({
@@ -78,9 +78,10 @@ export function RevealingMessage({
   );
 
   return (
-    <Pressable
+    <TouchableOpacity
       onPress={skip}
       // Tap anywhere on the reply to see all of it — never make someone wait.
+      activeOpacity={1}
       accessibilityRole="button"
       accessibilityLabel="Show the full reply"
       className="py-1"
@@ -100,6 +101,6 @@ export function RevealingMessage({
           />
         )}
       </View>
-    </Pressable>
+    </TouchableOpacity>
   );
 }

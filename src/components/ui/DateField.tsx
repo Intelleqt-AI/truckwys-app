@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Pressable, Modal, Platform } from 'react-native';
+import { View, TouchableOpacity, Modal, Platform } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,17 +7,20 @@ import { Txt, Mono, Label, FieldLabel } from './Text';
 import { Icon } from './icons';
 import { FieldMessage } from './forms';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues, motion } from '@/theme/tokens';
+import { motion, TAP_MIN } from '@/theme/tokens';
 import { formatDate } from '@/lib/formatters';
+import { localDateISO } from '@/lib/dates';
 
 // Date picker field. Stores/returns an ISO `YYYY-MM-DD` string so payloads are
 // unchanged; displays it human-readably. iOS uses a spinner in a sheet with
 // Done; Android uses the native dialog.
-function toISODate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+const toISODate = localDateISO;
+
+// A bare YYYY-MM-DD is a calendar date. new Date('2026-10-01') would read it as
+// UTC midnight and open the picker on the day before on a device west of UTC.
+function parseISODate(value: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
 }
 
 export function DateField({
@@ -48,7 +51,7 @@ export function DateField({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
-  const parsed = value ? new Date(value) : new Date();
+  const parsed = value ? parseISODate(value) : new Date();
   let current = isNaN(parsed.getTime()) ? new Date() : parsed;
   // Clamp the spinner's opening position into [minimumDate, maximumDate].
   // Needed once a field like Licence expiry gets a minimumDate of today but
@@ -60,42 +63,67 @@ export function DateField({
   if (maximumDate && current > maximumDate) current = maximumDate;
 
   const borderStyle = useAnimatedStyle(() => ({
-    borderColor: withTiming(error ? statusHues.danger : warning ? statusHues.warning : colors.line, {
-      duration: motion.fast,
-    }),
+    borderColor: withTiming(
+      error ? colors.dangerDot : warning ? colors.warningDot : colors.lineControl,
+      { duration: motion.fast },
+    ),
   }));
 
   return (
     <View>
       <FieldLabel label={label} required={required} />
-      <Pressable onPress={() => setOpen(true)}>
+      <TouchableOpacity
+        onPress={() => setOpen(true)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${label ?? 'Date'}, ${value ? formatDate(value) : 'not set'}`}
+        // The trigger groups its children for screen readers, which hides the
+        // inner clear button, so clearing is also offered as a custom action.
+        accessibilityActions={value ? [{ name: 'clear', label: 'Clear date' }] : undefined}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'clear') onChange('');
+        }}
+      >
         <Animated.View
-          className="min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3"
-          style={borderStyle}
+          style={[{ minHeight: TAP_MIN }, borderStyle]}
+          className="flex-row items-center gap-2 rounded-control border bg-input px-3"
         >
-          <Icon name="calendar" size={17} color={value ? colors.accent : colors.faint} />
-          <Txt numberOfLines={1} className={`flex-1 text-body ${value ? 'text-fg' : 'text-faint'}`}>
+          <Icon name="calendar" size={17} color={colors.faint} />
+          <Txt numberOfLines={1} className={`flex-1 text-body ${value ? 'text-fg' : 'text-placeholder'}`}>
             {value ? formatDate(value) : placeholder}
           </Txt>
           {value ? (
-            <Pressable hitSlop={10} onPress={() => onChange('')}>
+            <TouchableOpacity
+              hitSlop={16}
+              activeOpacity={0.6}
+              onPress={() => onChange('')}
+              accessibilityRole="button"
+              accessibilityLabel="Clear date"
+            >
               <Icon name="x" size={15} color={colors.faint} />
-            </Pressable>
+            </TouchableOpacity>
           ) : null}
         </Animated.View>
-      </Pressable>
+      </TouchableOpacity>
       <FieldMessage error={error} warning={warning} />
 
       {open && Platform.OS === 'ios' && (
         <Modal transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-          <Pressable className="flex-1 justify-end bg-black/60" onPress={() => setOpen(false)}>
-            <Pressable
-              className="overflow-hidden rounded-t-panel bg-elevated"
-              style={{ paddingBottom: insets.bottom + 8 }}
-              onPress={(e) => e.stopPropagation()}
+          <TouchableOpacity
+            activeOpacity={1}
+            accessible={false}
+            className="flex-1 justify-end bg-backdrop"
+            onPress={() => setOpen(false)}
+          >
+            {/* Inner touchable swallows taps so they don't reach the backdrop. */}
+            <TouchableOpacity
+              activeOpacity={1}
+              accessible={false}
+              className="overflow-hidden rounded-t-panel border-t border-line bg-elevated"
+              style={{ paddingBottom: insets.bottom + 8, boxShadow: colors.shadowPop }}
             >
               <View className="flex-row items-center justify-between border-b border-line px-4 py-3">
-                <Label className="text-muted">{label ?? 'Date'}</Label>
+                <Label className="text-sub text-muted">{label ?? 'Date'}</Label>
                 {/* Done commits the date on screen. The picker's onChange only
                     fires when the wheel actually MOVES, so without this, opening
                     the sheet and tapping Done straight away selected nothing —
@@ -103,15 +131,18 @@ export function DateField({
                     Idempotent: if they did scroll, onChange already wrote the
                     value and `current` re-derived from it, so this writes the
                     same string again. */}
-                <Pressable
-                  hitSlop={8}
+                <TouchableOpacity
+                  hitSlop={12}
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done"
                   onPress={() => {
                     onChange(toISODate(current));
                     setOpen(false);
                   }}
                 >
-                  <Mono className="text-micro uppercase tracking-wide text-accent">Done</Mono>
-                </Pressable>
+                  <Mono className="text-callout font-medium text-link">Done</Mono>
+                </TouchableOpacity>
               </View>
               <DateTimePicker
                 value={current}
@@ -122,8 +153,8 @@ export function DateField({
                 minimumDate={minimumDate}
                 onChange={(_e: DateTimePickerEvent, d?: Date) => d && onChange(toISODate(d))}
               />
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
 

@@ -6,7 +6,13 @@ import { Mono } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { decimate, MAX_ROUTE_POINTS, type GeoPoint } from '@/lib/routeGeometry';
 import { MAPTILER_KEY } from '@/lib/mapNative';
-import { status as statusHues } from '@/theme/tokens';
+
+// `#RRGGBB` theme token to `rgba(r,g,b,a)`. NativeWind's `/70` opacity modifier is
+// a no-op on a CSS-variable colour, so a translucent backing is set explicitly.
+const withAlpha = (hex: string, alpha: number) => {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+};
 
 // Static route map: OpenStreetMap raster tiles under an SVG polyline.
 //
@@ -84,7 +90,10 @@ export function RouteMap({
    */
   bottomInset?: number;
 }) {
-  const { colors } = useTheme();
+  const { colors, scheme } = useTheme();
+  // Casing and marker outline: white in light, near-black in dark, so the route
+  // and pins stay legible over the map tiles.
+  const outline = scheme === 'dark' ? '#0B0C0E' : '#FFFFFF';
   const { width: screenW } = useWindowDimensions();
   // Sized by the parent when it needs to be (the full-bleed map canvas);
   // otherwise the card inside the screen's 16px gutters, as before.
@@ -199,7 +208,7 @@ export function RouteMap({
           {/* Casing under the route so it stays legible over dark map features. */}
           {!view.empty && (
             <>
-              <Path d={view.d} stroke="rgba(0,0,0,0.35)" strokeWidth={6} fill="none" strokeLinejoin="round" />
+              <Path d={view.d} stroke={outline} strokeWidth={6} fill="none" strokeLinejoin="round" />
               <Path
                 d={view.d}
                 stroke={colors.accent}
@@ -212,16 +221,16 @@ export function RouteMap({
             </>
           )}
           {!view.empty && view.start && (
-            <Circle cx={view.start.x} cy={view.start.y} r={5} fill={statusHues.success} stroke="#fff" strokeWidth={2} />
+            <Circle cx={view.start.x} cy={view.start.y} r={5} fill={colors.successDot} stroke={outline} strokeWidth={2} />
           )}
           {!view.empty && view.end && (
-            <Circle cx={view.end.x} cy={view.end.y} r={5} fill={statusHues.danger} stroke="#fff" strokeWidth={2} />
+            <Circle cx={view.end.x} cy={view.end.y} r={5} fill={colors.dangerDot} stroke={outline} strokeWidth={2} />
           )}
           {!view.empty &&
             view.stops.map((p, i) => (
               <G key={i}>
-                <Circle cx={p.x} cy={p.y} r={7} fill={statusHues.info} stroke="#fff" strokeWidth={2} />
-                <SvgText x={p.x} y={p.y + 3} fontSize="9" fontWeight="700" fill="#fff" textAnchor="middle">
+                <Circle cx={p.x} cy={p.y} r={7} fill={colors.infoDot} stroke={outline} strokeWidth={2} />
+                <SvgText x={p.x} y={p.y + 3} fontSize="9" fontWeight="600" fill={colors.onAccent} textAnchor="middle">
                   {i + 1}
                 </SvgText>
               </G>
@@ -232,14 +241,17 @@ export function RouteMap({
             has to overlay it inside the map and lift it above whatever covers the
             bottom — below the box it would sit off-screen. */}
         {fullBleed && (
-          <View className="absolute right-2 rounded-xs bg-bg-deep/70 px-1.5 py-0.5" style={{ bottom: bottomInset + 6 }}>
-            <Mono className="text-nano text-faint">© MapTiler © OpenStreetMap</Mono>
+          <View
+            className="absolute right-2 rounded-xs px-1.5 py-0.5"
+            style={{ bottom: bottomInset + 6, backgroundColor: withAlpha(colors.bgDeep, 0.7) }}
+          >
+            <Mono className="text-caption text-faint">© MapTiler © OpenStreetMap</Mono>
           </View>
         )}
       </View>
 
       {!fullBleed && (
-        <Mono className="mt-1 text-right text-nano text-faint">© MapTiler © OpenStreetMap contributors</Mono>
+        <Mono className="mt-1 text-right text-caption text-faint">© MapTiler © OpenStreetMap contributors</Mono>
       )}
     </View>
   );

@@ -5,16 +5,21 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, TextField, SelectField, Button, type IconName } from '@/components/ui';
+import { SheetScreen, TextField, SelectField, Button, Label } from '@/components/ui';
 import { createCustomer, updateCustomer } from './api';
+import { customerTaxFrom, customerTaxPayload } from '@/lib/finance/customerTax';
+import { COUNTRIES, registrationNumberProblem, vatNumberProblem } from '@/lib/finance/validation';
 import { str, num, pick } from '@/lib/api/list';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, round2, decimalMax } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { useDemo } from '@/hooks/useDemo';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'AddCustomer'>;
+
+// Customer.credit_limit is DecimalField(max_digits=10, decimal_places=2).
+const CREDIT_LIMIT_MAX = decimalMax(10, 2);
 
 // NET7/14/45 joined 30/60/90 on the backend (migration 0125) — customers on
 // those terms already existed in seeders and real lists before they were
@@ -47,22 +52,35 @@ const schema = z.object({
     .optional()
     // Validated here rather than at submit so the message lands on the field.
     // parseNum accepts `50 000` and `50000,50` as well as a plain integer.
-    .refine((v) => !v || parseNum(v) != null, 'Enter a number, e.g. 50 000'),
+    .refine((v) => !v || parseNum(v) != null, 'Enter a number, e.g. 50 000')
+    .refine((v) => !v || (parseNum(v) ?? 0) >= 0, "Credit limit can't be negative")
+    .refine((v) => !v || (parseNum(v) ?? 0) <= CREDIT_LIMIT_MAX, "That's too large a credit limit"),
 });
 type Values = z.infer<typeof schema>;
 
-// Text fields in web order.
-const FIELDS: { name: keyof Values; label: string; placeholder?: string; icon?: IconName; keyboardType?: 'email-address' | 'phone-pad' | 'numeric'; autoCapitalize?: 'none' | 'words' }[] = [
-  { name: 'name', label: 'Customer name', placeholder: 'Business or customer name', icon: 'user', autoCapitalize: 'words' },
-  { name: 'company_name', label: 'Company name', placeholder: 'Acme Logistics', icon: 'building', autoCapitalize: 'words' },
-  { name: 'contact_person', label: 'Contact person', placeholder: 'Who to phone there', icon: 'user', autoCapitalize: 'words' },
-  { name: 'email', label: 'Email', placeholder: 'billing@company.co.za', icon: 'send', keyboardType: 'email-address', autoCapitalize: 'none' },
-  { name: 'phone', label: 'Phone', placeholder: '+27 82 123 4567', icon: 'phone', keyboardType: 'phone-pad' },
-  { name: 'city', label: 'City', placeholder: 'Cape Town' },
-  { name: 'state', label: 'Province / State', placeholder: 'Western Cape' },
-  { name: 'zip_code', label: 'Zip code', placeholder: '8001', keyboardType: 'numeric' },
-  { name: 'address', label: 'Address', placeholder: 'Street address' },
-  { name: 'billing_address', label: 'Billing address', placeholder: 'If different from address' },
+type FieldDef = {
+  name: keyof Values;
+  label: string;
+  section: 'contact' | 'address';
+  placeholder?: string;
+  required?: boolean;
+  keyboardType?: 'email-address' | 'phone-pad' | 'numeric';
+  autoCapitalize?: 'none' | 'words';
+};
+
+// Text fields, split into the form's sections. Required ones mirror the schema:
+// a name and a billing email.
+const FIELDS: FieldDef[] = [
+  { name: 'name', label: 'Customer name', section: 'contact', required: true, placeholder: 'Business or customer name', autoCapitalize: 'words' },
+  { name: 'company_name', label: 'Company name', section: 'contact', placeholder: 'Acme Logistics', autoCapitalize: 'words' },
+  { name: 'contact_person', label: 'Contact person', section: 'contact', placeholder: 'Who to phone there', autoCapitalize: 'words' },
+  { name: 'email', label: 'Email', section: 'contact', required: true, placeholder: 'billing@company.co.za', keyboardType: 'email-address', autoCapitalize: 'none' },
+  { name: 'phone', label: 'Phone', section: 'contact', placeholder: '+27 82 123 4567', keyboardType: 'phone-pad' },
+  { name: 'address', label: 'Address', section: 'address', placeholder: 'Street address' },
+  { name: 'city', label: 'City', section: 'address', placeholder: 'Cape Town' },
+  { name: 'state', label: 'Province', section: 'address', placeholder: 'Western Cape' },
+  { name: 'zip_code', label: 'Zip code', section: 'address', placeholder: '8001', keyboardType: 'numeric' },
+  { name: 'billing_address', label: 'Billing address', section: 'address', placeholder: 'If different from address' },
 ];
 
 export function AddCustomerScreen({ route, navigation }: Props) {
@@ -74,6 +92,19 @@ export function AddCustomerScreen({ route, navigation }: Props) {
   const [busy, setBusy] = useState(false);
   const [paymentTerms, setPaymentTerms] = useState(str(pick(preview, ['payment_terms_default']), 'NET30'));
   const [status, setStatus] = useState(str(pick(preview, ['status'])).toUpperCase() || 'ACTIVE');
+  // Country, VAT number and company registration number: printed on invoices,
+  // and used to match the customer in Xero/QuickBooks and to identify the debtor
+  // for Fast Pay. South African numbers are checked here; the server normalises.
+  const [tax, setTax] = useState(() => customerTaxFrom(preview as Parameters<typeof customerTaxFrom>[0]));
+  const vatError = vatNumberProblem(tax.vat_number, tax.country) ?? undefined;
+  const regError = registrationNumberProblem(tax.registration_number, tax.country) ?? undefined;
+  const countryOptions = useMemo(
+    () =>
+      COUNTRIES.some((c) => c.code === tax.country)
+        ? COUNTRIES.map((c) => ({ label: c.label, value: c.code }))
+        : [...COUNTRIES.map((c) => ({ label: c.label, value: c.code })), { label: tax.country, value: tax.country }],
+    [tax.country],
+  );
   // A record can carry any NET<n> (invoicing reads the number, not a fixed
   // table — see invoice_generator.py's _calculate_due_date), so a value
   // outside the offered list is added as its own option rather than silently
@@ -107,8 +138,11 @@ export function AddCustomerScreen({ route, navigation }: Props) {
     // block, but customers are fixed seeded data in the demo company, so this
     // is the actual save.
     if (demo.block()) return;
+    // The server would refuse these anyway; say which field in words first.
+    if (vatError || regError) return toast.error(vatError ?? regError ?? 'Check the tax details');
     setBusy(true);
     const payload: Record<string, unknown> = {
+      ...customerTaxPayload(tax),
       name: v.name.trim(),
       company_name: v.company_name?.trim() || undefined,
       contact_person: v.contact_person?.trim() || undefined,
@@ -122,7 +156,10 @@ export function AddCustomerScreen({ route, navigation }: Props) {
       payment_terms_default: paymentTerms,
       status,
     };
-    if (v.credit_limit) payload.credit_limit = parseNum(v.credit_limit) ?? undefined;
+    if (v.credit_limit) {
+      const n = parseNum(v.credit_limit);
+      payload.credit_limit = n == null ? undefined : round2(n);
+    }
     try {
       if (editing) await updateCustomer(editId, payload);
       else await createCustomer(payload);
@@ -138,7 +175,6 @@ export function AddCustomerScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow={editing ? 'Edit' : 'New customer'}
       title={editing ? 'Edit customer' : 'Add customer'}
       variant="modal"
       onBack={() => navigation.goBack()}
@@ -152,10 +188,43 @@ export function AddCustomerScreen({ route, navigation }: Props) {
       }
     >
       <View className="gap-4">
-        {FIELDS.map((f) => (
+        <Label className="text-muted">Contact</Label>
+        {FIELDS.filter((f) => f.section === 'contact').map((f) => (
           <Field key={f.name} control={control} field={f} />
         ))}
-        <SelectField label="Payment terms" icon="card" options={paymentTermsOptions} value={paymentTerms} onSelect={setPaymentTerms} />
+
+        <Label className="mt-1 text-muted">Address</Label>
+        {FIELDS.filter((f) => f.section === 'address').map((f) => (
+          <Field key={f.name} control={control} field={f} />
+        ))}
+
+        <Label className="mt-1 text-muted">Tax</Label>
+        <SelectField
+          label="Country"
+          options={countryOptions}
+          value={tax.country}
+          onSelect={(v) => setTax((t) => ({ ...t, country: v }))}
+        />
+        <TextField
+          label="VAT number"
+          placeholder="10 digits, starting with 4"
+          keyboardType="number-pad"
+          value={tax.vat_number}
+          onChangeText={(t) => setTax((s) => ({ ...s, vat_number: t }))}
+          error={vatError}
+          maxLength={20}
+        />
+        <TextField
+          label="Company registration number"
+          placeholder="e.g. 2015/123456/07"
+          value={tax.registration_number}
+          onChangeText={(t) => setTax((s) => ({ ...s, registration_number: t }))}
+          error={regError}
+          maxLength={20}
+        />
+
+        <Label className="mt-1 text-muted">Account</Label>
+        <SelectField label="Payment terms" options={paymentTermsOptions} value={paymentTerms} onSelect={setPaymentTerms} />
         <Controller
           control={control}
           name="credit_limit"
@@ -166,6 +235,7 @@ export function AddCustomerScreen({ route, navigation }: Props) {
               placeholder="e.g. 50 000"
               keyboardType="decimal-pad"
               numeric
+              decimals={2}
               value={value ?? ''}
               onChangeText={onChange}
               onBlur={onBlur}
@@ -173,13 +243,13 @@ export function AddCustomerScreen({ route, navigation }: Props) {
             />
           )}
         />
-        <SelectField label="Status" icon="user" options={STATUS} value={status} onSelect={setStatus} />
+        <SelectField label="Status" options={STATUS} value={status} onSelect={setStatus} />
       </View>
     </SheetScreen>
   );
 }
 
-function Field({ control, field: f }: { control: Control<Values>; field: (typeof FIELDS)[number] }) {
+function Field({ control, field: f }: { control: Control<Values>; field: FieldDef }) {
   return (
     <Controller
       control={control}
@@ -188,7 +258,7 @@ function Field({ control, field: f }: { control: Control<Values>; field: (typeof
         <TextField
           label={f.label}
           placeholder={f.placeholder}
-          icon={f.icon}
+          required={f.required}
           keyboardType={f.keyboardType}
           autoCapitalize={f.autoCapitalize}
           value={value ?? ''}

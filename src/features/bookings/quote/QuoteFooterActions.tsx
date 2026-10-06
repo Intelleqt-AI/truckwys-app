@@ -1,10 +1,23 @@
 import { memo } from 'react';
-import { View, Pressable, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useBottomSheetInternal, KEYBOARD_STATUS } from '@gorhom/bottom-sheet';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Button, Icon, Mono } from '@/components/ui';
-import { formatCurrency, formatPercent } from '@/lib/formatters';
+import { formatCurrency } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
+
+/**
+ * What the price bar offers beside the total, from the market price check:
+ *  prompt   no current result: run the check
+ *  apply    the market price differs: apply it
+ *  applied  market figures are in use: undo them
+ *  same     a current check found nothing to change
+ */
+export type FooterOffer =
+  | { kind: 'prompt'; onPress: () => void }
+  | { kind: 'apply'; label: string; onPress: () => void }
+  | { kind: 'applied'; onPress: () => void }
+  | { kind: 'same' };
 
 export interface FooterStrip {
   tone: 'danger' | 'warning';
@@ -23,8 +36,7 @@ export interface FooterStrip {
  */
 function QuoteFooterActionsImpl({
   total,
-  statsTrusted,
-  marginPct,
+  offer,
   ready,
   priceHint,
   onPriceHintPress,
@@ -37,8 +49,8 @@ function QuoteFooterActionsImpl({
   onSend,
 }: {
   total: number;
-  statsTrusted: boolean;
-  marginPct: number;
+  /** Market price check offer; null while there is nothing to offer. */
+  offer: FooterOffer | null;
   ready: boolean;
   /** What's still missing before a price can be worked out, e.g. "Pick a client
       to price this" — shown in place of the total while !ready. */
@@ -58,23 +70,6 @@ function QuoteFooterActionsImpl({
   // QuoteFooterBar's own padding animation around this component: the footer
   // already crowds the keyboard, a second row of text doesn't fit above it.
   const { animatedKeyboardState } = useBottomSheetInternal();
-  const stripStyle = useAnimatedStyle(() => {
-    const shown = animatedKeyboardState.value.status === KEYBOARD_STATUS.SHOWN;
-    return {
-      // 26, not 22: the total is text-callout, whose lineHeight is already 20,
-      // and this row is overflow-hidden — 2px of slack meant the OS text-size
-      // setting sliced the digits horizontally through the middle. Paired with
-      // maxFontSizeMultiplier below, which bounds how far that can go.
-      height: withTiming(shown ? 0 : 26, { duration: animatedKeyboardState.value.duration }),
-      opacity: withTiming(shown ? 0 : 1, { duration: animatedKeyboardState.value.duration }),
-      marginBottom: withTiming(shown ? 0 : 8, { duration: animatedKeyboardState.value.duration }),
-    };
-  });
-
-  const stripColor = strip?.tone === 'danger' ? '#FF4949' : '#F59E0B';
-  // The two above are theme-independent status hues; faint isn't, so the price
-  // hint's chevron has to read it off the theme to match its own text colour.
-  const { colors } = useTheme();
 
   // The total used to be suppressed by *any* strip, which hid the price at the
   // one moment the user is watching for it — right after a Send attempt, while
@@ -88,6 +83,27 @@ function QuoteFooterActionsImpl({
   // transient state is unchanged (it shows R 0 next to the spinner, as it
   // ships today).
   const showTotal = ready && (!strip || (strip.tone === 'warning' && total > 0));
+  // Nothing to say (e.g. a fresh form, before any Save/Send attempt): collapse
+  // the row so there's no blank line above the buttons.
+  const hasRow = showTotal || !!strip || !!priceHint;
+
+  const stripStyle = useAnimatedStyle(() => {
+    const hidden = animatedKeyboardState.value.status === KEYBOARD_STATUS.SHOWN || !hasRow;
+    return {
+      // 26, not 22: the total is text-callout, whose lineHeight is already 20,
+      // and this row is overflow-hidden — 2px of slack meant the OS text-size
+      // setting sliced the digits horizontally through the middle. Paired with
+      // maxFontSizeMultiplier below, which bounds how far that can go.
+      height: withTiming(hidden ? 0 : 26, { duration: animatedKeyboardState.value.duration }),
+      opacity: withTiming(hidden ? 0 : 1, { duration: animatedKeyboardState.value.duration }),
+      marginBottom: withTiming(hidden ? 0 : 8, { duration: animatedKeyboardState.value.duration }),
+    };
+  }, [hasRow]);
+
+  // Status hues and faint are theme-aware, so the chevrons read them off the
+  // theme to match their own text colours.
+  const { colors } = useTheme();
+  const stripColor = strip?.tone === 'danger' ? colors.dangerDot : colors.warningDot;
 
   return (
     <View>
@@ -112,72 +128,70 @@ function QuoteFooterActionsImpl({
           {showTotal ? (
             <>
               <Mono
-                className="text-callout font-semibold text-accent"
+                className="text-callout font-semibold text-fg"
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.2}
               >
                 {formatCurrency(total)}
               </Mono>
-              {/* total > 0 here is belt-and-braces — showTotal above already
-                  requires it whenever a strip is up, and it's always true once
-                  statsTrusted is (a route has actually returned). */}
-              {statsTrusted && total > 0 && (
-                <Mono className="shrink-0 text-micro text-muted" maxFontSizeMultiplier={1.2}>
-                  · {formatPercent(marginPct, 0)} margin
-                </Mono>
-              )}
-              {calculating && <ActivityIndicator size="small" />}
+              {/* The one price: what the client is sent, excluding VAT. */}
+              <Mono className="shrink-0 text-caption text-muted" maxFontSizeMultiplier={1.2}>
+                · excl. VAT
+              </Mono>
+              {calculating && <ActivityIndicator size="small" color={colors.faint} />}
             </>
           ) : strip ? null : (
             // Tappable for the same reason the strip on the right is: the
             // hint itself is generic, but tapping still jumps to the first
             // outstanding gap. Chevron only when there's somewhere to go.
-            <Pressable
+            <TouchableOpacity
               onPress={onPriceHintPress}
               disabled={!onPriceHintPress}
+              activeOpacity={0.6}
               accessibilityRole={onPriceHintPress ? 'button' : undefined}
               accessibilityLabel={priceHint}
               className="flex-1 flex-row items-center gap-1"
             >
               <Mono
-                className="flex-shrink text-micro text-faint"
+                className="flex-shrink text-caption text-faint"
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.2}
               >
                 {priceHint}
               </Mono>
               {onPriceHintPress && <Icon name="chevronRight" size={13} color={colors.faint} />}
-            </Pressable>
+            </TouchableOpacity>
           )}
         </View>
+        {!strip && showTotal && offer && <OfferAction offer={offer} />}
         {strip && (
-          <Pressable
+          <TouchableOpacity
             onPress={strip.onPress}
             disabled={!strip.onPress}
+            activeOpacity={0.6}
             accessibilityRole={strip.onPress ? 'button' : undefined}
             accessibilityLabel={strip.message}
             className="min-w-0 flex-shrink flex-row items-center justify-end gap-1"
           >
-            {/* One notch smaller than every other footer label (text-nano, not
-                text-micro) — this strip carries the longest messages in the
-                footer (e.g. the overload warning), and a single 26px line
-                still has to fit them next to the chevron. */}
+            {/* This strip carries the longest messages in the footer (e.g. the
+                overload warning); they truncate to a single 26px line next to
+                the chevron. */}
             <Mono
-              className={`shrink text-nano ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
+              className={`shrink text-caption ${strip.tone === 'danger' ? 'text-danger' : 'text-warning'}`}
               numberOfLines={1}
               maxFontSizeMultiplier={1.2}
             >
               {strip.message}
             </Mono>
             {strip.onPress && <Icon name="chevronRight" size={13} color={stripColor} />}
-          </Pressable>
+          </TouchableOpacity>
         )}
       </Animated.View>
 
       <View className="flex-row gap-2.5">
         <View className="flex-1">
           <Button
-            label="Save draft"
+            label="Save as draft"
             variant="secondary"
             loading={busy === 'draft'}
             disabled={saveDisabled}
@@ -187,7 +201,7 @@ function QuoteFooterActionsImpl({
         </View>
         <View className="flex-1">
           <Button
-            label="Send to client"
+            label="Send quote"
             icon="send"
             loading={busy === 'send'}
             disabled={sendDisabled}
@@ -197,6 +211,43 @@ function QuoteFooterActionsImpl({
         </View>
       </View>
     </View>
+  );
+}
+
+/** The market price check's one-line action beside the total. */
+function OfferAction({ offer }: { offer: FooterOffer }) {
+  const { colors } = useTheme();
+  if (offer.kind === 'same') {
+    return (
+      <Mono
+        className="min-w-0 shrink text-caption text-faint"
+        numberOfLines={1}
+        maxFontSizeMultiplier={1.2}
+      >
+        Market check: nothing to change
+      </Mono>
+    );
+  }
+  const text =
+    offer.kind === 'prompt'
+      ? 'Check market price'
+      : offer.kind === 'apply'
+        ? offer.label
+        : 'Market figures in use · Undo';
+  return (
+    <TouchableOpacity
+      onPress={offer.onPress}
+      activeOpacity={0.6}
+      accessibilityRole="button"
+      accessibilityLabel={text}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
+      className="min-w-0 shrink flex-row items-center justify-end gap-1"
+    >
+      <Mono className="shrink text-caption text-link" numberOfLines={1} maxFontSizeMultiplier={1.2}>
+        {text}
+      </Mono>
+      <Icon name="chevronRight" size={13} color={colors.link} />
+    </TouchableOpacity>
   );
 }
 

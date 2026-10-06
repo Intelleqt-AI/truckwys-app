@@ -5,7 +5,7 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 // (voice quotes), photo library (POD / avatar / logo uploads), notifications
 // (operational push), location (declared only — the map SDKs link CoreLocation,
 // the app itself never requests it). Each has a usage string below.
-const DEEP = '#030303';
+const DEEP = '#0B0C0E'; // dark page background (web v3 --bg-deep)
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // Must match the EAS project's own slug exactly — the CLI hard-errors on a
   // mismatch (see extra.eas.projectId below, @intelleqt/truckwys).
   slug: 'truckwys',
-  version: '1.0.4',
+  version: '1.0.5',
   updates: {
     url: 'https://u.expo.dev/0ef68ce5-03e0-46d7-b4c4-6fc1a9c5f170',
   },
@@ -110,7 +110,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-secure-store',
     'expo-font',
-    'expo-audio',
+    [
+      // Foreground-only voice-quote recording (VoiceQuoteSheet). The plugin
+      // defaults enableBackgroundPlayback to true, which injects
+      // UIBackgroundModes: audio and got 1.0.4 rejected under App Review
+      // Guideline 2.5.4 (no background-audio feature exists) — and an
+      // Android mediaPlayback foreground service we also don't use.
+      'expo-audio',
+      {
+        microphonePermission:
+          'Truckwys uses the microphone only when you record a voice quote.',
+        enableBackgroundPlayback: false,
+        enableBackgroundRecording: false,
+      },
+    ],
     // expo-audio's peer dependency — expo-doctor/expo install flags it as a
     // required native peer for SDK 57; its config plugin needs registering
     // the same as any other native module here.
@@ -143,7 +156,23 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-build-properties',
       {
         ios: { useFrameworks: 'static' },
-        android: { minSdkVersion: 24 },
+        android: {
+          minSdkVersion: 24,
+          // Play Console flagged "DEX code optimisation is below our
+          // threshold" (obfuscation 1% on 1.0.3) — release builds never ran
+          // R8. Keep rules cover @react-native-firebase/* and MapLibre,
+          // which ship no consumer ProGuard rules and use reflection
+          // (RNFB's module registry/messaging service, MapLibre's view
+          // managers); everything else (RN core, Expo modules, Notifee,
+          // Reanimated, Worklets, SVG) already ships its own.
+          enableMinifyInReleaseBuilds: true,
+          extraProguardRules: `
+-keep class io.invertase.firebase.** { *; }
+-dontwarn io.invertase.firebase.**
+-keep class org.maplibre.reactnative.** { *; }
+-dontwarn org.maplibre.**
+`,
+        },
       },
     ],
     [

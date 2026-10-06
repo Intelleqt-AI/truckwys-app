@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { View, Modal, Pressable } from 'react-native';
+import { View, Modal, StyleSheet, TouchableOpacity } from 'react-native';
 import { KeyboardAvoidingView, KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Txt, Mono, Button, TextField, DateField, SelectField, type Option } from '@/components/ui';
-import { formatCurrency, formatPlain, parseNum } from '@/lib/formatters';
+import { formatCurrency, formatPlain, parseNum, round2 } from '@/lib/formatters';
+import { localDateISO } from '@/lib/dates';
+import { paymentMethodLabel } from './api';
 
 // Records a payment against an invoice — the mobile counterpart of the web
 // invoice page's inline payment form.
@@ -26,12 +28,7 @@ const PAYMENT_METHODS: Option[] = [
   { label: 'Cheque', value: 'CHEQUE' },
 ];
 
-const todayISO = () => {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-};
+const todayISO = () => localDateISO();
 
 export interface PaymentDraft {
   amount: number;
@@ -45,25 +42,42 @@ export function RecordPaymentSheet({
   busy,
   onConfirm,
   onCancel,
+  initial,
 }: {
-  /** Outstanding balance — caps the amount and backs the "Full" shortcut. */
+  /**
+   * The most the amount can be, and what the "Full balance" shortcut fills in:
+   * the outstanding balance when recording, or the balance plus this payment's
+   * own amount when editing it.
+   */
   balance: number;
   busy?: boolean;
   onConfirm: (draft: PaymentDraft) => void;
   onCancel: () => void;
+  /** Editing an existing payment: its current values. Omit to record a new one. */
+  initial?: PaymentDraft;
 }) {
-  const [amount, setAmount] = useState('');
+  const editing = !!initial;
+  const [amount, setAmount] = useState(initial ? formatPlain(initial.amount, 2) : '');
   // Web leaves this blank and makes the user pick; defaulting to today matches
   // the expense form and is one less tap for the overwhelmingly common case.
-  const [date, setDate] = useState(todayISO());
-  const [method, setMethod] = useState('EFT');
-  const [reference, setReference] = useState('');
+  const [date, setDate] = useState(initial?.payment_date.slice(0, 10) || todayISO());
+  const [method, setMethod] = useState(initial?.payment_method || 'EFT');
+  const [reference, setReference] = useState(initial?.reference ?? '');
+  // A payment can have a method that isn't pickable by hand (EARLY_PAY, BANK_TRANSFER):
+  // keep showing it rather than a blank field.
+  const methods: Option[] = PAYMENT_METHODS.some((m) => m.value === method)
+    ? PAYMENT_METHODS
+    : [...PAYMENT_METHODS, { label: paymentMethodLabel(method), value: method }];
 
   // parseNum, not Number: with `|| 0` a comma amount left RECORD permanently
   // disabled and told the user nothing about why.
   const parsed = parseNum(amount);
   const invalid = amount.trim() !== '' && parsed == null;
-  const amountNum = parsed ?? 0;
+  // Payment.amount is DecimalField(max_digits=10, decimal_places=2). This
+  // field's Amount input can still be focused when RECORD is tapped — the
+  // sheet's scroll view uses keyboardShouldPersistTaps="handled", so the
+  // decimals={2} blur-reformat may never run — so round here regardless.
+  const amountNum = round2(parsed ?? 0);
   // The backend rejects an overpayment (payments.py: amount > invoice.balance),
   // so catch it here rather than letting the user submit into a 400.
   const overpaying = amountNum > balance;
@@ -71,15 +85,23 @@ export function RecordPaymentSheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
-      <Pressable onPress={onCancel} className="flex-1 items-center justify-center bg-black/65 px-6">
+      <View className="flex-1 items-center justify-center bg-backdrop px-6">
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={onCancel}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          style={StyleSheet.absoluteFill}
+        />
         <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            className="rounded-panel border border-line bg-surface p-5"
-          >
-            <Txt className="text-heading font-semibold text-fg">Record payment</Txt>
+          <View className="rounded-panel border border-line bg-elevated p-5">
+            <Txt className="text-heading font-semibold text-fg">
+              {editing ? 'Edit payment' : 'Record payment'}
+            </Txt>
             <Txt className="mb-4 mt-1.5 text-sub text-muted">
-              Outstanding balance {formatCurrency(balance)}
+              {editing
+                ? `Up to ${formatCurrency(balance)}, including this payment`
+                : `Outstanding balance ${formatCurrency(balance)}`}
             </Txt>
 
             <KeyboardAwareScrollView
@@ -99,15 +121,17 @@ export function RecordPaymentSheet({
                     value={amount}
                     onChangeText={setAmount}
                   />
-                  <Pressable
-                    hitSlop={8}
+                  <TouchableOpacity
+                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                    activeOpacity={0.6}
+                    accessibilityRole="button"
                     onPress={() => setAmount(formatPlain(balance, 2))}
                     className="mt-1.5 self-start"
                   >
-                    <Mono className="text-caption text-accent">
-                      Full — {formatCurrency(balance)}
+                    <Mono className="text-caption text-link">
+                      Full balance, {formatCurrency(balance)}
                     </Mono>
-                  </Pressable>
+                  </TouchableOpacity>
                 </View>
 
                 <DateField
@@ -119,8 +143,8 @@ export function RecordPaymentSheet({
 
                 <SelectField
                   label="Method"
-                  icon="dollar"
-                  options={PAYMENT_METHODS}
+                  icon="banknote"
+                  options={methods}
                   value={method}
                   onSelect={setMethod}
                 />
@@ -133,7 +157,7 @@ export function RecordPaymentSheet({
                 />
 
                 {overpaying && (
-                  <Mono className="text-micro text-warning">
+                  <Mono className="text-caption text-warning">
                     Amount is more than the {formatCurrency(balance)} outstanding.
                   </Mono>
                 )}
@@ -146,7 +170,7 @@ export function RecordPaymentSheet({
               </View>
               <View className="flex-1">
                 <Button
-                  label={busy ? 'RECORDING…' : 'RECORD'}
+                  label={busy ? (editing ? 'Saving…' : 'Recording…') : editing ? 'Save' : 'Record'}
                   loading={busy}
                   disabled={!canSubmit}
                   onPress={() =>
@@ -162,9 +186,9 @@ export function RecordPaymentSheet({
                 />
               </View>
             </View>
-          </Pressable>
+          </View>
         </KeyboardAvoidingView>
-      </Pressable>
+      </View>
     </Modal>
   );
 }

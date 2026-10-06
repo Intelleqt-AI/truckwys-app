@@ -1,4 +1,4 @@
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Mono } from '@/components/ui';
 import { resolveNotificationLink } from '@/lib/notificationLink';
@@ -23,8 +23,10 @@ export function ActionChips({ actions }: { actions: NavAction[] }) {
   return (
     <View className="mt-2.5 flex-row flex-wrap gap-2">
       {usable.map((a) => (
-        <Pressable
+        <TouchableOpacity
           key={`${a.label}:${a.route}`}
+          activeOpacity={0.6}
+          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
           accessibilityRole="button"
           accessibilityLabel={a.label}
           onPress={() =>
@@ -33,10 +35,10 @@ export function ActionChips({ actions }: { actions: NavAction[] }) {
               a.target!.params,
             )
           }
-          className="rounded-chip border border-accent px-2.5 py-1.5 active:opacity-60"
+          className="rounded-chip border border-line-active px-2.5 py-1.5"
         >
-          <Mono className="text-micro tracking-wide uppercase text-accent">{a.label} →</Mono>
-        </Pressable>
+          <Mono className="text-caption font-medium text-link">{a.label} →</Mono>
+        </TouchableOpacity>
       ))}
     </View>
   );

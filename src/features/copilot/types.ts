@@ -85,6 +85,8 @@ export interface Msg {
   proposedActionState?: ProposedActionState;
   /** Reply came from the rules engine because the LLM was unavailable. */
   degraded?: boolean;
+  /** When the message was written (stored created_at, or when it arrived). Drives the day divider. */
+  createdAt?: string;
   /** A local-only row for a failed request, with a retry affordance. */
   failed?: boolean;
   /** The user text to re-send when `failed`. */

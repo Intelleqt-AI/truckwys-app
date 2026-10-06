@@ -1,172 +1,228 @@
-import { useEffect, useState } from 'react';
-import { View, Pressable, Linking } from 'react-native';
+import { View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { SheetScreen, SectionLabel, StatCard, Button, Badge, Mono, EmptyState } from '@/components/ui';
+import { SheetScreen, SectionLabel, StatCard, Button, Badge, Card, Txt, Mono, EmptyState } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useCapital } from './api';
-import { loadAppliedIds, saveAppliedId, MERCHANT_CAPITAL_URL } from '@/features/finance/fastpay';
+import { useInvoiceAging } from '@/features/finance/api';
+import { useCapitalEligible, INVOICE_CHECKS, checksFor, isAccountLevel } from '@/features/finance/fastpay';
+import { CAPITAL_COMING_SOON, CAPITAL_LAUNCHED } from '@/lib/features';
+import { FastPayLaunched } from '@/features/capital/FastPayLaunched';
+import { num } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
-import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Capital'>;
 
-// Same thresholds the web facility meter uses.
-const meterColor = (utilization: number, accent: string) =>
-  utilization > 90 ? statusHues.danger : utilization > 75 ? statusHues.warning : accent;
+// Fast Pay before launch. There is no funding partner yet, so this screen shows
+// no facility, limit, availability, fee or timing, and nothing here applies for
+// anything. It shows what Fast Pay would work on (the receivables) and the
+// invoice checks that would hold invoices back, then how the product will work.
+// Mirrors the web's CapitalPrelaunch.
 
-export function CapitalScreen({ navigation }: Props) {
-  const { data, isLoading, isError, refetch } = useCapital();
-  const { colors } = useTheme();
-  const [showIneligible, setShowIneligible] = useState(false);
-  const [applied, setApplied] = useState<Set<string>>(new Set());
+// Backend bucket keys, in age order.
+const BUCKETS: { key: string; label: string }[] = [
+  { key: 'current', label: 'Not yet due' },
+  { key: '1-30', label: '1 to 30 days late' },
+  { key: '31-60', label: '31 to 60 days late' },
+  { key: '61-90', label: '61 to 90 days late' },
+  { key: '90+', label: 'More than 90 days late' },
+];
 
-  useEffect(() => {
-    void loadAppliedIds().then(setApplied);
-  }, []);
+const STEPS = [
+  {
+    title: 'Pick a delivered invoice',
+    body: 'Choose a sent invoice with proof of delivery on file that is no more than 90 days old.',
+  },
+  {
+    title: 'See the numbers first',
+    body: 'Before anything is requested you see the fee and the exact amount you would receive.',
+  },
+  {
+    title: 'Get paid, your customer pays later',
+    body: 'The money goes to your bank account, and the advance is repaid when your customer settles the invoice.',
+  },
+];
 
-  // Applications happen on Merchant Capital's own site — there's nothing on
-  // our backend to record, so this just flags the row and hands off.
-  const applyForCapital = async (invoiceId: string) => {
-    setApplied(await saveAppliedId(invoiceId));
-    await Linking.openURL(MERCHANT_CAPITAL_URL);
-  };
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+
+/**
+ * Fast Pay. Before launch (lib/features.ts CAPITAL_LAUNCHED) this is the
+ * pre-launch page below; once launched it is the live page, with the line, the
+ * application, offers, requests and history (features/capital/FastPayLaunched).
+ */
+export function CapitalScreen(props: Props) {
+  return CAPITAL_LAUNCHED ? <CapitalLive {...props} /> : <CapitalPrelaunch {...props} />;
+}
+
+function CapitalLive({ navigation }: Props) {
+  return (
+    <SheetScreen title="Fast Pay" onBack={() => navigation.goBack()}>
+      <FastPayLaunched />
+    </SheetScreen>
+  );
+}
+
+function CapitalPrelaunch({ navigation }: Props) {
+  const aging = useInvoiceAging();
+  const eligible = useCapitalEligible();
 
   return (
-    <SheetScreen
-      eyebrow="Working capital"
-      title="Fast Pay Capital"
-      onBack={() => navigation.goBack()}
-      actionLabel="Risk scores"
-      actionIcon="alert"
-      onAction={() => navigation.navigate('RiskScores')}
-    >
-      {isLoading ? (
-        <ListSkeleton />
-      ) : isError || !data ? (
-        <ErrorState onRetry={refetch} message="Couldn't load capital." />
+    <SheetScreen title="Fast Pay" onBack={() => navigation.goBack()}>
+      <View className="mb-4 items-start gap-2">
+        <Badge label="Coming soon" tone="neutral" />
+        <Txt className="text-sub text-muted">Get paid for delivered loads before customers pay.</Txt>
+      </View>
+
+      <SectionLabel>Waiting on customers</SectionLabel>
+      {aging.isLoading ? (
+        <ListSkeleton rows={3} />
+      ) : aging.isError || !aging.data?.summary ? (
+        <ErrorState onRetry={aging.refetch} message="Couldn't load your unpaid invoices." />
       ) : (
-        <View>
-          {/* Same four tiles as the web Capital page. The first two need the
-              facility, which mobile previously never fetched. */}
-          <View className="mb-3 flex-row gap-3">
-            <StatCard
-              label="Available"
-              value={formatCurrency(data.facility?.available ?? 0, { maximumFractionDigits: 0 })}
-              sub={data.facility ? `of ${formatCurrency(data.facility.limit, { maximumFractionDigits: 0 })} limit` : 'no facility'}
-            />
-            <StatCard
-              label="In use"
-              value={formatCurrency(data.facility?.outstanding ?? 0, { maximumFractionDigits: 0 })}
-              sub={data.facility ? `${Math.round(data.facility.utilization)}% utilization` : undefined}
-            />
-          </View>
-          <View className="mb-5 flex-row gap-3">
-            <StatCard label="Eligible invoices" value={String(data.eligibleCount || data.eligible.length)} sub="ready for Fast Pay" />
-            <StatCard
-              label="Eligible value"
-              value={formatCurrency(data.eligibleValue, { maximumFractionDigits: 0 })}
-              sub="total available"
-            />
-          </View>
+        <WaitingOnCustomers aging={aging.data} />
+      )}
 
-          {data.facility && (
-            <View className="mb-5 rounded-card border border-line bg-surface p-4">
-              <View className="mb-2.5 flex-row items-center justify-between">
-                <Mono className="text-micro tracking-wide uppercase text-faint">Facility meter</Mono>
-                <Mono className="text-micro tracking-wide uppercase text-muted">
-                  {Math.round(data.facility.utilization)}% used
-                </Mono>
-              </View>
-              <View className="h-2 overflow-hidden rounded-pill bg-surface-hover">
-                <View
-                  style={{
-                    width: `${Math.min(100, Math.max(0, data.facility.utilization))}%`,
-                    height: '100%',
-                    backgroundColor: meterColor(data.facility.utilization, colors.accent),
-                  }}
-                />
-              </View>
+      <SectionLabel>Invoice checks</SectionLabel>
+      {eligible.isLoading ? (
+        <ListSkeleton rows={2} />
+      ) : (
+        <InvoiceChecks data={eligible.data} />
+      )}
+
+      <SectionLabel>How Fast Pay will work</SectionLabel>
+      <Card className="mb-5 gap-3 p-4">
+        {STEPS.map((step, i) => (
+          <View key={step.title} className="flex-row gap-3">
+            <Mono className="w-5 text-callout font-semibold text-muted">{i + 1}</Mono>
+            <View className="flex-1">
+              <Txt className="text-callout font-medium text-fg">{step.title}</Txt>
+              <Txt className="mt-0.5 text-sub text-muted">{step.body}</Txt>
             </View>
-          )}
+          </View>
+        ))}
+        <Button label="Request early payment" disabled fullWidth />
+        <Txt className="text-caption text-faint">{CAPITAL_COMING_SOON}</Txt>
+      </Card>
+    </SheetScreen>
+  );
+}
 
-          {/* Same partnership banner as web — Fast Pay hands off to Merchant
-              Capital's own site rather than creating an in-app advance. */}
+function WaitingOnCustomers({ aging }: { aging: NonNullable<ReturnType<typeof useInvoiceAging>['data']> }) {
+  const total = num(aging.summary.total_outstanding);
+  const count = num(aging.summary.total_invoice_count);
+  const customers = num(aging.summary.customer_count);
+
+  if (count === 0 || total <= 0) {
+    return (
+      <EmptyState
+        icon="banknote"
+        title="Nothing is waiting"
+        body="Every invoice you have sent is paid, so there is nothing Fast Pay would advance today."
+      />
+    );
+  }
+
+  const rows = BUCKETS.map((b) => {
+    const hit = aging.buckets?.find((x) => x.bucket_name === b.key);
+    return { ...b, amount: num(hit?.total_amount), count: num(hit?.invoice_count) };
+  });
+  const lateAmount = rows.filter((r) => r.key !== 'current').reduce((s, r) => s + r.amount, 0);
+  const lateCount = rows.filter((r) => r.key !== 'current').reduce((s, r) => s + r.count, 0);
+  const dso = aging.summary.dso;
+
+  return (
+    <View className="mb-5">
+      <View className="mb-3 flex-row gap-3">
+        <StatCard
+          label="Owed to you"
+          value={formatCurrency(total, { maximumFractionDigits: 0 })}
+          sub={`${plural(count, 'invoice')}, ${plural(customers, 'customer')}`}
+        />
+        <StatCard
+          label="Past its due date"
+          value={lateCount === count ? 'All of it' : `${pct(lateAmount, total)}%`}
+          sub={lateCount === count ? undefined : `${lateCount} of ${plural(count, 'invoice')}`}
+        />
+      </View>
+      {dso != null && (
+        <Txt className="mb-3 text-sub text-muted">Customers take about {Math.round(num(dso))} days to pay.</Txt>
+      )}
+      <Card>
+        {rows.map((r, i) => (
           <View
-            className="mb-5 rounded-card border border-line bg-surface p-4"
-            style={{ borderLeftWidth: 3, borderLeftColor: colors.accent }}
+            key={r.key}
+            className={`flex-row items-center justify-between px-3.5 py-3 ${
+              i < rows.length - 1 ? 'border-b border-line-row' : ''
+            }`}
           >
-            <Mono className="text-caption font-medium text-fg">Fast Pay powered by Merchant Capital</Mono>
-            <Mono className="mt-1 text-micro text-faint">
-              Get paid faster on your eligible invoices. Apply via our trusted lending partner — approval in
-              minutes.
+            <Txt className="flex-1 text-callout text-muted">{r.label}</Txt>
+            <Mono className="text-sub font-semibold text-fg">
+              {formatCurrency(r.amount, { maximumFractionDigits: 0 })}
             </Mono>
           </View>
+        ))}
+      </Card>
+    </View>
+  );
+}
 
-          <SectionLabel>Eligible invoices</SectionLabel>
-          {data.eligible.length === 0 ? (
-            <EmptyState icon="dollar" title="Nothing eligible" body="Complete deliveries with a POD to unlock Fast Pay." />
-          ) : (
-            <View className="mb-5 gap-2.5">
-              {data.eligible.map((e) => (
-                <View key={e.id} className="rounded-card border border-line bg-surface p-4">
-                  <View className="flex-row items-center justify-between">
-                    <Mono className="text-body font-medium text-fg">{e.customer}</Mono>
-                    <Mono className="text-callout text-muted">{formatCurrency(e.amount, { maximumFractionDigits: 0 })}</Mono>
-                  </View>
-                  {(e.invoiceNumber || e.tier) && (
-                    <View className="mt-1 flex-row items-center gap-2">
-                      {!!e.invoiceNumber && <Mono className="text-micro text-faint">{e.invoiceNumber}</Mono>}
-                      {!!e.tier && <Badge label={e.tier.toUpperCase()} tone="info" />}
-                    </View>
-                  )}
-                  <View className="mt-3 flex-row items-center justify-between">
-                    <Mono className="text-caption text-faint">
-                      Advance {formatCurrency(e.advance, { maximumFractionDigits: 0 })}
-                    </Mono>
-                    {e.riskBlocked ? (
-                      // Customer risk above the 70% limit — the backend will
-                      // refuse this one, so don't offer the action.
-                      <Badge label="High risk" tone="danger" />
-                    ) : applied.has(String(e.id)) ? (
-                      <Badge label="Applied" tone="success" dot />
-                    ) : (
-                      <Button label="Apply" size="sm" onPress={() => applyForCapital(String(e.id))} />
-                    )}
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
+function InvoiceChecks({ data }: { data: ReturnType<typeof useCapitalEligible>['data'] }) {
+  // Account-level blockers (no Fast Pay line, application not approved, ...) are
+  // true of every invoice before launch, so they say nothing about the invoice.
+  const ineligible = (data?.ineligible_invoices ?? []).filter((i) => !isAccountLevel(i));
+  const passed = data?.invoices ?? [];
+  const checked = ineligible.length + passed.length;
 
-          {/* Why the rest didn't qualify — reasons come from the risk engine. */}
-          {data.ineligible.length > 0 && (
-            <>
-              <Pressable onPress={() => setShowIneligible((v) => !v)} hitSlop={8} className="mb-2.5">
-                <Mono className="text-caption text-accent">
-                  {showIneligible ? '▲ Hide reasons' : `▼ Show reasons (${data.ineligible.length})`}
-                </Mono>
-              </Pressable>
-              {showIneligible && (
-                <View className="mb-5 gap-2.5">
-                  {data.ineligible.map((e) => (
-                    <View key={e.id} className="rounded-card border border-line bg-surface p-3.5">
-                      <View className="flex-row items-center justify-between">
-                        <Mono className="text-caption font-medium text-fg">{e.customer}</Mono>
-                        <Mono className="text-caption text-muted">
-                          {formatCurrency(e.amount, { maximumFractionDigits: 0 })}
-                        </Mono>
-                      </View>
-                      <Mono className="mt-1.5 text-micro text-faint">{e.reason}</Mono>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-        </View>
-      )}
-    </SheetScreen>
+  if (checked === 0) {
+    return (
+      <Card className="mb-5 p-4">
+        <Txt className="text-sub text-muted">
+          Invoice checks switch on when Fast Pay goes live. Each open invoice will be checked for proof of
+          delivery, an age of 90 days or less, and no open dispute. Keeping the signed proof of delivery on
+          every booking is the one thing you can do now.
+        </Txt>
+      </Card>
+    );
+  }
+
+  const withChecks = ineligible.map((inv) => ({ inv, keys: checksFor(inv) }));
+  const rows = INVOICE_CHECKS.map((c) => ({
+    ...c,
+    count: withChecks.filter((w) => w.keys.includes(c.key)).length,
+  }))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const blocked = withChecks.filter((w) => w.keys.length > 0).length;
+
+  if (rows.length === 0) {
+    return (
+      <Card className="mb-5 p-4">
+        <Txt className="text-sub text-muted">None of the {plural(checked, 'checked invoice')} fail an invoice check.</Txt>
+      </Card>
+    );
+  }
+
+  return (
+    <View className="mb-5">
+      <Txt className="mb-2 text-sub text-muted">
+        {checked - blocked} of {plural(checked, 'checked invoice')} {checked - blocked === 1 ? 'passes' : 'pass'}{' '}
+        every check.
+      </Txt>
+      <Card>
+        {rows.map((r, i) => (
+          <View
+            key={r.key}
+            className={`flex-row items-center justify-between px-3.5 py-3 ${
+              i < rows.length - 1 ? 'border-b border-line-row' : ''
+            }`}
+          >
+            <Txt className="flex-1 text-callout text-muted">{r.label}</Txt>
+            <Mono className="text-sub font-semibold text-fg">
+              {r.count} of {checked}
+            </Mono>
+          </View>
+        ))}
+      </Card>
+    </View>
   );
 }

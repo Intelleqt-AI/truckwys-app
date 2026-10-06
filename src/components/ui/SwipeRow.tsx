@@ -8,7 +8,6 @@ import * as Haptics from 'expo-haptics';
 import { Icon } from './icons';
 import { Mono } from './Text';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
 
 const PANE_W = 84;
 
@@ -72,7 +71,7 @@ export function SwipeRow({
         overshootRight={false}
         dragOffsetFromRightEdge={18}
         enableTrackpadTwoFingerGesture
-        containerStyle={{ backgroundColor: statusHues.danger }}
+        containerStyle={{ backgroundColor: colors.btnDangerBg }}
         // The row's own content is transparent at rest — without this the red
         // pane behind it would show straight through.
         childrenContainerStyle={{ backgroundColor: colors.surface }}
@@ -108,6 +107,7 @@ function DeletePane({
   label: string;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
   const style = useAnimatedStyle(() => ({
     transform: [{ translateX: drag.value + PANE_W }],
     // overshootRight is false, so progress stays within [0, 1] — fades the
@@ -123,8 +123,8 @@ function DeletePane({
         accessibilityRole="button"
         accessibilityLabel={label}
       >
-        <Icon name="trash" size={18} color="#fff" />
-        <Mono className="text-nano uppercase tracking-wide" style={{ color: '#fff' }}>
+        <Icon name="trash" size={18} color={colors.btnDangerFg} />
+        <Mono className="text-caption font-medium" style={{ color: colors.btnDangerFg }}>
           {label}
         </Mono>
       </Pressable>

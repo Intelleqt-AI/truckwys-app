@@ -15,7 +15,10 @@ export function useInsights() {
   return useQuery<Signal[]>({
     queryKey: ['insights'],
     queryFn: async () => {
-      const raw = await fetchData('dashboard/signals/').catch(() => fetchData('dashboard/insights/').catch(() => []));
+      // signals first, the older insights endpoint as a fallback. If both fail the
+      // error is thrown (the backend answers 503 when it cannot compute them):
+      // swallowing it into [] showed "No insights yet" for an outage.
+      const raw = await fetchData('dashboard/signals/').catch(() => fetchData('dashboard/insights/'));
       const list = Array.isArray(raw) ? raw : ((raw as { signals?: unknown[] })?.signals ?? []);
       return asArray(list).map((s, i) => {
         const r = s as Record<string, unknown>;
@@ -31,64 +34,7 @@ export function useInsights() {
   });
 }
 
-// ── Capital / advances ──────────────────────────────────────────────────────
-export function useCapital() {
-  return useQuery({
-    queryKey: ['capital'],
-    queryFn: async () => {
-      const [eligibleRes, facilities] = await Promise.all([
-        fetchData('capital/eligible/').catch(() => null),
-        // The facility drives the Available / In Use tiles the web app shows;
-        // mobile never fetched it, which is why it only had two numbers.
-        fetchData('facilities/').catch(() => []),
-      ]);
-      // capital/eligible/ returns an OBJECT ({invoices, ineligible_invoices,
-      // counts, totals}), not a list. Passing it through asArray() — which only
-      // unwraps arrays or {results} — silently produced [], so the screen said
-      // "Nothing eligible" 100% of the time regardless of the real data.
-      const payload = (eligibleRes ?? {}) as Record<string, unknown>;
-      const facility = (asArray(facilities)[0] ?? null) as Record<string, unknown> | null;
-
-      return {
-        eligible: asArray(payload.invoices).map((e) => {
-          const r = e as Record<string, unknown>;
-          return {
-            id: str(pick(r, ['id', 'invoice_id']), ''),
-            invoiceNumber: str(pick(r, ['invoice_number']), ''),
-            customer: str(pick(r, ['customer', 'customer_name']), 'Customer'),
-            amount: num(pick(r, ['total_amount', 'amount', 'amount_zar'])),
-            // The real keys. 'advance_amount'/'eligible_amount' matched nothing
-            // on this endpoint, so every row used to read "Advance R0".
-            advance: num(pick(r, ['net_payout_zar', 'fundable_amount_zar'])),
-            tier: str(pick(r, ['risk_tier', 'tier']), ''),
-            riskPct: pick(r, ['customer_risk_pct']) as number | null | undefined,
-            riskBlocked: Boolean(pick(r, ['risk_blocked'])),
-          };
-        }),
-        ineligible: asArray(payload.ineligible_invoices).map((e) => {
-          const r = e as Record<string, unknown>;
-          return {
-            id: str(pick(r, ['id']), ''),
-            invoiceNumber: str(pick(r, ['invoice_number']), ''),
-            customer: str(pick(r, ['customer']), 'Customer'),
-            amount: num(pick(r, ['amount'])),
-            reason: str(pick(r, ['reason']), 'Not eligible'),
-          };
-        }),
-        // Server-side aggregates — no need to re-sum on the device.
-        eligibleCount: num(pick(payload, ['eligible_count'])),
-        eligibleValue: num(pick(payload, ['total_face_value_zar'])),
-        facility: facility && {
-          limit: num(pick(facility, ['limit'])),
-          outstanding: num(pick(facility, ['outstanding'])),
-          available: num(pick(facility, ['available'])),
-          utilization: num(pick(facility, ['utilization_percent'])),
-        },
-      };
-    },
-  });
-}
-
+// ── Advances ────────────────────────────────────────────────────────────────
 export function useAdvance(id: string | number) {
   return useQuery<Record<string, unknown>>({
     queryKey: ['advance', id],
@@ -151,9 +97,10 @@ export function useNotifications() {
     // NotificationSerializer sends `description` (not body/message) and
     // `unread` (the INVERSE of read). Reading the wrong names left every row
     // body-less and permanently unread. DRF paginates at 20 and nothing here
-    // asks for page 2, so raise the window explicitly.
+    // asks for page 2, so raise the window explicitly (`page_size`; the
+    // paginator ignores `limit`).
     queryFn: async () =>
-      asArray(await fetchData('notifications/?limit=50')).map((n, i) => {
+      asArray(await fetchData('notifications/?page_size=50')).map((n, i) => {
         const r = n as Record<string, unknown>;
         const unread = pick(r, ['unread']);
         return {

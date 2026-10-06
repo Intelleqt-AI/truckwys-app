@@ -22,7 +22,7 @@ export function ImportScreen({ route, navigation }: Props) {
 
   const handleImported = (res: ImportCommitResult) => {
     const bits = [`Imported ${res.imported} ${res.imported === 1 ? nouns.singular : nouns.plural}.`];
-    if (res.skipped > 0) bits.push(`${res.skipped} skipped — needed attention.`);
+    if (res.skipped > 0) bits.push(`${res.skipped} skipped. They needed attention.`);
     if (res.vehicle_types_created?.length) {
       bits.push(
         `New vehicle type${res.vehicle_types_created.length > 1 ? 's' : ''} created: ${res.vehicle_types_created.join(', ')}.`,
@@ -33,9 +33,8 @@ export function ImportScreen({ route, navigation }: Props) {
 
   return (
     <ImportPanel entity={entity} onImported={handleImported}>
-      {({ body, footer, hasPreview }) => (
+      {({ body, footer }) => (
         <SheetScreen
-          eyebrow={hasPreview ? 'Check the list' : 'Import'}
           title={title}
           onBack={() => navigation.goBack()}
           footer={footer}

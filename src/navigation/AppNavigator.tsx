@@ -12,9 +12,16 @@ import { CreateQuoteScreen } from '@/features/bookings/CreateQuoteScreen';
 import { VehicleDetailScreen } from '@/features/fleet/VehicleDetailScreen';
 import { DriverDetailScreen } from '@/features/fleet/DriverDetailScreen';
 import { InvoiceDetailScreen } from '@/features/finance/InvoiceDetailScreen';
+import { ReportScreen } from '@/features/finance/reports/ReportScreen';
 import { AssignDriverVehicleScreen } from '@/features/bookings/AssignDriverVehicleScreen';
 import { CreateInvoiceScreen } from '@/features/finance/CreateInvoiceScreen';
 import { AddExpenseScreen } from '@/features/finance/AddExpenseScreen';
+import { CreateCreditNoteScreen } from '@/features/finance/creditNotes/CreateCreditNoteScreen';
+import { CreditNoteDetailScreen } from '@/features/finance/creditNotes/CreditNoteDetailScreen';
+import { RequestFastPayScreen } from '@/features/capital/RequestFastPayScreen';
+import { AccountingScreen } from '@/features/accounting/AccountingScreen';
+import { SuppliersScreen } from '@/features/finance/suppliers/SuppliersScreen';
+import { SupplierFormScreen } from '@/features/finance/suppliers/SupplierFormScreen';
 import { AddVehicleScreen } from '@/features/fleet/AddVehicleScreen';
 import { AddVehicleTypeScreen } from '@/features/more/AddVehicleTypeScreen';
 import { AddDriverScreen } from '@/features/fleet/AddDriverScreen';
@@ -71,9 +78,9 @@ export function AppNavigator() {
       : undefined,
     headerLargeTitleShadowVisible: false,
     headerShadowVisible: false,
-    headerTintColor: colors.accent,
-    headerTitleStyle: { color: colors.fg },
-    headerLargeTitleStyle: { color: colors.fg },
+    headerTintColor: colors.fg,
+    headerTitleStyle: { color: colors.fg, fontWeight: '600' },
+    headerLargeTitleStyle: { color: colors.fg, fontWeight: '600' },
     headerStyle: { backgroundColor: iosHeader ? 'transparent' : colors.bgDeep },
     // Round chevron button only — no "Tabs"/previous-screen label.
     headerBackButtonDisplayMode: 'minimal',
@@ -111,6 +118,10 @@ export function AppNavigator() {
         <Stack.Screen name="VehicleDetail" component={VehicleDetailScreen} />
         <Stack.Screen name="DriverDetail" component={DriverDetailScreen} />
         <Stack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} />
+        <Stack.Screen name="CreditNoteDetail" component={CreditNoteDetailScreen} />
+        <Stack.Screen name="FinanceReport" component={ReportScreen} />
+        <Stack.Screen name="Accounting" component={AccountingScreen} />
+        <Stack.Screen name="Suppliers" component={SuppliersScreen} />
         <Stack.Screen name="Customers" component={CustomersScreen} />
         <Stack.Screen name="CustomerDetail" component={CustomerDetailScreen} />
         <Stack.Screen name="CustomerRisk" component={CustomerRiskScreen} />
@@ -149,6 +160,9 @@ export function AppNavigator() {
         <Stack.Screen name="AddCustomer" component={AddCustomerScreen} />
         <Stack.Screen name="Import" component={ImportScreen} />
         <Stack.Screen name="CreateInvoice" component={CreateInvoiceScreen} />
+        <Stack.Screen name="CreateCreditNote" component={CreateCreditNoteScreen} />
+        <Stack.Screen name="RequestFastPay" component={RequestFastPayScreen} />
+        <Stack.Screen name="SupplierForm" component={SupplierFormScreen} />
         <Stack.Screen name="AddExpense" component={AddExpenseScreen} />
         <Stack.Screen name="AddVehicle" component={AddVehicleScreen} />
         <Stack.Screen name="AddVehicleType" component={AddVehicleTypeScreen} />

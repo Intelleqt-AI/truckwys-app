@@ -1,4 +1,4 @@
-import { View, Pressable, Modal } from 'react-native';
+import { View, TouchableOpacity, Modal } from 'react-native';
 // Imported from their source files, not the '@/components/ui' barrel: that
 // barrel re-exports SubscriptionDot, which imports this modal — going
 // through the barrel here would close a circular import.
@@ -29,12 +29,21 @@ export function SubscriptionDetailModal({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={onClose}>
-        <Pressable
+      <TouchableOpacity
+        activeOpacity={1}
+        className="flex-1 justify-center bg-backdrop px-6"
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close"
+      >
+        {/* Swallows taps on the card so only the backdrop dismisses. */}
+        <TouchableOpacity
+          activeOpacity={1}
+          accessible={false}
           className="gap-3 rounded-panel border border-line bg-elevated p-4"
-          onPress={(e) => e.stopPropagation()}
+          onPress={() => {}}
         >
-          <Badge label={subscription.label} tone={subscription.tone} shape="pill" dot />
+          <Badge label={subscription.label} tone={subscription.tone} dot />
           <Txt className="text-sub text-muted">{subscription.detail}</Txt>
           {subscription.status === 'grace_period' && daysRemaining !== undefined && (
             <Txt className="text-sub text-fg">
@@ -56,8 +65,8 @@ export function SubscriptionDetailModal({
             )}
             <Button label="Close" variant="ghost" fullWidth onPress={onClose} />
           </View>
-        </Pressable>
-      </Pressable>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }

@@ -1,4 +1,6 @@
 import { num, str, pick, asArray } from '@/lib/api/list';
+import { invoiceDisplayNumber } from '@/lib/invoiceStatus';
+import { priceInclVat, type CustomerPrice } from '@/lib/vat';
 
 // Normalized, UI-facing shapes. The Django API types most numeric fields as
 // strings and field names drift a little between endpoints, so each normalizer
@@ -13,7 +15,10 @@ export interface QuoteLite {
   origin: string;
   destination: string;
   stopLabels: string[];
+  /** Price excl. VAT (total_amount). */
   amount: number;
+  /** What the customer is shown: incl. VAT (15%, or 0% international). */
+  amountInclVat: number;
   status: string;
   marginPct?: number;
   confidence?: number;
@@ -36,6 +41,10 @@ export const normalizeQuote = (q: Raw): QuoteLite => ({
     .map((s) => str(pick(s, ['location'])))
     .filter(Boolean),
   amount: num(pick(q, ['total_amount', 'price', 'amount', 'total'])),
+  amountInclVat: priceInclVat({
+    total_amount: pick(q, ['total_amount', 'price', 'amount', 'total']) as string | number | null,
+    customer_price: pick(q, ['customer_price']) as CustomerPrice | null | undefined,
+  }),
   status: str(pick(q, ['status']), 'DRAFT').toUpperCase(),
   marginPct:
     pick(q, ['margin_percent', 'marginPct', 'margin']) != null
@@ -53,7 +62,10 @@ export interface LoadLite {
   pickupState: string;
   deliveryState: string;
   status: string;
+  /** Price excl. VAT (total_amount). */
   amount: number;
+  /** What the customer is shown: incl. VAT (15%, or 0% international). */
+  amountInclVat: number;
   createdAt?: string;
   raw: Raw;
 }
@@ -66,6 +78,10 @@ export const normalizeLoad = (l: Raw): LoadLite => ({
   deliveryState: str(pick(l, ['delivery_state', 'delivery_city', 'destination_city']), '—'),
   status: str(pick(l, ['status']), 'PENDING').toUpperCase(),
   amount: num(pick(l, ['total_amount', 'rate', 'amount'])),
+  amountInclVat: priceInclVat({
+    total_amount: pick(l, ['total_amount', 'rate', 'amount']) as string | number | null,
+    customer_price: pick(l, ['customer_price']) as CustomerPrice | null | undefined,
+  }),
   createdAt: pick(l, ['created_at', 'pickup_date']) as string | undefined,
   raw: l,
 });
@@ -189,19 +205,17 @@ export interface InvoiceLite {
   total: number;
   balance: number;
   status: string;
-  earlyPayEligible?: boolean;
   dueDate?: string;
   raw: Raw;
 }
 
 export const normalizeInvoice = (inv: Raw): InvoiceLite => ({
   id: (pick(inv, ['id', 'pk']) as string | number) ?? '',
-  number: str(pick(inv, ['invoice_number', 'number', 'id']), 'INV-—'),
+  number: invoiceDisplayNumber(inv, str(pick(inv, ['id']), 'INV-—')),
   customer: str(pick(inv, ['customer_name', 'customer']), 'Customer'),
   total: num(pick(inv, ['total', 'total_amount', 'amount'])),
   balance: num(pick(inv, ['balance', 'balance_due', 'amount_due'])),
   status: str(pick(inv, ['status']), 'UNPAID').toUpperCase(),
-  earlyPayEligible: Boolean(pick(inv, ['early_pay_eligible'])),
   dueDate: pick(inv, ['due_date', 'dueDate']) as string | undefined,
   raw: inv,
 });
@@ -231,7 +245,10 @@ export interface ExpenseLite {
   amount: number;
   date?: string;
   status: string;
+  /** The supplier's name, else the free-text vendor an older expense was saved with. */
   vendor: string;
+  /** The VAT included in `amount` (gross); 0 when there is none. */
+  vat: number;
   expenseNumber: string;
   raw: Raw;
 }
@@ -252,7 +269,8 @@ export const normalizeExpense = (e: Raw): ExpenseLite => ({
   amount: num(pick(e, ['amount', 'total'])),
   date: pick(e, ['expense_date', 'date', 'created_at']) as string | undefined,
   status: str(pick(e, ['status']), 'PENDING').toUpperCase(),
-  vendor: str(pick(e, ['vendor'])),
+  vendor: str(pick(e, ['supplier_name', 'vendor'])),
+  vat: num(pick(e, ['vat_amount'])),
   expenseNumber: str(pick(e, ['expense_number'])),
   raw: e,
 });

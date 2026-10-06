@@ -30,6 +30,7 @@ const EXACT_ROUTES: Record<string, Target> = {
 // Longest prefix first — "/finance/invoices/3" must not match a bare "/finance".
 const ROUTES: { prefix: string; screen: keyof AppStackParamList }[] = [
   { prefix: '/finance/invoices/', screen: 'InvoiceDetail' },
+  { prefix: '/finance/credit-notes/', screen: 'CreditNoteDetail' },
   { prefix: '/invoices/', screen: 'InvoiceDetail' },
   { prefix: '/bookings/quotes/', screen: 'QuoteDetail' },
   { prefix: '/bookings/', screen: 'LoadDetail' },
@@ -57,6 +58,11 @@ const STATIC_ROUTES: Record<string, Target> = {
     screen: 'Tabs',
     params: { screen: 'Finance', params: { tab: 'invoices' } },
   },
+  '/finance/credit-notes': {
+    screen: 'Tabs',
+    params: { screen: 'Finance', params: { tab: 'credits' } },
+  },
+  '/finance/suppliers': { screen: 'Suppliers' },
   '/finance/expenses': {
     screen: 'Tabs',
     params: { screen: 'Finance', params: { tab: 'expenses' } },

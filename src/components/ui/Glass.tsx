@@ -24,6 +24,12 @@ const glass = (() => {
 
 const LIQUID = !!glass && glass.isLiquidGlassAvailable() && glass.isGlassEffectAPIAvailable();
 
+// `#RRGGBB` surface token → `rgba(r,g,b,a)`. The surface tokens are 6-digit hex.
+function withAlpha(hex: string, alpha: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
 export function Glass({
   children,
   intensity = 30,
@@ -63,7 +69,8 @@ export function Glass({
   // Android blur is unreliable/transparent on many devices — render a near-solid
   // frosted surface there instead so the bar is always clearly visible.
   if (Platform.OS === 'android') {
-    const solid = scheme === 'dark' ? 'rgba(16,16,16,0.96)' : 'rgba(255,255,255,0.96)';
+    // Card surface at 96%, derived from the token so it can't drift from it.
+    const solid = withAlpha(colors.surface, 0.96);
     return (
       <View style={[{ overflow: 'hidden', borderRadius: radius, backgroundColor: solid, borderColor: colors.line, borderWidth: 1 }, style]}>
         {children}
@@ -72,7 +79,7 @@ export function Glass({
   }
 
   // iOS < 26 — expo-blur frosted surface + translucent theme overlay.
-  const overlay = scheme === 'dark' ? 'rgba(10,10,10,0.6)' : 'rgba(255,255,255,0.65)';
+  const overlay = withAlpha(colors.surface, scheme === 'dark' ? 0.6 : 0.65);
   return (
     <BlurView
       tint={scheme === 'dark' ? 'dark' : 'light'}
@@ -81,15 +88,5 @@ export function Glass({
     >
       {children}
     </BlurView>
-  );
-}
-
-// Non-blur fallback surface (used where BlurView can't be a container).
-export function GlassSolid({ children, radius = 0, style }: { children?: ReactNode; radius?: number; style?: StyleProp<ViewStyle> }) {
-  const { colors } = useTheme();
-  return (
-    <View style={[{ borderRadius: radius, backgroundColor: colors.surface, borderColor: colors.line, borderWidth: 1, overflow: 'hidden' }, style]}>
-      {children}
-    </View>
   );
 }

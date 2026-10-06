@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Pressable, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, TouchableOpacity, type NativeSyntheticEvent, type NativeScrollEvent } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
-import { Mono, Icon } from '@/components/ui';
+import { Txt, Mono, Icon } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
+import { dayDividerLabel, messageDay } from '../dayDivider';
+import { saDateISO } from '@/lib/dates';
 import { UserBubble } from './UserBubble';
 import { AssistantMessage } from './AssistantMessage';
 import type { LiveStatus } from './LiveTurn';
@@ -24,9 +26,22 @@ import type { Msg, Proposal } from '../types';
 // to the bottom the instant the first real messages land. This anchor never
 // carries any reveal state and is never recycled into a real message row.
 const PENDING_ANCHOR_KEY = '__pending-anchor__';
-type ListItem = Msg | { key: typeof PENDING_ANCHOR_KEY };
-const isAnchor = (item: ListItem): item is { key: typeof PENDING_ANCHOR_KEY } =>
-  item.key === PENDING_ANCHOR_KEY;
+type AnchorItem = { key: typeof PENDING_ANCHOR_KEY };
+// A day divider row, placed before the first message of each South African day.
+type DividerItem = { key: string; divider: string };
+type ListItem = Msg | AnchorItem | DividerItem;
+const isAnchor = (item: ListItem): item is AnchorItem => item.key === PENDING_ANCHOR_KEY;
+const isDivider = (item: ListItem): item is DividerItem => 'divider' in item;
+
+function DayDivider({ label }: { label: string }) {
+  return (
+    <View className="my-2 flex-row items-center gap-3" accessibilityRole="header">
+      <View className="h-px flex-1 bg-line-row" />
+      <Txt className="text-caption text-faint">{label}</Txt>
+      <View className="h-px flex-1 bg-line-row" />
+    </View>
+  );
+}
 
 export function MessageList({
   messages,
@@ -54,8 +69,40 @@ export function MessageList({
   const listRef = useRef<FlashListRef<ListItem>>(null);
   const [awayFromBottom, setAwayFromBottom] = useState(false);
 
+  // Messages with a divider before the first one of each day (and the first
+  // overall), instead of an age on every reply.
+  const rows = useMemo<ListItem[]>(() => {
+    const out: ListItem[] = [];
+    let prevDay: string | null = null;
+    for (const m of messages) {
+      const day = messageDay(m.createdAt);
+      if (day && day !== prevDay) {
+        out.push({ key: `divider:${m.key}`, divider: dayDividerLabel(day) });
+        prevDay = day;
+      }
+      out.push(m);
+    }
+    return out;
+  }, [messages]);
+
   const data: ListItem[] =
-    messages.length === 0 && pendingStatus != null ? [{ key: PENDING_ANCHOR_KEY }] : messages;
+    messages.length === 0 && pendingStatus != null ? [{ key: PENDING_ANCHOR_KEY }] : rows;
+
+  // The live turn is today's. If the transcript so far ended on another day (or
+  // is empty), say "Today" above it, as the divider will once it settles.
+  const lastDay = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const day = messageDay(messages[i]?.createdAt);
+      if (day) return day;
+    }
+    return null;
+  }, [messages]);
+  const footerNode = footer ? (
+    <>
+      {saDateISO() !== lastDay ? <DayDivider label="Today" /> : null}
+      {footer}
+    </>
+  ) : null;
 
   // The only place `awayFromBottom` is ever cleared — deterministically, at
   // the moment WE scroll to bottom, rather than waiting on a scroll event to
@@ -124,7 +171,9 @@ export function MessageList({
 
   const renderItem = useCallback(
     ({ item }: { item: ListItem }) =>
-      isAnchor(item) ? null : item.role === 'user' ? (
+      isAnchor(item) ? null : isDivider(item) ? (
+        <DayDivider label={item.divider} />
+      ) : item.role === 'user' ? (
         <UserBubble text={item.content} />
       ) : (
         <AssistantMessage
@@ -146,7 +195,8 @@ export function MessageList({
         keyExtractor={(item) => item.key}
         renderItem={renderItem}
         ListHeaderComponent={header}
-        ListFooterComponent={footer}
+        getItemType={(item) => (isAnchor(item) ? 'anchor' : isDivider(item) ? 'divider' : item.role)}
+        ListFooterComponent={footerNode}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
@@ -170,18 +220,20 @@ export function MessageList({
       />
 
       {awayFromBottom && (
-        <Pressable
+        <TouchableOpacity
           onPress={() => scrollToBottom(true)}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
           accessibilityLabel="Jump to latest"
-          className="absolute self-center rounded-pill border border-line bg-surface px-3 py-1.5 active:opacity-70"
+          className="absolute self-center rounded-pill border border-line bg-surface px-3 py-1.5"
           style={{ bottom: 12 }}
         >
           <View className="flex-row items-center gap-1.5">
-            <Mono className="text-micro tracking-wide uppercase text-muted">Latest</Mono>
+            <Mono className="text-caption font-medium text-muted">Latest</Mono>
             <Icon name="chevronDown" size={13} color={colors.muted} />
           </View>
-        </Pressable>
+        </TouchableOpacity>
       )}
     </View>
   );

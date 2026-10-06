@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable, Modal } from 'react-native';
+import { View, TouchableOpacity, Modal } from 'react-native';
 import { Button, Label, Txt, Mono } from '@/components/ui';
 import { formatCurrency, formatNumber } from '@/lib/formatters';
 import type { CostBreakdown } from './costs';
@@ -58,10 +58,11 @@ function FuelBreakdownModalImpl({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={onClose}>
-        <Pressable
+      <TouchableOpacity activeOpacity={1} className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
+        <TouchableOpacity
+          activeOpacity={1}
           className="rounded-panel border border-line bg-elevated p-4"
-          onPress={(e) => e.stopPropagation()}
+          onPress={() => {}}
         >
           <Label className="mb-3 text-muted">How this fuel figure is worked out</Label>
 
@@ -70,7 +71,7 @@ function FuelBreakdownModalImpl({
               <Txt className="mb-3 text-sub text-muted">
                 {hasVehicleType
                   ? `Your ${vehicleType}'s own consumption, adjusted for this load.`
-                  : `No truck is picked, so this uses ${costs.fuelBasisName} — the most economical type in your fleet that can carry ${weightTons ?? 0}t.`}
+                  : `No truck is picked, so this uses ${costs.fuelBasisName}, the most economical type in your fleet that can carry ${weightTons ?? 0}t.`}
               </Txt>
               <View>
                 {rows.map(([k, v, bold]) => (
@@ -124,7 +125,7 @@ function FuelBreakdownModalImpl({
           </View>
 
           {!hasVehicleType && hasCapacity && (
-            <Txt className="mt-3 text-micro text-faint">
+            <Txt className="mt-3 text-caption text-faint">
               {"This is a fleet-wide estimate, picked so the figure doesn't jump around as you change the weight."}
               {suggestedTypeName
                 ? ` Choose ${suggestedTypeName} above to price on the truck you'd actually send.`
@@ -133,8 +134,8 @@ function FuelBreakdownModalImpl({
           )}
 
           <Button label="Close" variant="secondary" onPress={onClose} fullWidth className="mt-4" />
-        </Pressable>
-      </Pressable>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }

@@ -60,20 +60,20 @@ function TruckSuggestionChipsImpl({
               className="min-w-[152px] justify-center gap-1 rounded-control border border-line bg-surface px-3 py-2.5"
             >
               <View className="flex-row items-center gap-1.5">
-                <Mono className="flex-shrink text-micro uppercase tracking-wide text-fg" numberOfLines={1}>
+                <Mono className="flex-shrink text-caption font-medium text-fg" numberOfLines={1}>
                   {s.name} ({s.cap}t)
                 </Mono>
               </View>
               <Mono
-                className={`text-nano uppercase tracking-wide ${best ? 'text-success' : 'text-faint'}`}
+                className={`text-caption font-medium ${best ? 'text-success' : 'text-faint'}`}
                 numberOfLines={1}
               >
                 {s.fitLabel}
               </Mono>
-              <Mono className="text-micro text-faint" numberOfLines={1}>
+              <Mono className="text-caption text-faint" numberOfLines={1}>
                 {s.spare <= 0 ? 'exact fit' : `${s.spare}t spare`} · {s.rate}
               </Mono>
-              <Mono className="text-micro text-faint" numberOfLines={1}>
+              <Mono className="text-caption text-faint" numberOfLines={1}>
                 you own {s.owned}
               </Mono>
             </TouchableOpacity>
@@ -81,7 +81,7 @@ function TruckSuggestionChipsImpl({
         })}
       </ScrollView>
       {wanted === 'general' && (
-        <Mono className="mt-1.5 text-micro text-faint">
+        <Mono className="mt-1.5 text-caption text-faint">
           Add a cargo description for a better ranking.
         </Mono>
       )}

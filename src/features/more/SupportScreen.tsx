@@ -1,4 +1,4 @@
-import { View, Pressable, Linking } from 'react-native';
+import { View, TouchableOpacity, Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -49,9 +49,12 @@ export function SupportScreen({ navigation }: Props) {
     sub?: string;
     onPress: () => void;
   }) => (
-    <Pressable
+    <TouchableOpacity
       onPress={onPress}
-      className="min-h-[56px] flex-row items-center gap-3 border-b border-line-row px-4 py-3 active:bg-surface-hover"
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={sub ? `${label}, ${sub}` : label}
+      className="min-h-[56px] flex-row items-center gap-3 border-b border-line-row px-4 py-3"
     >
       <Icon name={icon} size={19} color={colors.muted} />
       <View className="flex-1">
@@ -59,14 +62,14 @@ export function SupportScreen({ navigation }: Props) {
         {sub ? <Txt className="mt-0.5 text-caption text-faint">{sub}</Txt> : null}
       </View>
       <Icon name="chevronRight" size={16} color={colors.faint} />
-    </Pressable>
+    </TouchableOpacity>
   );
 
   return (
-    <SheetScreen eyebrow="Help" title="Support" onBack={() => navigation.goBack()}>
+    <SheetScreen title="Support" onBack={() => navigation.goBack()}>
       <Txt className="mb-4 text-callout text-muted">
         Questions about a quote, a booking or your account? The Truckwys operations team answers
-        weekdays, 08:00–17:00 SAST.
+        weekdays, 08:00 to 17:00 SAST.
       </Txt>
 
       <Group label="Get in touch">
@@ -92,7 +95,7 @@ export function SupportScreen({ navigation }: Props) {
         <DetailRow label="Signed in as" value={user?.email ?? '—'} mono={false} last />
       </Group>
 
-      <Mono className="mt-2 text-center text-micro text-faint">Truckwys · v{version}</Mono>
+      <Mono className="mt-2 text-center text-caption text-faint">Truckwys · v{version}</Mono>
     </SheetScreen>
   );
 }

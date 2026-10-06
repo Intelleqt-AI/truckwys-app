@@ -17,7 +17,9 @@ import { QueryClient, focusManager, onlineManager } from '@tanstack/react-query'
 //
 // Navigating between tabs and screens deliberately triggers no requests at all:
 // the cache is already correct, because anything that could have changed it went
-// through (1), (2) or (3). Browsing the app should cost nothing.
+// through (1), (2) or (3). Browsing the app should cost nothing. The one exception
+// is Home, which refetches its figures once they are past staleTime
+// (features/home/api.ts#useAutoRefreshHome).
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -31,7 +33,15 @@ export const queryClient = new QueryClient({
       // not "user switched tab".
       retry: (failureCount, error) => {
         const status = (error as { status?: number })?.status;
-        if (status === 401 || status === 403 || status === 404) return false;
+        // 400 is a rejected request, 401/403/404 won't change by asking again,
+        // and a 429 means we are being throttled: retrying only makes it worse.
+        if (status === 400 || status === 401 || status === 403 || status === 404 || status === 429) {
+          return false;
+        }
+        // The backend answers 503 on purpose when it cannot compute something
+        // (insights, cash flow). One retry covers a blip; after that the screen
+        // shows its error state with a Retry button instead of hammering it.
+        if (status === 503) return failureCount < 1;
         return failureCount < 3;
       },
     },

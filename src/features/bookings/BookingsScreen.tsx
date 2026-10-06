@@ -1,16 +1,16 @@
-import { useState } from 'react';
-import { View, Pressable, Platform, ActivityIndicator } from 'react-native';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { View, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import {
-  AmbientGlow,
   AppHeader,
   SwipeTabs,
   FilterChips,
   SearchField,
   StatCard,
+  KpiRow,
   StatusPill,
   Avatar,
   Card,
@@ -20,20 +20,43 @@ import {
   ListRow,
   Fab,
   EmptyState,
+  Button,
 } from '@/components/ui';
-import { ListSkeleton, ErrorState } from '@/components/feedback';
-import { useQuotes, useLoads, useLoadsForConvertLookup, needsLoadsLookup } from './api';
+import { ListSkeleton, ErrorState, Skeleton } from '@/components/feedback';
+import { useQuotes, useLoadsTab, type OrdersSummary, type HistorySummary } from './api';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
+import { bookedLoadOf, quoteStage, type QuoteStage } from '@/lib/quoteStage';
+import { staleOf, staleLabel } from '@/lib/staleWork';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
-import { formatCurrency, formatCurrencyCompact, formatPercent } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
 import type { TabParamList, BookingsTab } from '@/navigation/types';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useTheme } from '@/theme/ThemeProvider';
+import { radius } from '@/theme/tokens';
 
 type Props = BottomTabScreenProps<TabParamList, 'Bookings'>;
 
-const ACTIVE = ['PENDING', 'ASSIGNED', 'LOADING', 'IN_TRANSIT'];
-const DONE = ['DELIVERED', 'INVOICED', 'CANCELLED'];
+
+// Same per-tab title and one-line description as the web's Bookings header.
+const TAB_TITLES: Record<BookingsTab, string> = {
+  quotes: 'Quotes',
+  orders: 'Open orders',
+  history: 'Order history',
+};
+const TAB_DESCRIPTIONS: Record<BookingsTab, string> = {
+  quotes: 'Draft, send and track quotes.',
+  orders: 'Booked loads that are not yet delivered.',
+  history: 'Delivered, invoiced and cancelled loads.',
+};
+const wholeRand = (n: number) => formatCurrency(n, { maximumFractionDigits: 0 });
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+// Pages are 20 rows, so start the next one well before the list runs out.
+const END_REACHED_THRESHOLD = 1.5;
+// Module-level so the list sees one component type, not a new one per render.
+const Separator = () => <View className="h-2.5" />;
 
 export function BookingsScreen({ route }: Props) {
   const [tab, setTab] = useState<BookingsTab>(route.params?.tab ?? 'quotes');
@@ -42,9 +65,8 @@ export function BookingsScreen({ route }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep" style={{ paddingTop: insets.top }}>
-      <AmbientGlow />
       <View className="px-screen">
-        <AppHeader eyebrow="Operations" title="Bookings" live />
+        <AppHeader title={TAB_TITLES[tab]} subtitle={TAB_DESCRIPTIONS[tab]} live />
       </View>
       <SwipeTabs
         tabs={[
@@ -57,7 +79,7 @@ export function BookingsScreen({ route }: Props) {
         lazy
       >
         <QuotesTab />
-        <OrdersTab />
+        <OrdersTab onViewQuotes={() => setTab('quotes')} />
         <HistoryTab />
       </SwipeTabs>
       {/* Long-press for the voice/AI entry point — undiscoverable alone, so
@@ -74,15 +96,29 @@ export function BookingsScreen({ route }: Props) {
 }
 
 // ── Quotes ───────────────────────────────────────────────────────────────
-const QUOTE_FILTERS = [
+// Same stages as the web board. Accepted means won and still to book; Booked
+// is a quote converted into a load; Expired is a Draft or Sent quote past its
+// valid-until day, so it is never counted as live work.
+const QUOTE_FILTERS: { label: string; value: 'ALL' | QuoteStage }[] = [
   { label: 'All', value: 'ALL' },
   { label: 'Draft', value: 'DRAFT' },
   { label: 'Sent', value: 'SENT' },
   { label: 'Accepted', value: 'ACCEPTED' },
+  { label: 'Booked', value: 'BOOKED' },
   { label: 'Declined', value: 'DECLINED' },
+  { label: 'Expired', value: 'EXPIRED' },
 ];
 
+// The server can filter these directly. Declined (which also holds Sent quotes
+// marked lost) and Expired (a date rule, not a status) are read off the full
+// list instead.
+const SERVER_FILTERS = ['DRAFT', 'SENT', 'ACCEPTED', 'BOOKED'];
+// How many rows a narrowed view tries to fill before it stops asking for pages.
+const FILL_TO = 8;
+const MAX_AUTO_PAGES = 12;
+
 function QuotesTab() {
+  const [filter, setFilter] = useState<'ALL' | QuoteStage>('ALL');
   const {
     combinedData: data,
     isLoading,
@@ -91,14 +127,36 @@ function QuotesTab() {
     loadMore,
     hasMore,
     isFetching,
-  } = useQuotes();
-  // Only worth walking the loads table when a visible quote is accepted but
-  // doesn't already carry its own load id — see needsLoadsLookup.
-  const { data: loadByQuote } = useLoadsForConvertLookup(needsLoadsLookup(data));
+  } = useQuotes(SERVER_FILTERS.includes(filter) ? filter : undefined);
   const { refreshing, onRefresh } = useManualRefresh(refresh);
-  const [filter, setFilter] = useState('ALL');
+  const { colors } = useTheme();
+  const { createQuote } = useAppNavigation();
   const [q, setQ] = useState('');
-  const { openQuote, openAssign, openLoad } = useAppNavigation();
+
+  const list = useMemo(
+    () =>
+      data.filter(
+        (item) =>
+          (filter === 'ALL' || quoteStage(item.raw) === filter) &&
+          (!q || `${item.code} ${item.customer}`.toLowerCase().includes(q.toLowerCase())),
+      ),
+    [data, filter, q],
+  );
+
+  // A narrowed view can come up short on the pages loaded so far (for example
+  // Expired among a long list of live quotes), so keep asking for the next page
+  // a few times rather than showing an empty list that is only empty so far.
+  const autoPages = useRef(0);
+  useEffect(() => {
+    autoPages.current = 0;
+  }, [filter, q]);
+  useEffect(() => {
+    if (isLoading || isFetching || !hasMore) return;
+    if (filter === 'ALL' && !q) return;
+    if (list.length >= FILL_TO || autoPages.current >= MAX_AUTO_PAGES) return;
+    autoPages.current += 1;
+    void loadMore();
+  }, [isLoading, isFetching, hasMore, filter, q, list.length, loadMore]);
 
   if (isLoading)
     return (
@@ -108,143 +166,175 @@ function QuotesTab() {
     );
   if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load quotes." />;
 
-  const list = data.filter(
-    (item) =>
-      (filter === 'ALL' || item.status === filter) &&
-      (!q || `${item.code} ${item.customer}`.toLowerCase().includes(q.toLowerCase())),
-  );
-
   return (
     <FlashList
       data={list}
-      keyExtractor={(q) => String(q.id)}
+      keyExtractor={quoteKey}
+      getItemType={quoteItemType}
       showsVerticalScrollIndicator={false}
       onRefresh={onRefresh}
       refreshing={refreshing}
+      extraData={filter}
       onEndReached={() => hasMore && !isFetching && loadMore()}
-      onEndReachedThreshold={0.5}
+      onEndReachedThreshold={END_REACHED_THRESHOLD}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
-      ItemSeparatorComponent={() => <View className="h-2.5" />}
+      ItemSeparatorComponent={Separator}
       ListHeaderComponent={
         <View className="mb-3">
           <View className="mb-3">
             <SearchField value={q} onChangeText={setQ} placeholder="Search quotes…" />
           </View>
-          <FilterChips options={QUOTE_FILTERS} value={filter} onChange={setFilter} />
+          <FilterChips
+            options={QUOTE_FILTERS}
+            value={filter}
+            onChange={(v) => setFilter(v as 'ALL' | QuoteStage)}
+          />
         </View>
       }
       ListFooterComponent={
         isFetching ? (
           <View className="py-4">
-            <ActivityIndicator />
+            <ActivityIndicator color={colors.faint} />
           </View>
         ) : null
       }
       ListEmptyComponent={
-        <EmptyState icon="file" title="No quotes" body="No quotes match this filter." />
-      }
-      renderItem={({ item }) => {
-        // The quote row carries its load once converted; fall back to scanning
-        // loads by their `quote` back-reference, matching QuoteDetailScreen.
-        const convertedFromQuote = pick(item.raw, ['load_id', 'load', 'booking_id']);
-        const convertedLoadId =
-          convertedFromQuote != null
-            ? (convertedFromQuote as string | number)
-            : (loadByQuote?.get(String(item.id)) ?? null);
-        return (
-          <QuoteCard
-            quote={item}
-            convertedLoadId={convertedLoadId}
-            onPress={() => openQuote(item.id, item.raw)}
-            onConvert={() =>
-              openAssign({
-                mode: 'convert',
-                quoteId: item.id,
-                reference: item.code,
-                vehicleType: str(pick(item.raw, ['vehicle_type'])) || undefined,
-              })
-            }
-            onViewBooking={() => openLoad(convertedLoadId!)}
+        q ? (
+          <EmptyState icon="file" title="No quotes match your search" />
+        ) : filter === 'ALL' ? (
+          <EmptyState
+            icon="file"
+            title="No quotes yet"
+            action={<Button label="New quote" icon="plus" onPress={() => createQuote()} />}
           />
-        );
-      }}
+        ) : (
+          <EmptyState
+            icon="file"
+            title={`No ${QUOTE_FILTERS.find((f) => f.value === filter)?.label.toLowerCase()} quotes`}
+            body={
+              filter === 'BOOKED'
+                ? 'Accepted quotes land here once converted to a booking.'
+                : undefined
+            }
+          />
+        )
+      }
+      renderItem={renderQuote}
     />
   );
 }
 
-function QuoteCard({
-  quote,
-  convertedLoadId,
-  onPress,
-  onConvert,
-  onViewBooking,
-}: {
-  quote: QuoteLite;
-  convertedLoadId: string | number | null;
-  onPress: () => void;
-  onConvert: () => void;
-  onViewBooking: () => void;
-}) {
-  // Web offers → Booking on accepted cards in the list as well as on the
-  // detail page (QuotesList.tsx).
-  const accepted = ['ACCEPTED', 'APPROVED'].includes(quote.status);
+const renderQuote = ({ item }: { item: QuoteLite }) => <QuoteCard quote={item} />;
+
+// Accepted / Booked cards carry an extra action row, so they are a different
+// height from the rest and get their own recycling pool.
+const quoteKey = (q: QuoteLite) => String(q.id);
+const quoteItemType = (q: QuoteLite) => {
+  const s = quoteStage(q.raw);
+  return s === 'ACCEPTED' || s === 'BOOKED' ? 'action' : 'plain';
+};
+
+/// Memoized and self-sufficient (navigation lives inside) so a parent re-render
+// for search, filter or a page arriving doesn't re-render every visible card.
+const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
+  const { colors } = useTheme();
+  const { openQuote, openAssign, openLoad } = useAppNavigation();
+  const stage = quoteStage(quote.raw) ?? quote.status;
+  // The quote API names the load it was booked as, so no scan of the loads
+  // table is needed.
+  const bookedLoad = bookedLoadOf(quote.raw);
+  // Expired reads "Expired 20 Jun 2026" (the valid-until day); everything else
+  // shows when the quote was created. Nothing is shown if the field is missing.
+  const dateText = (() => {
+    const raw = stage === 'EXPIRED' ? pick(quote.raw, ['valid_until']) : pick(quote.raw, ['created_at']);
+    const d = raw ? formatDate(String(raw)) : '';
+    if (!d || d === '—') return '';
+    return stage === 'EXPIRED' ? `Expired ${d}` : d;
+  })();
+  const onPress = () => openQuote(quote.id, quote.raw);
+  const onConvert = () =>
+    openAssign({
+      mode: 'convert',
+      quoteId: quote.id,
+      reference: quote.code,
+      vehicleType: str(pick(quote.raw, ['vehicle_type'])) || undefined,
+    });
+  const onViewBooking = () => bookedLoad && openLoad(bookedLoad.id, undefined, bookedLoad.load_number);
   return (
     <Card>
-      <Pressable className="p-3.5 active:bg-surface-hover" onPress={onPress}>
-        <View className="mb-2 flex-row items-center justify-between">
-          <View className="flex-row items-center gap-2">
-            <Mono className="text-micro font-semibold text-accent">{quote.code}</Mono>
+      <TouchableOpacity className="p-3.5" activeOpacity={0.7} onPress={onPress}>
+        <View className="mb-2 flex-row items-center justify-between gap-2">
+          <View className="shrink flex-row items-center gap-2">
+            <Mono className="text-caption font-medium text-muted">{quote.code}</Mono>
+            {dateText !== '' && (
+              <Mono className="shrink text-caption text-faint" numberOfLines={1}>
+                {dateText}
+              </Mono>
+            )}
           </View>
-          <StatusPill status={quote.status} />
+          <StatusPill status={stage} />
         </View>
         <Txt className="text-body font-medium text-fg">{quote.customer}</Txt>
         <Txt className="mt-0.5 text-sub text-muted" numberOfLines={1} ellipsizeMode="tail">
           {[quote.origin, ...quote.stopLabels, quote.destination].join(' → ')}
         </Txt>
         <View className="mt-3 flex-row items-center justify-between">
-          <Mono className="text-body font-semibold text-fg">{formatCurrency(quote.amount)}</Mono>
-          {quote.marginPct != null && (
-            <Mono className="text-micro text-faint">Margin {formatPercent(quote.marginPct)}</Mono>
+          <Mono className="text-body font-semibold text-fg">{wholeRand(quote.amountInclVat)}</Mono>
+          {/* A quote has no live margin once it is booked or expired. */}
+          {quote.marginPct != null && stage !== 'EXPIRED' && stage !== 'BOOKED' && (
+            <Mono className="text-caption text-faint">Margin {formatPercent(quote.marginPct)}</Mono>
           )}
         </View>
-      </Pressable>
-      {accepted && convertedLoadId == null && (
-        <Pressable
+      </TouchableOpacity>
+      {/* Accepted still has to be booked; once booked, the quote just points at
+          its booking. A quote converts to at most one load. */}
+      {stage === 'ACCEPTED' && (
+        <TouchableOpacity
           onPress={onConvert}
-          className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
+          activeOpacity={0.7}
+          className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row"
         >
-          <Mono className="text-micro uppercase tracking-label text-accent">
-            Convert to booking
-          </Mono>
-          <Icon name="arrowRight" size={14} color="#4D9EFF" />
-        </Pressable>
+          <Mono className="text-sub font-medium text-link">Convert to booking</Mono>
+          <Icon name="arrowRight" size={14} color={colors.link} />
+        </TouchableOpacity>
       )}
-      {accepted && convertedLoadId != null && (
-        <Pressable
+      {stage === 'BOOKED' && bookedLoad && (
+        <TouchableOpacity
           onPress={onViewBooking}
-          className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row active:bg-surface-hover"
+          activeOpacity={0.7}
+          className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row"
         >
-          <Mono className="text-micro uppercase tracking-label text-accent">View booking</Mono>
-          <Icon name="arrowRight" size={14} color="#4D9EFF" />
-        </Pressable>
+          <Mono className="text-sub font-medium text-link">
+            View booking{bookedLoad.load_number ? ` ${bookedLoad.load_number}` : ''}
+          </Mono>
+          <Icon name="arrowRight" size={14} color={colors.link} />
+        </TouchableOpacity>
       )}
     </Card>
   );
-}
+});
 
 // ── Orders / History (loads) ───────────────────────────────────────────────
-function OrdersTab() {
+// Server-side (backend `loads/?tab=`): the API sends one page of the tab's
+// loads, does the status filter and search, and sends the tiles with page 1, so
+// nothing here downloads every load to count them.
+
+function OrdersTab({ onViewQuotes }: { onViewQuotes: () => void }) {
+  const [filter, setFilter] = useState('ALL');
+  const [q, setQ] = useState('');
+  const search = useDebouncedValue(q.trim());
   const {
-    combinedData: data,
+    combinedData: list,
+    extras,
     isLoading,
     isError,
     refresh,
     loadMore,
     hasMore,
     isFetching,
-  } = useLoads();
+    isPlaceholderData,
+  } = useLoadsTab<OrdersSummary>('orders', filter, search);
   const { refreshing, onRefresh } = useManualRefresh(refresh);
-  const [filter, setFilter] = useState('ALL');
   const { openLoad } = useAppNavigation();
 
   if (isLoading)
@@ -253,11 +343,14 @@ function OrdersTab() {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load orders." />;
+  if (isError && list.length === 0) return <ErrorState onRetry={refresh} message="Couldn't load orders." />;
 
-  const active = data.filter((l) => ACTIVE.includes(l.status));
-  const list = active.filter((l) => filter === 'ALL' || l.status === filter);
-  const revenue = active.reduce((s, l) => s + l.amount, 0);
+  const s = extras?.summary;
+  const open = s?.open_count ?? 0;
+  // Past its delivery date, or open for over 30 days: said as "left open",
+  // never counted as current work.
+  const current = open - (s?.left_open ?? 0);
+  const filtering = filter !== 'ALL' || search !== '';
 
   return (
     <LoadList
@@ -267,41 +360,95 @@ function OrdersTab() {
       refreshing={refreshing}
       onEndReached={() => hasMore && !isFetching && loadMore()}
       isFetchingMore={isFetching}
-      stats={[
-        { label: 'Active orders', value: String(active.length) },
-        {
-          label: 'In transit',
-          value: String(active.filter((l) => l.status === 'IN_TRANSIT').length),
-        },
-        { label: 'Loading', value: String(active.filter((l) => l.status === 'LOADING').length) },
-        { label: 'Revenue', value: formatCurrencyCompact(revenue) },
-      ]}
+      searching={q.trim() !== search || isPlaceholderData}
+      search={{ value: q, onChange: setQ, placeholder: 'Search orders…' }}
+      stats={
+        !s
+          ? null
+          : open === 0
+            ? []
+            : [
+                {
+                  label: 'Need a vehicle',
+                  value: String(s.need_vehicle),
+                  // Only Pending/Assigned orders can still get one; one already
+                  // loading or in transit without one is not counted.
+                  note:
+                    s.need_vehicle === 0
+                      ? 'All have a vehicle'
+                      : s.need_vehicle_overdue === s.need_vehicle
+                        ? 'All past delivery date'
+                        : s.need_vehicle_overdue > 0
+                          ? `${s.need_vehicle_overdue} past delivery date`
+                          : 'Assign a vehicle',
+                },
+                {
+                  label: 'In transit',
+                  value: String(s.in_transit),
+                  note:
+                    s.in_transit === 0
+                      ? 'None on the road'
+                      : s.in_transit_overdue === s.in_transit
+                        ? s.in_transit === 1
+                          ? 'Past its delivery date'
+                          : 'All past delivery date'
+                        : s.in_transit_overdue > 0
+                          ? `${s.in_transit_overdue} past delivery date`
+                          : 'All on schedule',
+                },
+                {
+                  label: 'Open order value',
+                  value: wholeRand(s.open_total_incl_vat),
+                  note:
+                    s.left_open === 0
+                      ? plural(current, 'active order', 'active orders')
+                      : current === 0
+                        ? `${plural(s.left_open, 'order', 'orders')}, all left open`
+                        : `${current} active · ${s.left_open} left open`,
+                },
+              ]
+      }
       filters={[
-        { label: 'All', value: 'ALL' },
+        { label: 'All', value: 'ALL', count: s && !filtering ? open : undefined },
         { label: 'Pending', value: 'PENDING' },
         { label: 'Assigned', value: 'ASSIGNED' },
         { label: 'Loading', value: 'LOADING' },
-        { label: 'Transit', value: 'IN_TRANSIT' },
+        { label: 'In transit', value: 'IN_TRANSIT' },
       ]}
       filter={filter}
       onFilter={setFilter}
+      empty={
+        !filtering && open === 0 ? (
+          <EmptyState
+            icon="truck"
+            title="No orders are in progress"
+            body="No loads yet. Create a quote, then convert it."
+            action={<Button label="View quotes" variant="secondary" onPress={onViewQuotes} />}
+          />
+        ) : (
+          <EmptyState icon="truck" title="No orders match" body="Try another status or search." />
+        )
+      }
     />
   );
 }
 
 function HistoryTab() {
+  const [filter, setFilter] = useState('ALL');
+  const [q, setQ] = useState('');
+  const search = useDebouncedValue(q.trim());
   const {
-    combinedData: data,
+    combinedData: list,
+    extras,
     isLoading,
     isError,
     refresh,
     loadMore,
     hasMore,
     isFetching,
-  } = useLoads();
+    isPlaceholderData,
+  } = useLoadsTab<HistorySummary>('history', filter, search);
   const { refreshing, onRefresh } = useManualRefresh(refresh);
-  const [filter, setFilter] = useState('ALL');
-  const [q, setQ] = useState('');
   const { openLoad } = useAppNavigation();
 
   if (isLoading)
@@ -310,15 +457,11 @@ function HistoryTab() {
         <ListSkeleton />
       </View>
     );
-  if (isError || !data) return <ErrorState onRetry={refresh} message="Couldn't load history." />;
+  if (isError && list.length === 0) return <ErrorState onRetry={refresh} message="Couldn't load history." />;
 
-  const done = data.filter((l) => DONE.includes(l.status));
-  const list = done.filter(
-    (l) =>
-      (filter === 'ALL' || l.status === filter) &&
-      (!q || `${l.loadNumber} ${l.customer}`.toLowerCase().includes(q.toLowerCase())),
-  );
-  const revenue = done.filter((l) => l.status !== 'CANCELLED').reduce((s, l) => s + l.amount, 0);
+  const s = extras?.summary;
+  const total = s?.history_count ?? 0;
+  const filtering = filter !== 'ALL' || search !== '';
 
   return (
     <LoadList
@@ -328,24 +471,61 @@ function HistoryTab() {
       refreshing={refreshing}
       onEndReached={() => hasMore && !isFetching && loadMore()}
       isFetchingMore={isFetching}
-      search={{ value: q, onChange: setQ }}
-      stats={[
-        { label: 'Completed', value: String(done.filter((l) => l.status !== 'CANCELLED').length) },
-        { label: 'Invoiced', value: String(done.filter((l) => l.status === 'INVOICED').length) },
-        { label: 'Cancelled', value: String(done.filter((l) => l.status === 'CANCELLED').length) },
-        { label: 'Total revenue', value: formatCurrencyCompact(revenue) },
-      ]}
+      searching={q.trim() !== search || isPlaceholderData}
+      search={{ value: q, onChange: setQ, placeholder: 'Search history…' }}
+      stats={
+        !s
+          ? null
+          : total === 0
+            ? []
+            : [
+                {
+                  label: 'Delivered, not invoiced',
+                  value: String(s.delivered_not_invoiced),
+                  note: s.delivered_not_invoiced > 0 ? 'Invoice to get paid' : 'All invoiced',
+                },
+                {
+                  label: 'Invoiced',
+                  value: String(s.invoiced),
+                  note: `${wholeRand(s.invoiced_total_incl_vat)} billed`,
+                },
+                {
+                  label: 'Delivered revenue',
+                  value: wholeRand(s.completed_total_incl_vat),
+                  note: plural(s.completed, 'load', 'loads'),
+                },
+              ]
+      }
       filters={[
-        { label: 'All', value: 'ALL' },
+        { label: 'All', value: 'ALL', count: s && !filtering ? total : undefined },
         { label: 'Delivered', value: 'DELIVERED' },
         { label: 'Invoiced', value: 'INVOICED' },
         { label: 'Cancelled', value: 'CANCELLED' },
       ]}
       filter={filter}
       onFilter={setFilter}
+      empty={
+        !filtering && total === 0 ? (
+          <EmptyState
+            icon="truck"
+            title="No past loads yet"
+            body="Delivered, invoiced and cancelled loads show up here."
+          />
+        ) : (
+          <EmptyState icon="truck" title="No loads match" body="Try another status or search." />
+        )
+      }
     />
   );
 }
+
+/** " · left open since 20 Jun 2026 (101 days)" for stale open work, else nothing. */
+function staleNote(raw: Record<string, unknown>): string {
+  const st = staleOf(raw);
+  return st ? ` · left open ${staleLabel(st).text}` : '';
+}
+
+type Stat = { label: string; value: string; note?: string };
 
 function LoadList({
   list,
@@ -355,88 +535,100 @@ function LoadList({
   filter,
   onFilter,
   search,
+  empty,
   onRefresh,
   refreshing,
   onEndReached,
   isFetchingMore,
+  searching,
 }: {
   list: LoadLite[];
   onOpen: (id: string | number, preview?: Record<string, unknown>) => void;
-  stats: { label: string; value: string }[];
-  filters: { label: string; value: string }[];
+  /** null while the totals are still loading; an empty array shows no tiles. */
+  stats: Stat[] | null;
+  filters: { label: string; value: string; count?: number }[];
   filter: string;
   onFilter: (v: string) => void;
-  search?: { value: string; onChange: (v: string) => void };
+  search?: { value: string; onChange: (v: string) => void; placeholder: string };
+  empty: ReactNode;
   onRefresh?: () => void;
   refreshing?: boolean;
   onEndReached?: () => void;
   isFetchingMore?: boolean;
+  /** A new search or filter is loading; the previous rows stay until it lands. */
+  searching?: boolean;
 }) {
+  const { colors } = useTheme();
   return (
     <FlashList
       data={list}
+      extraData={searching}
       keyExtractor={(l) => String(l.id)}
       onRefresh={onRefresh}
       refreshing={refreshing}
       onEndReached={onEndReached}
-      onEndReachedThreshold={0.5}
+      onEndReachedThreshold={END_REACHED_THRESHOLD}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 150 }}
       ListFooterComponent={
         isFetchingMore ? (
           <View className="py-4">
-            <ActivityIndicator />
+            <ActivityIndicator color={colors.faint} />
           </View>
         ) : null
       }
       ListHeaderComponent={
         <View className="mb-3">
-          <View className="mb-3 flex-row flex-wrap justify-between">
-            {stats.map((s) => (
-              <View
-                key={s.label}
-                className="flex-row"
-                style={{ width: '48%', marginBottom: 10 }}
-              >
-                <StatCard label={s.label} value={s.value} />
+          {stats === null ? (
+            <View className="mb-3">
+              <KpiRow>
+                {[0, 1, 2].map((i) => (
+                  <Skeleton key={i} width="100%" height={78} radius={radius.card} />
+                ))}
+              </KpiRow>
+            </View>
+          ) : (
+            stats.length > 0 && (
+              <View className="mb-3">
+                <KpiRow>
+                  {stats.map((s) => (
+                    <StatCard key={s.label} label={s.label} value={s.value} note={s.note} />
+                  ))}
+                </KpiRow>
               </View>
-            ))}
-          </View>
+            )
+          )}
           {search && (
             <View className="mb-3">
               <SearchField
                 value={search.value}
                 onChangeText={search.onChange}
-                placeholder="Search history…"
+                placeholder={search.placeholder}
               />
             </View>
           )}
           <FilterChips options={filters} value={filter} onChange={onFilter} />
         </View>
       }
-      ListEmptyComponent={
-        <EmptyState icon="truck" title="No loads" body="No loads match this filter." />
-      }
+      ListEmptyComponent={<>{empty}</>}
       renderItem={({ item }) => (
-        <View className="overflow-hidden rounded-card border border-line bg-surface">
+        <Card>
           <ListRow
             leading={<Avatar name={item.customer} size={38} />}
             title={item.loadNumber}
-            subtitle={`${item.customer} · ${item.pickupState}→${item.deliveryState}`}
+            subtitle={`${item.customer} · ${item.pickupState}→${item.deliveryState}${staleNote(item.raw)}`}
             trailing={
               <View className="items-end gap-1">
-                <Mono className="text-callout font-semibold text-fg">
-                  {formatCurrency(item.amount, { maximumFractionDigits: 0 })}
-                </Mono>
+                <Mono className="text-callout font-semibold text-fg">{wholeRand(item.amountInclVat)}</Mono>
                 <StatusPill status={item.status} />
               </View>
             }
             onPress={() => onOpen(item.id, item.raw)}
             last
           />
-        </View>
+        </Card>
       )}
-      ItemSeparatorComponent={() => <View className="h-2.5" />}
+      ItemSeparatorComponent={Separator}
     />
   );
 }

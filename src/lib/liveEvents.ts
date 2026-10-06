@@ -11,6 +11,13 @@ import { apiOrigin } from '@/lib/api/client';
 //   {type:'event', event, message, data:{title,message,link,type,actor_id,category,event_id}}
 // The consumer also answers {type:'ping'} with {type:'pong'}, and closes with
 // 4401 (bad token) or 4403 (no company).
+//
+// On connect the server sends {type:'connected', company_id}. Separately, every
+// save/delete of a screen's data (invoice, payment, expense, quote, load, trip,
+// vehicle, driver, customer, advance) pushes
+//   {type:'event', event:'data.changed', message:'', data:{topics:[...], ids:{topic:[id,...]}}}
+// to the whole company, including the person who made the change. Those carry no
+// toast text; they exist only so open screens can refetch.
 
 export interface LiveEvent {
   type: 'event';
@@ -24,6 +31,10 @@ export interface LiveEvent {
     actor_id?: number | string | null;
     category?: string | null;
     event_id?: string;
+    /** data.changed only: which kinds of record changed (sorted). */
+    topics?: string[];
+    /** data.changed only: at most 20 ids per topic. */
+    ids?: Record<string, Array<number | string>>;
   };
 }
 
@@ -44,12 +55,20 @@ export interface LiveEventsHandle {
 
 /**
  * Open the event stream and call `onEvent` for each event frame.
+ * `onConnected(isReconnect)` fires on the server's `connected` frame; on a
+ * reconnect, changes pushed while the socket was down were missed, so the
+ * caller should refetch everything once.
  * Reconnects with capped exponential backoff. Never throws.
  */
-export function connectLiveEvents(token: string, onEvent: (e: LiveEvent) => void): LiveEventsHandle {
+export function connectLiveEvents(
+  token: string,
+  onEvent: (e: LiveEvent) => void,
+  onConnected?: (isReconnect: boolean) => void,
+): LiveEventsHandle {
   let socket: WebSocket | null = null;
   let stopped = false;
   let attempt = 0;
+  let hasConnected = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
   // The same event can arrive twice (a reconnect can replay, and a push may
@@ -92,7 +111,17 @@ export function connectLiveEvents(token: string, onEvent: (e: LiveEvent) => void
       } catch {
         return;
       }
-      if (!msg || msg.type !== 'event') return; // 'connected' / 'pong'
+      if (msg?.type === 'connected') {
+        const isReconnect = hasConnected;
+        hasConnected = true;
+        try {
+          onConnected?.(isReconnect);
+        } catch {
+          /* a consumer error must not break the stream */
+        }
+        return;
+      }
+      if (!msg || msg.type !== 'event') return; // 'pong'
       const evt = msg as LiveEvent;
       const eventId = evt.data?.event_id;
       if (eventId) {

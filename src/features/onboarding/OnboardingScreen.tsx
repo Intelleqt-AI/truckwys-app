@@ -4,7 +4,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { AmbientGlow, Txt, Mono, TextField, SelectField, Button } from '@/components/ui';
+import { Txt, Mono, TextField, SelectField, Button } from '@/components/ui';
 import { ListSkeleton } from '@/components/feedback';
 import { useCompanyProfile, updateCompanyProfile } from '@/features/more/api';
 import { INDUSTRY_OPTIONS } from '@/lib/companyOptions';
@@ -86,27 +86,32 @@ export function OnboardingScreen({ navigation }: Props) {
 
   return (
     <View className="flex-1 bg-bg-deep">
-      <AmbientGlow />
-
       {/* A grid, not space-between: the step count stays centred whether or
           not Back is showing, instead of shifting as it appears. */}
       <View className="px-screen" style={{ paddingTop: insets.top + 12 }}>
         <View className="mb-2 flex-row items-center justify-between">
           <View style={{ minWidth: 64 }}>
             {step > 1 && step < 4 && (
-              <TouchableOpacity onPress={() => setStep((s) => (s - 1) as Step)} hitSlop={8}>
-                <Mono className="text-micro uppercase tracking-wide text-faint">← Back</Mono>
+              <TouchableOpacity
+                onPress={() => setStep((s) => (s - 1) as Step)}
+                hitSlop={8}
+                activeOpacity={0.6}
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                className="min-h-[36px] justify-center self-start"
+              >
+                <Mono className="text-caption text-faint">← Back</Mono>
               </TouchableOpacity>
             )}
           </View>
-          <Mono className="text-micro uppercase tracking-wide text-faint">STEP {step} OF 4</Mono>
-          {/* Kept empty (not removed) so "STEP n OF 4" stays centred against
+          <Mono className="text-caption text-faint">Step {step} of 4</Mono>
+          {/* Kept empty (not removed) so "Step n of 4" stays centred against
               the Back slot on the left. Every step's own way to skip lives
               in its body now, as a real button, instead of up here. */}
           <View style={{ minWidth: 64, alignItems: 'flex-end' }} />
         </View>
-        <View className="h-1 overflow-hidden rounded-full bg-line">
-          <View className="h-full rounded-full bg-accent" style={{ width: `${(step / 4) * 100}%` }} />
+        <View className="h-1 overflow-hidden rounded-pill bg-line">
+          <View className="h-full rounded-pill bg-btn-primary" style={{ width: `${(step / 4) * 100}%` }} />
         </View>
       </View>
 
@@ -132,7 +137,7 @@ export function OnboardingScreen({ navigation }: Props) {
                   required
                   value={companyName}
                   onChangeText={setCompanyName}
-                  placeholder="ACME Logistics (Pty) Ltd"
+                  placeholder="e.g. ACME Logistics (Pty) Ltd"
                   autoFocus
                 />
                 <SelectField label="Industry" options={INDUSTRY_OPTIONS} value={industry} onSelect={setIndustry} />
@@ -140,7 +145,7 @@ export function OnboardingScreen({ navigation }: Props) {
                   label="Phone"
                   value={phone}
                   onChangeText={setPhone}
-                  placeholder="+27 11 123 4567"
+                  placeholder="e.g. +27 11 123 4567"
                   keyboardType="phone-pad"
                 />
                 <Button label="Continue" onPress={handleStep1Submit} loading={submitting} fullWidth />
@@ -159,7 +164,7 @@ export function OnboardingScreen({ navigation }: Props) {
         {step === 2 && (
           <ImportStep
             title="Import your customers"
-            blurb="Already have them in a spreadsheet? Paste the list straight in — we work out which column is which. You can always add them later instead."
+            blurb="Already have them in a spreadsheet? Paste the list straight in. We work out which column is which. You can always add them later instead."
             entity="customers"
             onImported={(n) => {
               setCustomersImported((c) => c + n);
@@ -188,8 +193,8 @@ export function OnboardingScreen({ navigation }: Props) {
             <Txt className="mt-4 text-heading font-semibold text-fg">You&apos;re all set!</Txt>
             <Txt className="mb-8 mt-2 text-center text-callout text-muted">
               {totalImported > 0
-                ? `${summaryBits.join(' and ')} imported. Jump in and price your first load — you can add more any time from the app.`
-                : 'Your business is ready. Jump in and create your first quote — you can import your customers and fleet any time from the app.'}
+                ? `${summaryBits.join(' and ')} imported. Jump in and price your first load. You can add more any time from the app.`
+                : 'Your business is ready. Jump in and create your first quote. You can import your customers and fleet any time from the app.'}
             </Txt>
             <Button label="Go to dashboard" onPress={finish} fullWidth />
             {/* Vehicles were just offered as their own step, so pointing back

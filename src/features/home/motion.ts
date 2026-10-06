@@ -1,4 +1,4 @@
-import { FadeInDown, FadeIn, Easing } from 'react-native-reanimated';
+import { FadeInDown, FadeIn, Easing, useReducedMotion } from 'react-native-reanimated';
 import { motion, EASE_OUT } from '@/theme/tokens';
 
 // Precomputed Reanimated entering-animation instances for Home's mount-once
@@ -8,9 +8,9 @@ import { motion, EASE_OUT } from '@/theme/tokens';
 // https://docs.swmansion.com/react-native-reanimated/docs/layout-animations/entering-exiting-animations
 const ease = Easing.bezier(...EASE_OUT);
 
-// One entry per top-level Home section (command bar, hero, bento pair,
-// utilisation, quotes, bookings, actions — with one spare), in render order.
-const SECTION_COUNT = 8;
+// One entry per top-level Home section (command bar, needs you, hero, bento pair, utilisation,
+// funnel, quotes, bookings, actions, with one spare), in render order.
+const SECTION_COUNT = 10;
 export const SECTION_REVEAL = Array.from({ length: SECTION_COUNT }, (_, i) =>
   FadeInDown.duration(motion.reveal)
     .delay(i * motion.stagger)
@@ -35,3 +35,14 @@ export const HEAT_REVEAL = Array.from({ length: HEAT_DIAGONALS }, (_, i) =>
     .delay(i * 22)
     .easing(ease),
 );
+
+// Reduce Motion: no entrance and no stagger delay at all, so every section is
+// simply there. `entering={undefined}` is a no-op in Reanimated.
+export function useReveal() {
+  const reduced = useReducedMotion();
+  return {
+    section: (i: number) => (reduced ? undefined : SECTION_REVEAL[i % SECTION_REVEAL.length]),
+    row: (i: number) => (reduced ? undefined : ROW_REVEAL[i % ROW_REVEAL.length]),
+    heat: (i: number) => (reduced ? undefined : HEAT_REVEAL[i % HEAT_REVEAL.length]),
+  };
+}

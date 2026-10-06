@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, TouchableOpacity, Platform } from 'react-native';
 import Animated from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -7,11 +7,15 @@ import {
   AppHeader,
   SectionLabel,
   StatCard,
+  KpiRow,
+  InfoTip,
+  Card,
   ListRow,
   Button,
   Avatar,
   Icon,
   IconButton,
+  Label,
   Mono,
   Txt,
   StatusPill,
@@ -19,28 +23,44 @@ import {
   Fab,
 } from '@/components/ui';
 import {
-  CommandBarSkeleton,
   HeroSkeleton,
   BentoSkeleton,
-  UtilisationSkeleton,
   ListSkeleton,
   SectionError,
+  Skeleton,
 } from '@/components/feedback';
-import { useOverview } from './api';
+import {
+  STALE_MS,
+  useAutoRefreshHome,
+  useHomeFleet,
+  useHomeFreshness,
+  useHomeLoads,
+  useHomeMoney,
+  useHomeQuotes,
+  useHomeSignals,
+  useRefreshHome,
+} from './api';
 import { useUnreadCount } from '@/features/more/api';
-import { CommandBar } from './CommandBar';
+import { CommandBar, type CommandCell } from './CommandBar';
 import { HeroRevenue } from './HeroRevenue';
+import { NeedsYouCard } from './NeedsYouCard';
+import { OwedTile } from './OwedTile';
+import { QuoteFunnelCard } from './QuoteFunnelCard';
+import { StaleDataNotice } from './StaleDataNotice';
 import { UtilisationCard } from './UtilisationCard';
-import { HeaderClock } from './HeaderClock';
-import { SECTION_REVEAL, ROW_REVEAL } from './motion';
+import { buildNeeds, type NeedsRow, type NeedsTarget } from './signals';
+import { useReveal } from './motion';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
-import { useRole, visibleTabs } from '@/lib/access';
+import { canSeeInsights, useRole, visibleTabs } from '@/lib/access';
+import { CAPITAL_LAUNCHED } from '@/lib/features';
+import { laneOf, type Load } from '@/lib/ledger';
+import { quoteStage } from '@/lib/quoteStage';
 import { useTheme } from '@/theme/ThemeProvider';
 import {
   formatCurrency,
-  formatCurrencyCompact,
   formatDate,
   formatNumber,
+  formatOperationalDate,
   formatPercent,
 } from '@/lib/formatters';
 import { useManualRefresh } from '@/hooks/useManualRefresh';
@@ -50,9 +70,11 @@ import { useAuthStore } from '@/stores/authStore';
 import { mediaUrl } from '@/lib/api/client';
 import { useOnboardingGate } from '@/features/onboarding/useOnboardingGate';
 
+const wholeRand = (n: number) => formatCurrency(n, { maximumFractionDigits: 0 });
+
 // Mirrors the phrasing already used on the Billing settings screen
 // (SettingsScreen.tsx's BillingSection), so grace-period copy reads
-// identically whether it's seen here or drilled into from Settings.
+// near-identically whether it's seen here or drilled into from Settings.
 function subscriptionBannerMessage(
   subscription: Pick<
     ReturnType<typeof useSubscription>,
@@ -63,11 +85,11 @@ function subscriptionBannerMessage(
 ): string {
   if (subscription.blocked) return subscription.notice ?? subscription.detail;
   if (subscription.cancelling) {
-    return 'Cancelling — access continues until the end of the current billing period.';
+    return 'Cancelling: access continues until the end of the current billing period.';
   }
   if (subscription.status === 'grace_period') {
     if (daysRemaining !== undefined) {
-      return `Payment is overdue — ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} of grace remaining${
+      return `Payment is overdue: ${daysRemaining} day${daysRemaining === 1 ? '' : 's'} of grace remaining${
         expiresAt ? ` (until ${formatDate(expiresAt)})` : ''
       }.`;
     }
@@ -84,43 +106,143 @@ export function HomeScreen() {
   // from. See useOnboardingGate for the actual gating.
   useOnboardingGate();
 
-  // Three independent queries (see home/api.ts) instead of one fused query —
-  // each section below renders as soon as its own data lands rather than
-  // waiting on all six original endpoints behind a single skeleton.
-  const { finance, jobs, fleet } = useOverview();
-  const refetchAll = useCallback(
-    () => Promise.all([finance.refetch(), jobs.refetch(), fleet.refetch()]),
-    // refetch identity is stable per query (React Query), same as
-    // useManualRefresh's own refetch dependency below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [finance.refetch, jobs.refetch, fleet.refetch],
-  );
-  const { refreshing, onRefresh } = useManualRefresh(refetchAll);
-  const { goTab, openQuote, openLoad, createQuote, openMore, openNotifications } =
+  // Independent sources (see home/api.ts): each section renders as soon as its
+  // own data lands and fails on its own, with its own Retry. Money, loads, quotes
+  // and vehicles are the full ledgers, so every figure is a whole-list figure.
+  const money = useHomeMoney();
+  const loads = useHomeLoads();
+  const quotes = useHomeQuotes();
+  const fleet = useHomeFleet();
+  const signals = useHomeSignals();
+  const fresh = useHomeFreshness();
+  useAutoRefreshHome(fresh.updatedAt);
+
+  // One refetch per query Home shows; pull-to-refresh and the stale-data notice's
+  // "Refresh now" both use it.
+  const refreshHome = useRefreshHome();
+  const { refreshing, onRefresh } = useManualRefresh(refreshHome);
+  const [noticeRefreshing, setNoticeRefreshing] = useState(false);
+  const refreshFromNotice = useCallback(async () => {
+    setNoticeRefreshing(true);
+    try {
+      await refreshHome();
+    } finally {
+      setNoticeRefreshing(false);
+    }
+  }, [refreshHome]);
+
+  const { nav, goTab, openQuote, openLoad, openInvoice, createQuote, openMore, openNotifications } =
     useAppNavigation();
   const { data: unread } = useUnreadCount();
   const user = useAuthStore((s) => s.user);
   const { colors } = useTheme();
-  const tabs = visibleTabs(useRole());
+  const reveal = useReveal();
+  const role = useRole();
+  const tabs = visibleTabs(role);
   const hasFleet = tabs.includes('Fleet');
   const hasFinance = tabs.includes('Finance');
   const subscription = useSubscription();
   const { daysRemaining, expiresAt } = useGracePeriod(subscription.status, subscription.visible);
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
 
-  const f = finance.data?.finance;
-  // CommandBar and UtilisationCard each need one field from both jobs and
-  // fleet, so they wait on the slower of those two — still just two of the
-  // six original endpoints, not all of them.
-  const commandReady = !!jobs.data && !!fleet.data;
-  const recentQuotes = jobs.data?.quotes.slice(0, 4) ?? [];
-  const recentLoads = jobs.data?.loads.slice(0, 4) ?? [];
+  // ── Command bar cells ─────────────────────────────────────────────────────
+  const activeLoadsCell: CommandCell = loads.summary
+    ? {
+        state: 'ready',
+        value: formatNumber(loads.summary.active),
+        note: loads.summary.notClosed > 0 ? `+${formatNumber(loads.summary.notClosed)} not closed` : undefined,
+        warn: true,
+        onPress: () => goTab('Bookings', { tab: 'orders' }),
+      }
+    : loads.error
+      ? { state: 'error', onRetry: loads.retry }
+      : { state: 'loading' };
+  const fleetReadyCell: CommandCell = fleet.summary
+    ? {
+        state: 'ready',
+        value: `${fleet.summary.active}/${fleet.summary.total}`,
+        // Fleet ready still reads fine for a driver; it just isn't tappable when
+        // the Fleet tab is hidden for their role.
+        onPress: hasFleet ? () => goTab('Fleet') : undefined,
+      }
+    : fleet.error
+      ? { state: 'error', onRetry: fleet.retry }
+      : { state: 'loading' };
+
+  // ── Money tiles ───────────────────────────────────────────────────────────
+  const m = money.money;
+  const receivedPartial = money.partial.length > 0;
+  // The owed tile's note: how much of it is past due, or that none is.
+  const owedNote =
+    m && m.owed > 0.005
+      ? m.pastDue >= m.owed - 0.005
+        ? 'All past due'
+        : m.pastDue > 0
+          ? `${wholeRand(m.pastDue)} past due`
+          : 'None past due'
+      : m
+        ? 'Nothing outstanding'
+        : undefined;
+  const owedNoteTone: 'success' | 'danger' | undefined =
+    m && m.owed > 0.005 ? (m.pastDue > 0 ? 'danger' : 'success') : undefined;
+  const partialNote = receivedPartial ? ` Figures use the ${money.partial.join(', ')} that loaded.` : '';
+  const basisWord = m?.basis === 'accrual' ? 'accrual (invoiced)' : 'cash (received)';
+  const marginChange =
+    m && m.margin != null && m.marginPrior != null ? Math.round((m.margin - m.marginPrior) * 10) / 10 : null;
+  // Costs already include expenses awaiting approval, so say how much of them
+  // that is rather than offering an "if approved" figure.
+  const marginNote =
+    m == null
+      ? undefined
+      : m.margin == null
+        ? m.basis === 'accrual'
+          ? 'No revenue invoiced yet'
+          : 'No revenue received yet'
+        : m.pending > 0.005
+          ? `Includes ${wholeRand(m.pending)} awaiting approval`
+          : marginChange == null
+            ? `Excl. VAT, ${basisWord}`
+            : undefined;
+
+  // ── Needs you ─────────────────────────────────────────────────────────────
+  const signalList = signals.data;
+  const needsRows = useMemo(
+    () =>
+      signalList
+        ? buildNeeds({ signals: signalList, loads: loads.loads, vehicles: fleet.vehicles })
+        : [],
+    [signalList, loads.loads, fleet.vehicles],
+  );
+  const needsLoading =
+    (!signals.data && !signals.isError) ||
+    (!loads.loads && !loads.error) ||
+    (!fleet.vehicles && !fleet.error);
+  const needsNotes = [
+    ...(loads.error && !loads.loads
+      ? [{ text: "Loads couldn't load, so loads left open aren't shown.", onRetry: loads.retry }]
+      : []),
+    ...(fleet.error && !fleet.vehicles
+      ? [{ text: "Vehicles couldn't load, so idle trucks aren't shown.", onRetry: fleet.retry }]
+      : []),
+  ];
+  const canOpenTarget = (t: NeedsTarget) => {
+    if (t.kind === 'invoice') return hasFinance;
+    if (t.kind === 'tab') return tabs.includes(t.tab);
+    return t.name === 'Capital' ? CAPITAL_LAUNCHED && hasFinance : canSeeInsights(role);
+  };
+  const openTarget = (row: NeedsRow) => {
+    const t = row.target;
+    if (!t) return;
+    if (t.kind === 'invoice') openInvoice(t.id);
+    else if (t.kind === 'tab') goTab(t.tab as 'Bookings', t.params as never);
+    else nav.navigate(t.name);
+  };
 
   return (
     <View className="flex-1">
       <Screen onRefresh={onRefresh} refreshing={refreshing}>
         <AppHeader
-          title="Overview"
+          title="Home"
           live
           right={
             <View className="flex-row items-center gap-1">
@@ -129,15 +251,15 @@ export function HomeScreen() {
                   name="bell"
                   size={23}
                   color={colors.fg}
-                  accessibilityLabel="Notifications"
+                  accessibilityLabel={unread && unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
                   onPress={openNotifications}
                 />
                 {!!unread && unread > 0 && (
                   <View
                     className="absolute right-0.5 top-0 min-w-[16px] items-center justify-center rounded-pill px-1"
-                    style={{ height: 16, backgroundColor: '#FF4949' }}
+                    style={{ height: 16, backgroundColor: colors.dangerDot }}
                   >
-                    <Mono style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>
+                    <Mono className="text-nano font-semibold" style={{ color: colors.btnDangerFg }}>
                       {unread > 9 ? '9+' : unread}
                     </Mono>
                   </View>
@@ -145,7 +267,7 @@ export function HomeScreen() {
               </View>
               <TouchableOpacity
                 accessibilityRole="button"
-                accessibilityLabel="Profile, settings & more"
+                accessibilityLabel="Profile, settings and more"
                 hitSlop={8}
                 activeOpacity={0.7}
                 onPress={openMore}
@@ -162,13 +284,10 @@ export function HomeScreen() {
           }
         />
 
-        {/* Date on one line, ticking HH:mm:ss SAST on the next, under the
-            title rather than above it as an eyebrow — date+seconds+timezone
-            together don't fit one line, and the screen's own name should be
-            the first thing read, not a timestamp. Always South Africa's
-            time, like web's live clock — never the device's own timezone. */}
+        {/* Today's date under the title, like web's Home header. Always South
+            Africa's date — never the device's own timezone. No live clock. */}
         <View className="-mt-2 mb-5">
-          <HeaderClock />
+          <Label>{formatOperationalDate(new Date())}</Label>
         </View>
 
         {subscription.visible && (
@@ -181,211 +300,254 @@ export function HomeScreen() {
           </View>
         )}
 
-        {/* Command bar — live clock + the three operational stats */}
-        <Animated.View entering={SECTION_REVEAL[0]}>
-          {commandReady ? (
-            <CommandBar
-              data={{
-                activeLoads: jobs.data!.activeLoads,
-                activeVehicles: fleet.data!.activeVehicles,
-                totalVehicles: fleet.data!.totalVehicles,
-                advancesPending: fleet.data!.advancesPending,
-              }}
-              hasFleet={hasFleet}
-              goTab={goTab}
-              openMore={openMore}
-            />
-          ) : (jobs.isError && !jobs.data) || (fleet.isError && !fleet.data) ? (
-            <SectionError message="Couldn't load your stats." onRetry={refetchAll} />
+        {/* Silent while the figures are current. Tracks the OLDEST figure on
+            screen, and "Refresh now" refetches everything Home shows. An
+            automatic refresh in progress isn't news; only a manual one is shown. */}
+        {(noticeRefreshing || !fresh.fetching) && (
+          <StaleDataNotice
+            className="mb-5"
+            updatedAt={fresh.updatedAt}
+            refreshFailed={fresh.refreshFailed}
+            refreshing={noticeRefreshing}
+            onRetry={refreshFromNotice}
+            staleAfterMs={STALE_MS + 60_000}
+          />
+        )}
+
+        {/* Command bar: active loads and fleet ready */}
+        <Animated.View entering={reveal.section(0)}>
+          <CommandBar activeLoads={activeLoadsCell} fleetReady={fleetReadyCell} />
+        </Animated.View>
+
+        {/* Needs you, first as on the web: overdue invoices, loads left open, idle
+            trucks, other signals */}
+        <Animated.View entering={reveal.section(1)}>
+          {signals.isError && !signals.data ? (
+            <SectionError message="Couldn't load what needs you." onRetry={() => void signals.refetch()} />
+          ) : needsLoading ? (
+            <View className="mb-5">
+              <Skeleton height={120} radius={12} />
+            </View>
           ) : (
-            <CommandBarSkeleton />
+            <NeedsYouCard
+              rows={needsRows}
+              canOpen={(row) => !!row.target && canOpenTarget(row.target)}
+              onOpen={openTarget}
+              notes={needsNotes}
+            />
           )}
         </Animated.View>
 
-        {/* Hero — total revenue + the revenue-vs-fuel sparkline */}
-        <Animated.View entering={SECTION_REVEAL[1]}>
-          {f ? (
+        {/* Hero: revenue received, last 12 months, + the revenue-vs-costs line */}
+        <Animated.View entering={reveal.section(2)}>
+          {m ? (
             <View className="mb-5">
               <HeroRevenue
-                finance={f}
+                money={m}
                 onPress={hasFinance ? () => goTab('Finance', { tab: 'reports' }) : undefined}
               />
             </View>
-          ) : finance.isError ? (
-            <SectionError message="Couldn't load revenue." onRetry={() => finance.refetch()} />
+          ) : money.error ? (
+            <SectionError
+              message="Couldn't load revenue, owed and margin. Invoices, payments or expenses didn't load."
+              onRetry={money.retry}
+            />
           ) : (
             <HeroSkeleton />
           )}
         </Animated.View>
 
-        {/* Bento pair — net margin / outstanding */}
-        <Animated.View entering={SECTION_REVEAL[2]}>
-          {f ? (
-            <View className="mb-5 flex-row gap-3">
-              <StatCard
-                compact
-                label="Net margin"
-                value={formatPercent(f.netMarginPct)}
-                delta={
-                  f.marginChangePts
-                    ? `${f.marginChangePts > 0 ? '+' : ''}${formatNumber(f.marginChangePts, { maximumFractionDigits: 1 })} pts`
-                    : undefined
-                }
-                deltaTone={f.marginChangePts >= 0 ? 'up' : 'down'}
-              />
-              <StatCard
-                compact
-                label="Outstanding"
-                value={formatCurrencyCompact(f.outstanding)}
-                // Whole days, like web's `Math.round(financeData.dso)` — the
-                // API sends this unrounded too, so without rounding it read
-                // "DSO 89.9d" instead of a clean day count.
-                sub={f.dso ? `DSO ${formatNumber(Math.round(f.dso))}d` : undefined}
-              />
+        {/* Bento pair: owed to you (the page's one emphasis tile) / net margin */}
+        <Animated.View entering={reveal.section(3)}>
+          {m ? (
+            <View className="mb-5">
+              <KpiRow>
+                <OwedTile
+                  value={wholeRand(m.owed)}
+                  owed={m.owed}
+                  pastDue={m.pastDue}
+                  note={owedNote}
+                  noteTone={owedNoteTone}
+                  tip={`Owed is the open balance on sent invoices, including VAT.${partialNote}`}
+                />
+                <StatCard
+                  compact
+                  label="Net margin, 12 months"
+                  aside={
+                    <InfoTip
+                      text={`Margin is revenue excl. VAT (${basisWord}) less every expense that is not rejected, approved or awaiting approval, excl. VAT, as a share of that revenue. The same figure as the profit and loss report on that basis. Compared with the 12 months before.${partialNote}`}
+                      label="About net margin"
+                    />
+                  }
+                  value={m.margin == null ? 'n/a' : formatPercent(m.margin)}
+                  delta={
+                    marginNote == null && marginChange != null
+                      ? `${marginChange > 0 ? '+' : ''}${formatNumber(marginChange, { maximumFractionDigits: 1 })} pts vs prior 12 months`
+                      : undefined
+                  }
+                  deltaTone={(marginChange ?? 0) >= 0 ? 'up' : 'down'}
+                  sub={marginNote}
+                />
+              </KpiRow>
             </View>
-          ) : (
+          ) : money.error ? null : (
             <BentoSkeleton />
           )}
         </Animated.View>
 
-        {/* Fleet utilisation heatmap */}
-        <Animated.View entering={SECTION_REVEAL[3]}>
-          {commandReady ? (
+        {/* Loads booked, last 28 days */}
+        <Animated.View entering={reveal.section(4)}>
+          {loads.summary && fleet.summary ? (
             <UtilisationCard
-              activeVehicles={fleet.data!.activeVehicles}
-              totalVehicles={fleet.data!.totalVehicles}
-              activeLoads={jobs.data!.activeLoads}
-              heat={jobs.data!.heat}
+              booked28={loads.summary.booked28}
+              activeLoads={loads.summary.active}
+              notClosed={loads.summary.notClosed}
+              heat={loads.summary.heat}
+              availableVehicles={fleet.summary.available}
+              totalVehicles={fleet.summary.total}
             />
-          ) : (jobs.isError && !jobs.data) || (fleet.isError && !fleet.data) ? (
-            <SectionError message="Couldn't load fleet utilisation." onRetry={refetchAll} />
+          ) : (loads.error && !loads.summary) || (fleet.error && !fleet.summary) ? (
+            <SectionError
+              message="Couldn't load loads and vehicles."
+              onRetry={() => {
+                loads.retry();
+                fleet.retry();
+              }}
+            />
           ) : (
-            <UtilisationSkeleton />
+            <View className="mb-5">
+              <Skeleton height={160} radius={12} />
+            </View>
+          )}
+        </Animated.View>
+
+        {/* Quote pipeline: where quotes stand */}
+        <Animated.View entering={reveal.section(5)}>
+          {quotes.funnel ? (
+            <QuoteFunnelCard
+              funnel={quotes.funnel}
+              total={quotes.total}
+              onViewAll={() => goTab('Bookings', { tab: 'quotes' })}
+              onNewQuote={() => createQuote()}
+            />
+          ) : quotes.error ? (
+            <SectionError message="Couldn't load the quote pipeline." onRetry={quotes.retry} />
+          ) : (
+            <View className="mb-5">
+              <Skeleton height={200} radius={12} />
+            </View>
           )}
         </Animated.View>
 
         {/* Recent quotes */}
-        <Animated.View entering={SECTION_REVEAL[4]}>
+        <Animated.View entering={reveal.section(6)}>
           <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'quotes' })}>
             Recent quotes
           </SectionLabel>
-          {!jobs.data && jobs.isError ? (
-            <SectionError message="Couldn't load recent quotes." onRetry={() => jobs.refetch()} />
-          ) : !jobs.data ? (
+          {!quotes.data && quotes.error ? (
+            <SectionError message="Couldn't load recent quotes." onRetry={quotes.retry} />
+          ) : !quotes.data ? (
             <View className="mb-5">
               <ListSkeleton rows={3} />
             </View>
           ) : (
-            <View className="mb-5 overflow-hidden rounded-card border border-line bg-surface">
-              {recentQuotes.length === 0 ? (
+            <Card className="mb-5">
+              {quotes.recent.length === 0 ? (
                 <Txt className="p-4 text-center text-caption text-faint">No quotes yet</Txt>
               ) : (
-                recentQuotes.map((q, i) => (
-                  <Animated.View key={q.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                quotes.recent.map((q, i) => (
+                  <Animated.View key={q.id} entering={reveal.row(i)}>
                     <ListRow
                       leading={<Avatar name={q.customer} size={38} />}
-                      title={q.customer}
-                      subtitle={[q.origin, ...q.stopLabels, q.destination].join(' → ')}
+                      title={q.code}
+                      subtitle={q.customer}
                       trailing={
                         <View className="items-end gap-1">
                           <Mono className="text-callout font-semibold text-fg">
-                            {formatCurrency(q.amount, { maximumFractionDigits: 0 })}
+                            {formatCurrency(q.amountInclVat, { maximumFractionDigits: 0 })}
                           </Mono>
                           <View>
-                            <StatusPill status={q.status} />
+                            {/* The stage, not the raw status: a lapsed Draft or Sent quote
+                                reads Expired, a converted one Booked. */}
+                            <StatusPill status={quoteStage(q.raw) ?? q.status} />
                           </View>
                         </View>
                       }
                       onPress={() => openQuote(q.id, q.raw)}
-                      last={i === recentQuotes.length - 1}
+                      last={i === quotes.recent.length - 1}
                     />
                   </Animated.View>
                 ))
               )}
-            </View>
+            </Card>
           )}
         </Animated.View>
 
         {/* Recent bookings */}
-        <Animated.View entering={SECTION_REVEAL[5]}>
+        <Animated.View entering={reveal.section(7)}>
           <SectionLabel action="View all" onAction={() => goTab('Bookings', { tab: 'orders' })}>
             Recent bookings
           </SectionLabel>
-          {!jobs.data && jobs.isError ? (
-            <SectionError message="Couldn't load recent bookings." onRetry={() => jobs.refetch()} />
-          ) : !jobs.data ? (
+          {!loads.data && loads.error ? (
+            <SectionError message="Couldn't load recent bookings." onRetry={loads.retry} />
+          ) : !loads.data ? (
             <View className="mb-5">
               <ListSkeleton rows={3} />
             </View>
           ) : (
-            <View className="mb-5 overflow-hidden rounded-card border border-line bg-surface">
-              {recentLoads.length === 0 ? (
+            <Card className="mb-5">
+              {loads.recent.length === 0 ? (
                 <Txt className="p-4 text-center text-caption text-faint">No bookings yet</Txt>
               ) : (
-                recentLoads.map((l, i) => (
-                  <Animated.View key={l.id} entering={ROW_REVEAL[i % ROW_REVEAL.length]}>
+                loads.recent.map((l, i) => (
+                  <Animated.View key={l.id} entering={reveal.row(i)}>
                     <ListRow
                       leading={<Icon name="truck" size={22} color={colors.muted} />}
                       title={l.loadNumber}
-                      subtitle={l.customer}
-                      trailing={
-                        <View className="items-end gap-1">
-                          <Mono className="text-caption text-muted">
-                            {l.pickupState} → {l.deliveryState}
-                          </Mono>
-                          <StatusPill status={l.status} />
-                        </View>
-                      }
+                      // City names from the load's own city fields; the province codes
+                      // normalizeLoad reads first are not shown.
+                      subtitle={[l.customer, laneOf(l.raw as unknown as Load)].filter(Boolean).join(' · ')}
+                      trailing={<StatusPill status={l.status} />}
                       onPress={() => openLoad(l.id, l.raw)}
-                      last={i === recentLoads.length - 1}
+                      last={i === loads.recent.length - 1}
                     />
                   </Animated.View>
                 ))
               )}
-            </View>
+            </Card>
           )}
         </Animated.View>
 
-        {/* Quick actions */}
-        <Animated.View entering={SECTION_REVEAL[6]}>
+        {/* Quick actions — the web's order: Add expense, Create invoice, then New
+            quote as the primary. Finance shortcuts only exist when the role
+            actually has that tab: navigating to a screen the navigator never
+            registered is a no-op. */}
+        <Animated.View entering={reveal.section(8)}>
           <SectionLabel>Quick actions</SectionLabel>
-          <View className="flex-row flex-wrap gap-2.5">
-            <View className="flex-1" style={{ minWidth: '46%' }}>
-              <Button label="New quote" icon="plus" onPress={() => createQuote()} fullWidth />
-            </View>
-            {/* Finance shortcuts only exist when the role actually has that tab —
-                navigating to a screen the navigator never registered is a no-op. */}
+          <View className="gap-2.5">
             {hasFinance && (
-              <>
-                <View className="flex-1" style={{ minWidth: '46%' }}>
-                  <Button
-                    label="Invoices"
-                    icon="receipt"
-                    variant="secondary"
-                    onPress={() => goTab('Finance', { tab: 'invoices' })}
-                    fullWidth
-                  />
-                </View>
-                <View className="flex-1" style={{ minWidth: '46%' }}>
+              <View className="flex-row gap-2.5">
+                <View className="flex-1">
                   <Button
                     label="Add expense"
-                    icon="dollar"
+                    icon="banknote"
                     variant="secondary"
-                    onPress={() => goTab('Finance', { tab: 'expenses' })}
+                    onPress={() => nav.navigate('AddExpense')}
                     fullWidth
                   />
                 </View>
-                <View className="flex-1" style={{ minWidth: '46%' }}>
+                <View className="flex-1">
                   <Button
-                    label="Reports"
-                    icon="chart"
+                    label="Create invoice"
+                    icon="receipt"
                     variant="secondary"
-                    onPress={() => goTab('Finance', { tab: 'reports' })}
+                    onPress={() => nav.navigate('CreateInvoice')}
                     fullWidth
                   />
                 </View>
-              </>
+              </View>
             )}
+            <Button label="New quote" icon="plus" onPress={() => createQuote()} fullWidth />
           </View>
         </Animated.View>
       </Screen>

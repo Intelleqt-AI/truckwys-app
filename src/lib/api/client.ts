@@ -44,6 +44,47 @@ export const api = axios.create({
   timeout: 30000,
 });
 
+// Last-resort net under every screen's own rounding: plain JS float
+// arithmetic (unit conversions, subtractions, sums — tons*1000,
+// suggestedPrice-total, subtotal+vat, …) routinely lands on a value like
+// 5678.9100000000035 that carries 15-17 significant digits of pure binary
+// rounding noise. The backend's DecimalField columns have no server-side
+// rounding, so that noise blows past max_digits and the whole request is
+// rejected with "Ensure that there are no more than N digits in total" —
+// even though every digit that actually matters is correct.
+//
+// toPrecision(15) strips exactly that noise and nothing else: the widest
+// column on the backend (BillingTransaction/APICallLog) is 14 digits, so 15
+// significant digits is more precision than any column could ever validate
+// against — this can only remove binary-representation error, never a digit
+// a screen's own rounding actually intended. Integers are left untouched
+// (they have no fractional noise to strip, and toPrecision on a large
+// integer can flip to exponential notation, which JSON.stringify would then
+// serialize as a string). Screens should still round to the right number of
+// decimal places themselves (see round2/roundTo in lib/formatters) — this
+// only catches what they missed.
+function stripFloatNoise(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripFloatNoise);
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && !Number.isInteger(value)
+      ? Number(value.toPrecision(15))
+      : value;
+  }
+  if (value && typeof value === 'object' && value.constructor === Object) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = stripFloatNoise(v);
+    return out;
+  }
+  return value; // strings, Date, FormData, File/Blob, null, etc. — untouched
+}
+
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (config.data && typeof config.data === 'object' && config.data.constructor !== FormData) {
+    config.data = stripFloatNoise(config.data);
+  }
+  return config;
+});
+
 // Token is held in memory for synchronous injection; hydrated from SecureStore
 // at boot and updated on login/logout.
 let authToken: string | null = null;
@@ -62,6 +103,13 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (authToken) config.headers.Authorization = `Token ${authToken}`;
   return config;
 });
+
+// "total_amount" -> "Total amount". Only used for DRF's per-field error keys
+// above, never shown anywhere else.
+function humanizeFieldName(key: string): string {
+  const words = key.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 api.interceptors.response.use(
   (res) => res,
@@ -83,8 +131,18 @@ api.interceptors.response.use(
       serverMsg = data.trim().startsWith('<') ? undefined : data;
     } else if (data && typeof data === 'object') {
       const obj = data as Record<string, unknown>;
-      const first = obj.error ?? obj.detail ?? obj[Object.keys(obj)[0] ?? ''];
-      serverMsg = Array.isArray(first) ? String(first[0]) : (first as string | undefined);
+      const key =
+        obj.error != null ? 'error' : obj.detail != null ? 'detail' : (Object.keys(obj)[0] ?? '');
+      const first = obj[key];
+      const msg = Array.isArray(first) ? String(first[0]) : (first as string | undefined);
+      // A per-field error (e.g. {total_amount: ["Ensure that there are no
+      // more than 10 digits in total."]}) otherwise shows just the message
+      // with no field name — the toast can't say which number was wrong.
+      // Prefix it, e.g. "Total amount: Ensure that there are no more than
+      // 10 digits in total." {error}/{detail}/{non_field_errors} are already
+      // meant to stand alone, so those stay unprefixed.
+      const isFieldError = key !== 'error' && key !== 'detail' && key !== 'non_field_errors' && key !== '';
+      serverMsg = isFieldError && msg ? `${humanizeFieldName(key)}: ${msg}` : msg;
     }
 
     const err = new Error(
@@ -94,6 +152,12 @@ api.interceptors.response.use(
           : 'Network error — check your connection'),
     );
     (err as Error & { status?: number }).status = error.response?.status;
+    // A 429 carries Retry-After (seconds). Callers that rate-limit themselves
+    // (the market price check's cooldown) read it instead of guessing.
+    const retryAfterHeader = error.response?.headers?.['retry-after'];
+    const retryAfter = Number(retryAfterHeader);
+    (err as Error & { retryAfter?: number }).retryAfter =
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined;
     // Keep the raw body too — some callers need the machine-readable code, not
     // just the message (e.g. `cross_border_not_allowed` from route/calculate/).
     (err as Error & { data?: unknown }).data = data;

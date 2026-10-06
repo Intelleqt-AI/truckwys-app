@@ -18,7 +18,7 @@ export const DEMO_QUOTA_MESSAGE =
   'You\'ve used this demo session\'s one free quote. Log out and log back in (or click "View Demo" again) to start a fresh session.';
 
 /** Header badge, mirroring web's OSLayout.tsx pill. */
-export const DEMO_BADGE_LABEL = 'DEMO';
+export const DEMO_BADGE_LABEL = 'Demo';
 export const DEMO_BADGE_DETAIL =
   'Shared public demo account — actions like emailing customers are simulated, not real.';
 

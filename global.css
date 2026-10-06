@@ -3,48 +3,106 @@
 @tailwind utilities;
 
 /* ============================================================
-   Truckwys theme variables. Dark is the default (:root); the OS
-   light preference swaps the themeable roles. Values verbatim
-   from the design system tokens/colors.css.
+   Truckwys theme variables ("v3", mirrors the web's theme.css).
+   ThemeProvider injects the live values at runtime from
+   src/theme/tokens.ts; this block is only the pre-hydration
+   fallback, so keep it in step. Dark is the default (:root); the
+   OS light preference swaps the roles.
    ============================================================ */
 @layer base {
   :root {
-    --bg-deep: #030303;
-    --bg-surface: #0a0a0a;
-    --bg-surface-hover: #121212;
-    --bg-elevated: #141414;
+    --bg-deep: #0b0c0e;
+    --bg-surface: #131518;
+    --bg-surface-hover: #181b1f;
+    --bg-raised: #1c1f24;
+    --bg-elevated: #1c1f24;
+    --bg-input: #0f1114;
+    --backdrop: rgba(0, 0, 0, 0.64);
 
-    --border-subtle: #1f1f1f;
-    --border-active: #333333;
-    --border-row: #141414;
+    --border-subtle: #23262c;
+    --border-active: #2c3037;
+    --border-row: #1d2025;
+    --border-strong: #3a3f47;
+    --border-control: #6e7682;
 
-    --accent-primary: #4d9eff;
-    --accent-dim: #1a3a6b;
+    --accent-primary: #6aa6ff;
+    --accent-dim: rgba(106, 166, 255, 0.1);
+    --link: #7db2ff;
 
-    --text-primary: #ededed;
-    --text-secondary: #888888;
-    --text-tertiary: #444444;
-    --text-on-accent: #030303;
+    --text-primary: #edeff2;
+    --text-secondary: #b4bac3;
+    --text-tertiary: #9ba1ab;
+    --text-disabled: #555b64;
+    --text-on-accent: #0b0c0e;
+
+    --btn-primary-bg: #edeff2;
+    --btn-primary-fg: #0b0c0e;
+    --btn-danger-bg: #d93036;
+    --btn-danger-fg: #ffffff;
+
+    --status-success-text: #4cc38a;
+    --status-success-dot: #3db87e;
+    --status-success-bg: rgba(76, 195, 138, 0.1);
+    --status-warning-text: #edb14f;
+    --status-warning-dot: #e09a2d;
+    --status-warning-bg: rgba(237, 177, 79, 0.1);
+    --status-danger-text: #f47a7a;
+    --status-danger-dot: #e5534b;
+    --status-danger-bg: rgba(244, 122, 122, 0.1);
+    --status-info-text: #7db2ff;
+    --status-info-dot: #6aa6ff;
+    --status-info-bg: rgba(106, 166, 255, 0.1);
+    --status-neutral-text: #b4bac3;
+    --status-neutral-dot: #6b717b;
+    --status-neutral-bg: #1c1f24;
   }
 
   @media (prefers-color-scheme: light) {
     :root {
       --bg-deep: #f3f4f6;
       --bg-surface: #ffffff;
-      --bg-surface-hover: #f9fafb;
+      --bg-surface-hover: #f8f9fa;
+      --bg-raised: #eef0f3;
       --bg-elevated: #ffffff;
+      --bg-input: #ffffff;
+      --backdrop: rgba(14, 17, 22, 0.4);
 
-      --border-subtle: #e5e7eb;
-      --border-active: #d1d5db;
-      --border-row: #e5e7eb;
+      --border-subtle: #e4e6ea;
+      --border-active: #d8dbe0;
+      --border-row: #eef0f2;
+      --border-strong: #c3c7ce;
+      --border-control: #848b96;
 
       --accent-primary: #2563eb;
-      --accent-dim: #eff6ff;
+      --accent-dim: #eff5ff;
+      --link: #1d4ed8;
 
-      --text-primary: #111827;
-      --text-secondary: #374151;
-      --text-tertiary: #6b7280;
+      --text-primary: #0e1116;
+      --text-secondary: #434a55;
+      --text-tertiary: #636a75;
+      --text-disabled: #a3a8b1;
       --text-on-accent: #ffffff;
+
+      --btn-primary-bg: #0e1116;
+      --btn-primary-fg: #ffffff;
+      --btn-danger-bg: #c81e1e;
+      --btn-danger-fg: #ffffff;
+
+      --status-success-text: #137a3a;
+      --status-success-dot: #15803d;
+      --status-success-bg: #ecfdf3;
+      --status-warning-text: #a84c08;
+      --status-warning-dot: #ba7607;
+      --status-warning-bg: #fff7e6;
+      --status-danger-text: #c81e1e;
+      --status-danger-dot: #dc2626;
+      --status-danger-bg: #fef2f2;
+      --status-info-text: #1d4ed8;
+      --status-info-dot: #2563eb;
+      --status-info-bg: #eff5ff;
+      --status-neutral-text: #434a55;
+      --status-neutral-dot: #7d848f;
+      --status-neutral-bg: #eef0f3;
     }
   }
 }

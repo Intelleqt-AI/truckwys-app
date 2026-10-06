@@ -1,4 +1,5 @@
 import { View } from 'react-native';
+import { CAPITAL_LAUNCHED } from '@/lib/features';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SheetScreen, Group, ListRow, Badge, Mono, EmptyState, type Tone } from '@/components/ui';
 import { ListSkeleton, ErrorState } from '@/components/feedback';
@@ -20,7 +21,7 @@ export function RiskScoresScreen({ navigation }: Props) {
   const { data, isLoading, isError, refetch } = useRiskScores();
 
   return (
-    <SheetScreen eyebrow="Underwriting" title="Risk scores" onBack={() => navigation.goBack()}>
+    <SheetScreen title="Risk scores" onBack={() => navigation.goBack()}>
       {isLoading ? (
         <ListSkeleton />
       ) : isError ? (
@@ -33,7 +34,9 @@ export function RiskScoresScreen({ navigation }: Props) {
             <ListRow
               key={r.id || i}
               title={r.customer}
-              subtitle={r.fee ? `Fast Pay fee ${formatPercent(r.fee, 2)}` : undefined}
+              // No Fast Pay fee while Fast Pay is not live: it would advertise a rate for a
+              // product nobody can use yet.
+              subtitle={CAPITAL_LAUNCHED && r.fee ? `Fast Pay fee ${formatPercent(r.fee, 2)}` : undefined}
               trailing={
                 <View className="items-end gap-1">
                   {r.score ? <Mono className="text-caption text-muted">{r.score}/100</Mono> : null}

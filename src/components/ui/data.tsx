@@ -1,19 +1,13 @@
-import { Fragment, useEffect, type ReactNode } from 'react';
-import { View, Pressable, ActivityIndicator } from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
+import { Children, Fragment, type ReactNode } from 'react';
+import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Txt, Mono, Label } from './Text';
 import { Card } from './primitives';
 import { Icon, type IconName } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues, motion } from '@/theme/tokens';
+import { motion } from '@/theme/tokens';
 
-// ── StatCard / KPI tile: mono caps label + big mono value + delta ──────────
+// ── StatCard / KPI tile: muted label + big tabular value + delta/note ──────
 /**
  * The root `Card` is `flex-1` (`flex: 1 1 0%`), so this MUST sit directly
  * inside a `flex-row` parent — that's where `flexBasis: 0` means "equal
@@ -33,6 +27,11 @@ export function StatCard({
   delta,
   deltaTone = 'neutral',
   sub,
+  note,
+  tone,
+  emphasis = false,
+  onPress,
+  aside,
   compact = false,
 }: {
   label: string;
@@ -40,30 +39,102 @@ export function StatCard({
   delta?: string;
   deltaTone?: 'up' | 'down' | 'neutral';
   sub?: string;
+  /** Web's single note line under the figure; `tone` colours it, as on the web tile. */
+  note?: string;
+  tone?: KpiTone;
+  /**
+   * The page's one emphasis tile (web `--emphasis-fg`): a plain card, only the
+   * figure is drawn in accent. Use it once per screen.
+   */
+  emphasis?: boolean;
+  /** Makes the whole tile a button, e.g. a tile that applies a list filter. */
+  onPress?: () => void;
+  /** Trailing slot on the label row — an `InfoTip`. */
+  aside?: ReactNode;
   // Smaller padding/value size — opt-in so the 17+ other screens using this
   // component are unaffected. Home's bento pair is the only current user.
   compact?: boolean;
 }) {
+  const { colors } = useTheme();
   const deltaColor =
-    deltaTone === 'up' ? statusHues.success : deltaTone === 'down' ? statusHues.danger : undefined;
-  return (
-    <Card className={`flex-1 ${compact ? 'p-3' : 'p-4'}`}>
-      <Label className="text-faint">{label}</Label>
+    deltaTone === 'up' ? colors.success : deltaTone === 'down' ? colors.danger : undefined;
+  const noteColor = tone ? colors[tone] : undefined;
+  const body = (
+    <>
+      <View className="flex-row items-center justify-between gap-1">
+        <Label className="shrink text-faint" numberOfLines={1}>
+          {label}
+        </Label>
+        {aside}
+      </View>
+      {/* One line, shrunk to fit the tile: a long amount ("R 1 234 567") scales
+          down instead of ending in an ellipsis, which would hide the digits
+          that matter most. */}
       <Mono
-        className={`${compact ? 'mt-1.5' : 'mt-2'} text-fg tracking-display`}
-        style={{ fontSize: compact ? 20 : 24, fontWeight: '600' }}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.55}
+        className={`${compact ? 'mt-1.5' : 'mt-2'} tracking-display ${emphasis ? 'text-accent' : 'text-fg'}`}
+        style={{ fontSize: compact ? 20 : 24, lineHeight: compact ? 26 : 30, fontWeight: '600' }}
       >
         {value}
       </Mono>
       <View className="mt-1 flex-row items-center gap-2">
         {delta && (
-          <Mono className="text-micro" style={deltaColor ? { color: deltaColor } : undefined}>
+          <Mono className="text-caption" style={deltaColor ? { color: deltaColor } : undefined}>
             {delta}
           </Mono>
         )}
-        {sub && <Mono className="text-micro text-faint">{sub}</Mono>}
+        {sub && <Mono className="text-caption text-faint">{sub}</Mono>}
+        {note && (
+          <Mono
+            className={`shrink text-caption ${noteColor ? '' : 'text-faint'}`}
+            style={noteColor ? { color: noteColor } : undefined}
+          >
+            {note}
+          </Mono>
+        )}
       </View>
-    </Card>
+    </>
+  );
+  const pad = compact ? 'p-3' : 'p-4';
+
+  if (!onPress) return <Card className={`flex-1 ${pad}`}>{body}</Card>;
+
+  // The Card's `flex-1` collapses its height inside a column wrapper (see the
+  // note above), so the pressable variant moves the flex to the wrapper and lets
+  // the Card `grow` to the row height instead.
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, ${value}`}
+      className="flex-1"
+    >
+      <Card className={`grow ${pad}`}>{body}</Card>
+    </TouchableOpacity>
+  );
+}
+
+export type KpiTone = 'success' | 'warning' | 'danger';
+export { StatCard as KpiTile };
+
+/**
+ * Two-column grid of `StatCard`/`KpiTile`s. An odd last tile spans the full row,
+ * as on the web's phone layout. Each cell is its own `flex-row` so the tile's
+ * `flex-1` still means "fill the width" (see the StatCard note).
+ */
+export function KpiRow({ children }: { children: ReactNode }) {
+  const cells = Children.toArray(children).filter(Boolean);
+  return (
+    <View className="flex-row flex-wrap gap-3">
+      {cells.map((c, i) => (
+        <View key={i} className="flex-row" style={{ flexBasis: '47%', flexGrow: 1 }}>
+          {c}
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -72,6 +143,7 @@ export function ListRow({
   title,
   subtitle,
   subtitleIcon,
+  detail,
   leading,
   trailing,
   onPress,
@@ -81,6 +153,8 @@ export function ListRow({
   title: string;
   subtitle?: string;
   subtitleIcon?: IconName;
+  /** A third line under the subtitle, for a row that says what it is doing. */
+  detail?: ReactNode;
   leading?: ReactNode;
   trailing?: ReactNode;
   onPress?: () => void;
@@ -91,12 +165,13 @@ export function ListRow({
 }) {
   const { colors } = useTheme();
   return (
-    <Pressable
+    <TouchableOpacity
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={!onPress}
+      activeOpacity={0.7}
       accessibilityRole={onPress ? 'button' : undefined}
-      className={`min-h-[56px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+      className={`min-h-[56px] flex-row items-center gap-3 px-4 py-3 ${
         last ? '' : 'border-b border-line-row'
       }`}
     >
@@ -113,9 +188,10 @@ export function ListRow({
             </Txt>
           </View>
         )}
+        {detail}
       </View>
       {trailing ?? (onPress && <Icon name="chevronRight" size={16} color={colors.faint} />)}
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 
@@ -140,15 +216,16 @@ export function Group({
         <View className="mb-2.5 flex-row items-center justify-between">
           <Label>{label}</Label>
           {action && (
-            <Pressable
-              hitSlop={8}
+            <TouchableOpacity
+              hitSlop={{ top: 14, bottom: 14, left: 10, right: 10 }}
               onPress={onAction}
+              activeOpacity={0.6}
               accessibilityRole="button"
               className="flex-row items-center gap-0.5"
             >
-              <Mono className="text-micro tracking-label uppercase text-accent">{action}</Mono>
-              <Icon name="chevronRight" size={12} color={colors.accent} />
-            </Pressable>
+              <Mono className="text-sub font-medium text-link">{action}</Mono>
+              <Icon name="chevronRight" size={12} color={colors.link} />
+            </TouchableOpacity>
           )}
         </View>
       )}
@@ -190,6 +267,9 @@ export function DetailRow({
   valueColor,
   boldValue,
   last,
+  hintColor,
+  onEdit,
+  editLabel,
 }: {
   label: string;
   /** Second line under the label — a rate basis, a reference, a breakdown. */
@@ -200,8 +280,15 @@ export function DetailRow({
   /** Bumps the value from font-medium to font-semibold, e.g. for a price. */
   boldValue?: boolean;
   last?: boolean;
+  /** Colour for the hint line, e.g. danger for "12 days late". */
+  hintColor?: string;
+  /** Shows a pencil beside the label that calls this (e.g. change a due date). */
+  onEdit?: () => void;
+  /** Accessibility label for the pencil, e.g. "Change due date". */
+  editLabel?: string;
 }) {
   const ValueCmp = mono ? Mono : Txt;
+  const { colors } = useTheme();
   return (
     <View
       className={`flex-row items-center justify-between gap-4 px-3.5 py-3 ${
@@ -209,11 +296,29 @@ export function DetailRow({
       }`}
     >
       <View className="shrink">
-        <Txt className="text-callout text-muted" numberOfLines={1} ellipsizeMode="tail">
-          {label}
-        </Txt>
+        <View className="flex-row items-center gap-1.5">
+          <Txt className="shrink text-callout text-muted" numberOfLines={1} ellipsizeMode="tail">
+            {label}
+          </Txt>
+          {onEdit && (
+            <TouchableOpacity
+              onPress={onEdit}
+              activeOpacity={0.6}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel={editLabel ?? `Edit ${label.toLowerCase()}`}
+            >
+              <Icon name="edit" size={14} color={colors.muted} />
+            </TouchableOpacity>
+          )}
+        </View>
         {hint && (
-          <Txt className="mt-0.5 text-micro text-faint" numberOfLines={1} ellipsizeMode="tail">
+          <Txt
+            className="mt-0.5 text-micro text-faint"
+            style={hintColor ? { color: hintColor } : undefined}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {hint}
           </Txt>
         )}
@@ -262,7 +367,7 @@ export type TimelineStep = {
   /** Prose second line instead of a mono timestamp — a driver name, an invoice number. */
   meta?: string;
   done?: boolean;
-  /** The in-progress step: a ring instead of a fill, plus a pulsing halo. */
+  /** The in-progress step: a ring instead of a fill (static — v3 has no pulse). */
   current?: boolean;
   color?: string;
 };
@@ -279,27 +384,8 @@ export function Timeline({ steps }: { steps: TimelineStep[] }) {
 
 function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
   const { colors } = useTheme();
-  const color = s.color ?? statusHues.success;
+  const color = s.color ?? colors.successDot;
   const ringColor = s.done || s.current ? color : colors.faint;
-
-  // The one allowed loop (see LiveDot) — scales a halo ring behind the marker
-  // while this step is the current one, then stops as soon as it isn't.
-  const pulse = useSharedValue(0);
-  useEffect(() => {
-    if (!s.current) {
-      pulse.value = 0;
-      return;
-    }
-    pulse.value = withRepeat(
-      withSequence(withTiming(1, { duration: 900 }), withTiming(0, { duration: 900 })),
-      -1,
-      false,
-    );
-  }, [pulse, s.current]);
-  const halo = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + pulse.value * 0.7 }],
-    opacity: (1 - pulse.value) * 0.6,
-  }));
 
   const ringStyle = useAnimatedStyle(() => ({
     borderColor: withTiming(ringColor, { duration: motion.smooth }),
@@ -309,21 +395,6 @@ function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
     <View className="flex-row gap-3.5" style={{ minHeight: last ? 28 : 44 }}>
       <View className="items-center">
         <View className="items-center justify-center" style={{ width: 22, height: 22 }}>
-          {s.current && (
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                {
-                  position: 'absolute',
-                  width: 22,
-                  height: 22,
-                  borderRadius: 22,
-                  backgroundColor: colors.pulse,
-                },
-                halo,
-              ]}
-            />
-          )}
           <Animated.View
             className="items-center justify-center"
             style={[
@@ -366,7 +437,7 @@ function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
             {s.label}
           </Txt>
           {s.current && (
-            <Mono className="text-nano uppercase tracking-label" style={{ color }}>
+            <Mono className="text-caption font-medium" style={{ color }}>
               Current
             </Mono>
           )}
@@ -380,9 +451,9 @@ function TimelineRow({ step: s, last }: { step: TimelineStep; last: boolean }) {
 
 // ── RoutePreview: schematic origin → destination strip (never a real map) ──
 // Rail geometry, derived from the type scale rather than guessed: the label line
-// box (text-micro's 14px lineHeight, kept even though fontSize is overridden to
-// 9) and the address line beneath it (text-callout's 20px + the 2px mt-0.5).
-const RAIL_LABEL_H = 14;
+// box (Label's text-caption 16px lineHeight) and the address line beneath it
+// (text-callout's 20px + the 2px mt-0.5).
+const RAIL_LABEL_H = 16;
 const RAIL_ADDRESS_H = 22;
 const MARKER_COL = 16;
 // Every block after the first (each stop, and Drop-off) opens with mt-5 (20px)
@@ -452,9 +523,11 @@ export function RoutePreview({
               <View style={{ height: RAIL_LABEL_H }} className="justify-center">
                 <View
                   className="items-center justify-center"
-                  style={{ width: 14, height: 14, borderRadius: 14, backgroundColor: statusHues.info }}
+                  style={{ width: 14, height: 14, borderRadius: 14, backgroundColor: colors.infoDot }}
                 >
-                  <Mono style={{ fontSize: 8, fontWeight: '700', color: '#fff' }}>{i + 1}</Mono>
+                  <Mono style={{ fontSize: 9, fontWeight: '600', color: colors.onAccent }}>
+                    {i + 1}
+                  </Mono>
                 </View>
               </View>
             </Fragment>
@@ -469,13 +542,13 @@ export function RoutePreview({
             }}
           />
           <View style={{ height: RAIL_LABEL_H }} className="justify-center">
-            <Icon name="pin" size={16} color={statusHues.success} />
+            <Icon name="pin" size={16} color={colors.successDot} />
           </View>
           <View style={{ height: RAIL_ADDRESS_H }} />
         </View>
         <View className="flex-1">
           <View>
-            <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
+            <Label className="text-faint" style={{ lineHeight: RAIL_LABEL_H }}>
               Pickup
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>
@@ -484,7 +557,7 @@ export function RoutePreview({
           </View>
           {(stops ?? []).map((s, i) => (
             <View key={i} className="mt-5">
-              <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
+              <Label className="text-faint" style={{ lineHeight: RAIL_LABEL_H }}>
                 Stop {i + 1}
               </Label>
               <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>
@@ -493,7 +566,7 @@ export function RoutePreview({
             </View>
           ))}
           <View className="mt-5">
-            <Label className="text-faint" style={{ fontSize: 9, lineHeight: RAIL_LABEL_H }}>
+            <Label className="text-faint" style={{ lineHeight: RAIL_LABEL_H }}>
               Drop-off
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg" numberOfLines={1}>

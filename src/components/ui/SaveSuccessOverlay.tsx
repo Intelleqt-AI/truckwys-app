@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
 import { View } from 'react-native';
-import Animated, { FadeIn, FadeOut, ZoomIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, ZoomIn, useReducedMotion } from 'react-native-reanimated';
 import { Icon } from './icons';
 import { Txt } from './Text';
-import { status as statusHues } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
 
 export interface SaveSuccessOverlayProps {
   visible: boolean;
@@ -37,6 +37,8 @@ export function SaveSuccessOverlay({
   onDone,
   autoDismissMs = 1100,
 }: SaveSuccessOverlayProps) {
+  const { colors } = useTheme();
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
     if (!visible) return;
     const t = setTimeout(onDone, autoDismissMs);
@@ -47,17 +49,17 @@ export function SaveSuccessOverlay({
 
   return (
     <Animated.View
-      entering={FadeIn.duration(150)}
-      exiting={FadeOut.duration(150)}
+      entering={reduceMotion ? undefined : FadeIn.duration(150)}
+      exiting={reduceMotion ? undefined : FadeOut.duration(150)}
       pointerEvents="none"
-      className="absolute inset-0 items-center justify-center bg-black/70 px-8"
+      className="absolute inset-0 items-center justify-center bg-backdrop px-8"
     >
       <Animated.View
-        entering={ZoomIn.duration(220)}
+        entering={reduceMotion ? undefined : ZoomIn.duration(220)}
         className="w-full max-w-[280px] items-center rounded-panel border border-line bg-surface px-6 py-7"
       >
         <View className="h-12 w-12 items-center justify-center rounded-pill bg-success-bg">
-          <Icon name="checkCircle" size={28} color={statusHues.success} />
+          <Icon name="checkCircle" size={28} color={colors.successDot} />
         </View>
         <Txt className="mt-4 text-center text-heading font-semibold text-fg">{title}</Txt>
         {!!subtitle && <Txt className="mt-1.5 text-center text-caption text-faint">{subtitle}</Txt>}

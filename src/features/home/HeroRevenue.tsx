@@ -1,121 +1,152 @@
-import { View, StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Card, Mono, Label, Sparkline, PressScale } from '@/components/ui';
+import { useMemo } from 'react';
+import { View, TouchableOpacity } from 'react-native';
+import {
+  Card,
+  CostsSwatch,
+  Icon,
+  InfoTip,
+  Mono,
+  Label,
+  RevenueCostBars,
+  SegmentedControl,
+  type RevenueCostMonth,
+} from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
 import { useCountUp } from '@/hooks/useCountUp';
-import { formatCurrency, formatPercent, formatNumber } from '@/lib/formatters';
-import type { FinanceSummary } from '@/types/domain';
+import { formatCurrency, formatPercent } from '@/lib/formatters';
+import { monthShort, monthsSpanText, type HomeMoney } from './derive';
+import { BASIS_LABEL, basisText, monthLabel, type RevenueBasis } from '@/lib/ledger';
+import { useRevenueBasisStore } from '@/stores/revenueBasisStore';
 
-// ── HeroRevenue: the mobile collapse of web's adjacent "Total Revenue" metric
-// card + "Revenue vs Fuel Cost" chart card (Overview.tsx) into one focal
-// panel. Same copy, same series, same line treatment — merged because a
-// 3-column desktop grid has room for both side by side and a single phone
-// column does not.
+// ── HeroRevenue: "Revenue excl. VAT, 12 months" with the monthly revenue vs
+// costs bars underneath. The mobile version of the web's revenue tile and its
+// "Revenue vs costs" chart card. Every figure is from the invoices, payments,
+// expenses and credit-notes ledgers (derive.ts computeHomeMoney), on the rules
+// the Reports use, so Home agrees with them:
+//   headline  revenue excl. VAT on the chosen basis. Received (cash): money in,
+//             each payment less its invoice's VAT. Invoiced (accrual): issued
+//             invoices less credit notes. What was received incl. VAT is in the tip.
+//   delta     against the 12 months before that (shown only when they had revenue)
+//   chart     per month, excl. VAT, on that basis: revenue vs expenses not rejected
+// Tapping a month in the chart selects it, so the card itself is not one big
+// press target; the way into the reports is the row at the foot.
+
+const BASIS_OPTIONS: { label: string; value: RevenueBasis }[] = [
+  { label: BASIS_LABEL.cash, value: 'cash' },
+  { label: BASIS_LABEL.accrual, value: 'accrual' },
+];
+
 export function HeroRevenue({
-  finance,
+  money,
   onPress,
 }: {
-  finance: FinanceSummary;
+  money: HomeMoney;
   onPress?: () => void;
 }) {
   const { colors } = useTheme();
-  const revenue = useCountUp(finance.totalRevenue);
+  const setBasis = useRevenueBasisStore((s) => s.setBasis);
+  const revenue = useCountUp(money.revenueExcl);
+  const basisWord = money.basis === 'cash' ? 'cash (received)' : 'accrual (invoiced)';
 
-  const delta = finance.revenueChangePct
-    ? `${finance.revenueChangePct > 0 ? '+' : ''}${formatPercent(finance.revenueChangePct)} vs prev 30d`
-    : undefined;
-  // Matches the bento tiles just below (StatCard's green-up/red-down), not
-  // web's CSS (which colors revenue-up accent-blue) — the same screen using
-  // two different "positive" colors would read as a mistake, not a choice.
-  const deltaColor = finance.revenueChangePct >= 0 ? statusHues.success : statusHues.danger;
+  const change =
+    money.revenuePrior != null && money.revenuePrior > 0.005
+      ? ((money.revenueExcl - money.revenuePrior) / money.revenuePrior) * 100
+      : null;
+  const changeRounded = change == null ? null : Math.round(change * 10) / 10;
+  const up = (changeRounded ?? 0) >= 0;
+  const deltaColor = up ? colors.success : colors.danger;
 
-  const last = finance.monthlyTrend.at(-1);
-  const fuelRatioPct = last && last.revenue > 0 ? (last.expenses / last.revenue) * 100 : undefined;
-  // Web's chart-card footer hardcodes this to "↑ improving" regardless of the
-  // actual number — derived from the real revenue delta here instead, so a
-  // month that's actually declining can't get told it's improving.
-  const trendUp = finance.revenueChangePct >= 0;
+  const bars: RevenueCostMonth[] = useMemo(
+    () =>
+      money.months.map((m) => ({
+        label: monthShort(m.ym),
+        full: monthLabel(m.ym),
+        revenue: m.revenue,
+        costs: m.costs,
+      })),
+    [money.months],
+  );
+  const hasMovement = money.months.some((m) => m.revenue !== 0 || m.costs !== 0);
 
-  const monthLabels = finance.monthlyTrend.slice(-4).map((p) => p.month?.slice(5) ?? '');
+  const tip =
+    (money.basis === 'cash'
+      ? 'Money received from customers in the last 12 months, by payment date, less the VAT share of each invoice: the profit and loss revenue on the cash basis.'
+      : 'Invoices issued in the last 12 months (not drafts or void), by issue date, excl. VAT, less credit notes: the profit and loss revenue on the accrual basis.') +
+    ` Received incl. VAT in the same period: ${formatCurrency(money.received, { maximumFractionDigits: 0 })}. Switch the basis below.`;
 
-  const content = (
-    <Card className="overflow-hidden p-3.5">
-      <LinearGradient
-        pointerEvents="none"
-        colors={[colors.glow, 'transparent']}
-        style={StyleSheet.absoluteFill}
-      />
-      <View className="flex-row items-start justify-between">
-        <Label className="text-faint">Total revenue</Label>
-        {/* Web's separate "Revenue vs Fuel Cost" chart-card title, folded up
-            here (see file header) — top-right, stacked above the delta,
-            smaller than the rest of this row so it reads as a caption. */}
-        <View className="items-end">
-          {/* <Mono className="text-nano text-faint">Revenue vs Fuel Cost (Last 30 Days)</Mono> */}
-          {delta && (
-            <Mono className="mt-0.5 text-micro" style={{ color: deltaColor }}>
-              {delta}
-            </Mono>
-          )}
+  return (
+    <Card className="overflow-hidden p-4">
+      <View className="flex-row items-start justify-between gap-3">
+        {/* The last word and the icon are one unbreakable unit, so the icon stays
+            right after "months" even when the title wraps onto a second line. */}
+        <View className="flex-1 flex-row flex-wrap items-center gap-x-1.5">
+          <Label className="text-faint">Revenue excl. VAT, 12</Label>
+          <View className="flex-row items-center gap-1.5">
+            <Label className="text-faint">months</Label>
+            <InfoTip text={tip} label="About revenue" />
+          </View>
         </View>
-      </View>
-      <Mono className="mt-1.5 tracking-display text-fg" style={{ fontSize: 22, fontWeight: '600' }}>
-        {formatCurrency(revenue, { maximumFractionDigits: 0 })}
-      </Mono>
-
-      <View className="mt-1.5 flex-row items-center justify-end gap-3">
-        <View className="flex-row items-center gap-1.5">
-          <View style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: colors.accent }} />
-          <Mono className="text-nano text-muted">Revenue</Mono>
-        </View>
-        <View className="flex-row items-center gap-1.5">
-          <View
-            style={{ width: 14, height: 2, borderRadius: 1, backgroundColor: statusHues.danger }}
-          />
-          <Mono className="text-nano text-muted">Fuel cost</Mono>
-        </View>
-      </View>
-      <View className="mt-1">
-        <Sparkline points={finance.monthlyTrend} height={56} />
-      </View>
-      {monthLabels.some(Boolean) && (
-        <View className="mt-1 flex-row justify-between">
-          {monthLabels.map((m, i) => (
-            <Mono key={i} className="text-nano text-faint">
-              {m}
-            </Mono>
-          ))}
-        </View>
-      )}
-
-      <View className="mt-2 flex-row flex-wrap gap-1.5 border-t border-line pt-2">
-        <Mono className="text-nano text-faint">Revenue vs Fuel Cost (Last 30 Days)</Mono>
-        {/* <Mono className="text-micro text-muted">
-          Net Margin{' '}
-          <Mono className="text-micro text-accent">{formatPercent(finance.netMarginPct)}</Mono>
-        </Mono> */}
-        {fuelRatioPct != null && (
-          <Mono className="text-nano text-muted">
-            Fuel/Rev ratio{' '}
-            <Mono className="text-nano text-warning">
-              {formatNumber(fuelRatioPct, { maximumFractionDigits: 0 })}%
-            </Mono>
+        {changeRounded != null && (
+          <Mono
+            className="mt-0.5 shrink text-right text-caption"
+            style={{ color: deltaColor, maxWidth: '45%' }}
+          >
+            {`${changeRounded > 0 ? '+' : ''}${formatPercent(changeRounded)} vs prior 12 months`}
           </Mono>
         )}
-        <Mono className="text-nano text-muted">
-          Trend{' '}
-          <Mono
-            className="text-nano"
-            style={{ color: trendUp ? statusHues.success : statusHues.danger }}
-          >
-            {trendUp ? '↑ improving' : '↓ declining'}
-          </Mono>
+      </View>
+      <Mono
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.55}
+        className="mt-1.5 text-figure font-semibold text-fg"
+      >
+        {formatCurrency(revenue, { maximumFractionDigits: 0 })}
+      </Mono>
+      <Mono className="mt-0.5 text-caption text-faint">{`Excl. VAT, ${basisWord}`}</Mono>
+
+      <View className="mt-3">
+        <SegmentedControl options={BASIS_OPTIONS} value={money.basis} onChange={setBasis} />
+      </View>
+
+      {hasMovement ? (
+        <>
+          <View className="mt-3 flex-row items-center justify-end gap-3">
+            <View className="flex-row items-center gap-1.5">
+              <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: colors.accent }} />
+              <Mono className="text-caption text-muted">Revenue</Mono>
+            </View>
+            <View className="flex-row items-center gap-1.5">
+              <CostsSwatch />
+              <Mono className="text-caption text-muted">Costs</Mono>
+            </View>
+          </View>
+          <View className="mt-1.5">
+            <RevenueCostBars months={bars} />
+          </View>
+        </>
+      ) : (
+        <Mono className="mt-3 text-caption text-faint">No money in or out in the last 12 months.</Mono>
+      )}
+
+      <View className="mt-2 border-t border-line pt-2">
+        <Mono className="text-caption text-faint">
+          {`Revenue vs costs, ${basisText(money.basis)}${money.months.length ? `, ${monthsSpanText(money.months)}` : ''}`}
         </Mono>
+        {onPress && (
+          <TouchableOpacity
+            onPress={onPress}
+            activeOpacity={0.6}
+            accessibilityRole="button"
+            accessibilityLabel="Open finance reports"
+            hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
+            className="mt-1 min-h-[36px] flex-row items-center gap-1 self-start"
+          >
+            <Mono className="text-caption text-link">View reports</Mono>
+            <Icon name="chevronRight" size={14} color={colors.link} />
+          </TouchableOpacity>
+        )}
       </View>
     </Card>
   );
-
-  if (!onPress) return content;
-  return <PressScale onPress={onPress}>{content}</PressScale>;
 }

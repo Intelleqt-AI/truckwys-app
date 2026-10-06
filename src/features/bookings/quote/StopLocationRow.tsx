@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { Icon } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { LocationField } from './LocationField';
@@ -43,34 +43,37 @@ function StopLocationRowImpl({
       onPickOnMap={() => beginPick({ stop: stop.id })}
       headerRight={
         <View className="flex-row items-center gap-3">
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={0.6}
             onPress={() => moveStop(stop.id, -1)}
             disabled={isFirst}
-            hitSlop={12}
+            hitSlop={14}
             accessibilityRole="button"
             accessibilityLabel={`Move stop ${index + 1} up`}
             accessibilityState={{ disabled: isFirst }}
           >
             <Icon name="chevronUp" size={16} color={isFirst ? colors.faint : colors.muted} />
-          </Pressable>
-          <Pressable
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.6}
             onPress={() => moveStop(stop.id, 1)}
             disabled={isLast}
-            hitSlop={12}
+            hitSlop={14}
             accessibilityRole="button"
             accessibilityLabel={`Move stop ${index + 1} down`}
             accessibilityState={{ disabled: isLast }}
           >
             <Icon name="chevronDown" size={16} color={isLast ? colors.faint : colors.muted} />
-          </Pressable>
-          <Pressable
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.6}
             onPress={() => removeStop(stop.id)}
-            hitSlop={12}
+            hitSlop={14}
             accessibilityRole="button"
             accessibilityLabel={`Remove stop ${index + 1}`}
           >
             <Icon name="x" size={16} color={colors.faint} />
-          </Pressable>
+          </TouchableOpacity>
         </View>
       }
     />

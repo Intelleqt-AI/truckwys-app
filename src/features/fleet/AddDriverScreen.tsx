@@ -12,6 +12,7 @@ import {
   DateField,
   Button,
   Label,
+  Txt,
   SaveSuccessOverlay,
   type TextFieldProps,
 } from '@/components/ui';
@@ -47,7 +48,10 @@ const PROVINCES = ['GP', 'WC', 'KZN', 'EC', 'MP', 'LP', 'NW', 'FS', 'NC'].map((v
   label: v,
   value: v,
 }));
-const STATUSES = DRIVER_STATUSES.map((v) => ({ label: v.replace(/_/g, ' '), value: v }));
+const STATUSES = DRIVER_STATUSES.map((v) => ({
+  label: v.charAt(0) + v.slice(1).toLowerCase().replace(/_/g, ' '),
+  value: v,
+}));
 
 function fromDriverRecord(d: Record<string, unknown>, assignedVehicleId: string): DriverFormValues {
   const userDetails = (pick(d, ['user_details']) ?? {}) as Record<string, unknown>;
@@ -89,7 +93,10 @@ async function createDriverUser(v: DriverFormValues) {
         last_name: v.last_name.trim(),
         phone: v.phone?.trim() || undefined,
         address: v.address?.trim() || undefined,
-        password: 'TruckWys2026!',
+        // No password: the account is created without a usable one and the driver
+        // sets their own through "Forgot password". A shared default would let
+        // anyone who knows it sign in as any new driver. The role must stay
+        // explicit now that the backend defaults new users to VIEWER.
         role: 'DRIVER',
       });
     } catch (e) {
@@ -97,7 +104,7 @@ async function createDriverUser(v: DriverFormValues) {
       const isUsernameClash = !!(data && typeof data === 'object' && 'username' in data);
       if (!isUsernameClash) throw e;
       if (attempt === 5) {
-        throw new Error('A driver with this name already exists — add a middle initial');
+        throw new Error('A driver with this name already exists. Add a middle initial.');
       }
       // else loop again with the next numbered suffix
     }
@@ -231,7 +238,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
 
   const vehicleOptions = useMemo(
     () => [
-      { label: '— No vehicle —', value: '' },
+      { label: 'No vehicle', value: '' },
       ...(vehicles ?? []).map((v) => ({ label: `${v.name} · ${v.plate}`, value: String(v.id) })),
     ],
     [vehicles],
@@ -349,7 +356,6 @@ export function AddDriverScreen({ route, navigation }: Props) {
   return (
     <View className="flex-1">
       <SheetScreen
-        eyebrow={editing ? 'Edit' : 'New driver'}
         title={editing ? 'Edit driver' : 'Add driver'}
         variant="modal"
         onBack={() => navigation.goBack()}
@@ -375,7 +381,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
                 anchors={anchors}
                 label="First name"
                 required
-                placeholder="Jane"
+                placeholder="e.g. Jane"
                 icon="user"
                 autoCapitalize="words"
               />
@@ -387,7 +393,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
                 anchors={anchors}
                 label="Last name"
                 required
-                placeholder="Dlamini"
+                placeholder="e.g. Dlamini"
                 autoCapitalize="words"
               />
             </View>
@@ -453,11 +459,16 @@ export function AddDriverScreen({ route, navigation }: Props) {
             name="email"
             anchors={anchors}
             label="Email"
-            placeholder="jane@company.co.za"
+            placeholder="e.g. jane@company.co.za"
             icon="send"
             autoCapitalize="none"
             keyboardType="email-address"
           />
+          {!editing && (
+            <Txt className="text-sub text-muted">
+              {'The driver sets their own password with "Forgot password" on the sign-in screen, using this email.'}
+            </Txt>
+          )}
           {/* Phone and Emergency contact both go full width too — a formatted
               phone number and a compound "Name · phone" value are just as
               cramped at half-width as Licence number above. */}
@@ -466,7 +477,7 @@ export function AddDriverScreen({ route, navigation }: Props) {
             name="phone"
             anchors={anchors}
             label="Phone"
-            placeholder="+27 82 123 4567"
+            placeholder="e.g. +27 82 123 4567"
             icon="phone"
             keyboardType="phone-pad"
           />

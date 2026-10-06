@@ -1,79 +1,79 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
+import type { AllPages } from '@/lib/api/fetchAllPages';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { useInfiniteList } from '@/lib/api/useInfiniteList';
-import { normalizeQuote, normalizeLoad } from '@/types/domain';
+import { normalizeQuote, normalizeLoad, type LoadLite } from '@/types/domain';
+import { roundTo } from '@/lib/formatters';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
-export const useQuotes = () => useInfiniteList('quotes', 'quotes/', normalizeQuote);
-export const useLoads = () => useInfiniteList('loads', 'loads/', normalizeLoad);
-
-// Background-only: resolves which load (if any) a quote converted to.
-// Neither `quotes/` nor `loads/` exposes a way to answer this in one request —
-// the Quote payload carries no load_id (Load.quote is a FK the other way, not
-// on Quote's serializer) and LoadViewSet has no ?quote= filter — so this pages
-// through every load once, decoupled from the paginated (partially-loaded)
-// Orders/History lists so the lookup stays correct regardless of how far the
-// user has scrolled those.
-//
-// Only worth doing at all when a visible quote is ACCEPTED/APPROVED and
-// doesn't already carry its own load_id — the → Booking button is the only
-// consumer. `enabled` below skips the whole thing otherwise (most companies,
-// most of the time), and when it does run, page 1's `count` lets every
-// remaining page fire in parallel instead of chaining N sequential round
-// trips — the previous `for(;;)` loop meant 500 loads = 25 requests back to
-// back, each pulling the full load payload just to read two fields.
-type PageEnvelope<T> = { count: number; next: string | null; results: T[] } | T[];
-
-const MAX_LOOKUP_PAGES = 25; // 500 loads at DRF's PAGE_SIZE=20 — generous ceiling, not a real limit for any tenant seen so far.
-
-interface LoadQuoteRef {
-  id: string | number;
-  quote: string | number | null;
-}
-
-function toRef(r: Record<string, unknown>): LoadQuoteRef {
-  return {
-    id: pick(r, ['id', 'pk']) as string | number,
-    quote: (pick(r, ['quote']) as string | number) ?? null,
-  };
-}
-
-/** Any visible quote that's accepted but doesn't already know its load id. */
-export function needsLoadsLookup(quotes: { status: string; raw: Record<string, unknown> }[]): boolean {
-  return quotes.some(
-    (q) =>
-      ['ACCEPTED', 'APPROVED'].includes(q.status) &&
-      pick(q.raw, ['load_id', 'load', 'booking_id']) == null,
-  );
-}
-
-export function useLoadsForConvertLookup(enabled: boolean) {
-  return useQuery<Map<string, string | number>>({
-    queryKey: ['loads-lookup'],
-    enabled,
-    // The mapping barely moves — a quote converts once — so there's no need
-    // to re-walk the table on every 5-minute-stale remount.
-    staleTime: 10 * 60 * 1000,
-    queryFn: async ({ signal }) => {
-      const first = await fetchData<PageEnvelope<Record<string, unknown>>>('loads/?page=1', signal);
-      const refs = asArray<Record<string, unknown>>(first).map(toRef);
-
-      if (!Array.isArray(first) && first.next) {
-        const totalPages = Math.min(MAX_LOOKUP_PAGES, Math.ceil(first.count / 20));
-        const rest = await Promise.all(
-          Array.from({ length: totalPages - 1 }, (_, i) =>
-            fetchData<PageEnvelope<Record<string, unknown>>>(`loads/?page=${i + 2}`, signal),
-          ),
-        );
-        for (const page of rest) refs.push(...asArray<Record<string, unknown>>(page).map(toRef));
-      }
-
-      const out = new Map<string, string | number>();
-      for (const r of refs) if (r.quote != null) out.set(String(r.quote), r.id);
-      return out;
+/**
+ * Quotes, optionally narrowed by the server's own `status` filter. Besides the
+ * stored statuses it understands BOOKED (converted into a load; legacy IT /
+ * COMPLETED count too) and an ACCEPTED that means "won, still to book".
+ * Expired is not a server status for Draft/Sent quotes that merely ran past
+ * valid_until, so that view uses the unfiltered list and the date rule in
+ * lib/quoteStage.ts.
+ */
+export const useQuotes = (status?: string) => {
+  const qc = useQueryClient();
+  const server = status && status !== 'ALL' && status !== 'EXPIRED' ? status : null;
+  return useInfiniteList(
+    ['quotes', server ?? 'ALL'],
+    server ? `quotes/?status=${encodeURIComponent(server)}` : 'quotes/',
+    normalizeQuote,
+    {
+      // The list endpoint costs a handful of queries per row on the server, so
+      // the first page is kept small; more arrive on scroll.
+      pageSize: 20,
+      // Rows Home already downloaded stand in until the real page lands. They
+      // are every quote, which is a superset of any server filter, and the
+      // screen narrows by stage on the device anyway.
+      seed: () => qc.getQueryData<AllPages<Record<string, unknown>>>(['ledger-quotes'])?.rows,
+      keepPrevious: true,
     },
-  });
+  );
+};
+/** The Orders tab's tiles, as the API sends them (core.services.load_list). */
+export interface OrdersSummary {
+  open_count: number;
+  need_vehicle: number;
+  need_vehicle_overdue: number;
+  moving_no_vehicle: number;
+  in_transit: number;
+  in_transit_overdue: number;
+  left_open: number;
+  open_total_incl_vat: number;
+  any_loads: boolean;
+}
+/** The History tab's tiles. */
+export interface HistorySummary {
+  history_count: number;
+  delivered_not_invoiced: number;
+  invoiced: number;
+  invoiced_total_incl_vat: number;
+  completed: number;
+  completed_total_incl_vat: number;
+  any_loads: boolean;
+}
+
+/**
+ * One tab of loads, server-side: `?tab=orders|history` limits it to that tab's
+ * statuses, `status` narrows to one, `q` searches customer, load, route, driver
+ * and truck, History comes newest first, and page 1 carries the tab's tiles as
+ * `summary`. Keyed under 'loads' so invalidating ['loads'] reaches every variant.
+ */
+export function useLoadsTab<S>(tab: 'orders' | 'history', status: string, q: string) {
+  const params = new URLSearchParams({ tab });
+  if (status !== 'ALL') params.set('status', status);
+  if (q) params.set('q', q);
+  return useInfiniteList<LoadLite, { summary?: S }>(
+    ['loads', 'list', tab, status, q],
+    `loads/?${params.toString()}`,
+    normalizeLoad,
+    // A new status or search keeps the current rows until its own land.
+    { pageSize: 20, keepPrevious: true },
+  );
 }
 
 // ── Details ──────────────────────────────────────────────────────────────────
@@ -89,13 +89,79 @@ export function useQuote(id: string | number, preview?: Record<string, unknown>)
   });
 }
 
+/**
+ * Has diesel gone up since this quote was priced? Only worth asking for a quote
+ * that is still open (Draft or Sent). `has_alert` false is the normal answer;
+ * a failed request is simply no alert, since this is advice, not a figure.
+ */
+export interface QuoteFuelAlert {
+  has_alert: boolean;
+  fuel_delta_zar?: number;
+  estimated_cost_impact?: number;
+  message?: string;
+}
+
+export function useQuoteFuelAlert(id: string | number, enabled: boolean) {
+  return useQuery<QuoteFuelAlert | null>({
+    queryKey: ['quote-fuel-alert', id],
+    enabled: enabled && !!id,
+    retry: false,
+    queryFn: async () => {
+      try {
+        const res = await fetchData<QuoteFuelAlert>(`quotes/${id}/fuel-alert/`);
+        return res?.has_alert ? res : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
+/**
+ * A load row some list already downloaded (Home's ledger, or the Orders/History
+ * pages), for a screen opened by id alone: the "View booking" link on a quote
+ * knows the load's id but carries no row. Undefined when no list has it yet.
+ */
+function cachedLoadRow(qc: QueryClient, id: string | number): Record<string, unknown> | undefined {
+  const same = (r: Record<string, unknown>) => String(pick(r, ['id', 'pk'])) === String(id);
+  const ledger = qc.getQueryData<AllPages<Record<string, unknown>>>(['ledger-loads'])?.rows;
+  const fromLedger = ledger?.find(same);
+  if (fromLedger) return fromLedger;
+  for (const [, data] of qc.getQueriesData<InfiniteData<unknown>>({ queryKey: ['loads'] })) {
+    const hit = data?.pages?.flatMap((p) => asArray<Record<string, unknown>>(p)).find(same);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 export function useLoad(id: string | number, preview?: Record<string, unknown>) {
+  const qc = useQueryClient();
   return useQuery<Record<string, unknown>>({
     queryKey: ['load', id],
     queryFn: () => fetchData(`loads/${id}/`),
     // See useQuote — placeholderData so the real record is always fetched.
-    placeholderData: preview,
+    placeholderData: () => preview ?? cachedLoadRow(qc, id),
   });
+}
+
+/**
+ * Write a load record a mutation just returned straight into the detail cache,
+ * so the screen shows it on the first frame instead of waiting for a refetch.
+ * Ignores anything that isn't an object with an id, so an unexpected response
+ * shape can never replace a good cached record.
+ */
+export function seedLoad(qc: QueryClient, record: unknown, fallbackId?: string | number) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return;
+  const r = record as Record<string, unknown>;
+  const id = pick(r, ['id', 'pk']) ?? fallbackId;
+  if (id == null || id === '') return;
+  // A load record always carries a status; this keeps a non-load body (e.g. an
+  // upload ack) from being cached as one.
+  if (r.status == null) return;
+  qc.setQueryData(['load', id], r);
+  // The route param can be a string while the record's id is a number (or vice
+  // versa) — seed both spellings so useLoad's key always matches.
+  if (fallbackId != null && String(fallbackId) !== String(id)) qc.setQueryData(['load', fallbackId], r);
 }
 
 // ── Reference data for the quote builder ────────────────────────────────────
@@ -177,84 +243,6 @@ export function useVehicleTypes() {
   });
 }
 
-// Two-tier win-model training status, as returned inside quotes/model-stats/'s
-// win_model.{user,global}. Each tier is independent: a company can have a
-// ready global model while its own user tier is still short on outcomes.
-export type WinBlocker =
-  | 'ml_unavailable'
-  | 'insufficient_data'
-  | 'needs_lost_quotes'
-  | 'needs_won_quotes'
-  | 'awaiting_retrain';
-
-export interface WinModelTier {
-  outcomes_collected: number;
-  outcomes_needed: number;
-  progress_pct: number;
-  qualifies: boolean;
-  /** Nullable (not defaulted to 0) so a tier payload missing this key — an
-      old/pre-two-tier backend shape — can still be told apart from a real
-      zero. Mirrors web's own `tier.accepted ?? tier.outcomes_collected`
-      fallback (QuoteBuilder.tsx), which only makes sense if this stays null
-      rather than being coerced here. */
-  accepted: number | null;
-  rejected: number | null;
-  /** A trained artifact actually exists on disk — distinct from `qualifies`,
-      which is the outcome-count gate only. A tier can qualify without being
-      ready (e.g. awaiting_retrain, or the class-balance gate). */
-  ready: boolean;
-  blocker: WinBlocker | null;
-  /** Only populated for blocker === 'awaiting_retrain' — carries the last
-      training run's rejection reason. */
-  blocker_detail: string | null;
-}
-
-// quotes/analyze/'s ai_prediction is polymorphic on `available` — always
-// branch on that before reading any other field. This is the only field that
-// licenses labelling a price "AI"; price_optimization is always populated and
-// may be pure heuristic underneath.
-export type AiPrediction =
-  | { available: false; reason: 'insufficient_training_data' | 'optimizer_error' | 'model_curve_unusable' }
-  | {
-      available: true;
-      model_scope: 'user' | 'global';
-      training_samples: number;
-      win_probability: number;
-      recommended_price: number;
-      expected_profit: number;
-      margin_pct: number;
-      market_rate: number | null;
-      price_vs_market_pct: number | null;
-    };
-
-const WIN_BLOCKERS: WinBlocker[] = [
-  'ml_unavailable',
-  'insufficient_data',
-  'needs_lost_quotes',
-  'needs_won_quotes',
-  'awaiting_retrain',
-];
-
-/** Reads one win_model.{user,global} tier out of quotes/model-stats/'s raw
-    payload. Defensive against a missing/null tier (model_progress can raise
-    server-side and return a null win_model entirely) so callers always get a
-    consistent shape rather than having to null-check every field. */
-export function normalizeWinModelTier(r: unknown): WinModelTier {
-  const o = (r ?? {}) as Record<string, unknown>;
-  const rawBlocker = str(pick(o, ['blocker']));
-  return {
-    outcomes_collected: num(pick(o, ['outcomes_collected'])),
-    outcomes_needed: num(pick(o, ['outcomes_needed'])),
-    progress_pct: num(pick(o, ['progress_pct'])),
-    qualifies: pick(o, ['qualifies']) === true,
-    accepted: pick(o, ['accepted']) != null ? num(pick(o, ['accepted'])) : null,
-    rejected: pick(o, ['rejected']) != null ? num(pick(o, ['rejected'])) : null,
-    ready: pick(o, ['ready']) === true,
-    blocker: (WIN_BLOCKERS as string[]).includes(rawBlocker) ? (rawBlocker as WinBlocker) : null,
-    blocker_detail: pick(o, ['blocker_detail']) != null ? str(pick(o, ['blocker_detail'])) : null,
-  };
-}
-
 export function useCompanyProfileData() {
   return useQuery<Record<string, unknown>>({
     queryKey: ['company-profile'],
@@ -272,16 +260,6 @@ export function useFuelPrice() {
   });
 }
 
-// Win-model training status — drives the "still learning" banner.
-export function useModelStats() {
-  return useQuery<Record<string, unknown>>({
-    queryKey: ['quote-model-stats'],
-    queryFn: () => fetchData('quotes/model-stats/'),
-    retry: false,
-    staleTime: 30 * 60 * 1000,
-  });
-}
-
 // ── Quote builder network calls ─────────────────────────────────────────────
 export const suggestLocations = (q: string) =>
   fetchData<unknown>(`location/suggest/?q=${encodeURIComponent(q)}`);
@@ -295,7 +273,14 @@ export const fetchRecentLocations = (q?: string) =>
 // Fire-and-forget: builds the recent-locations history, never blocks or
 // surfaces an error to the location-picking flow.
 export const recordLocationPick = (label: string, lat: number, lon: number) =>
-  postData({ url: 'location/recent/', data: { location_text: label, lat, lon } }).catch(() => {});
+  postData({
+    url: 'location/recent/',
+    // LocationSearchHistory.lat/lon are DecimalField(max_digits=9,
+    // decimal_places=6) — one decimal place tighter than the (12,7) quote
+    // coordinate columns roundCoord targets, so round to this column's own
+    // precision rather than reusing that helper.
+    data: { location_text: label, lat: roundTo(lat, 6), lon: roundTo(lon, 6) },
+  }).catch(() => {});
 
 export const calculateRoute = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'route/calculate/', data });
@@ -386,7 +371,7 @@ export const recordQuoteOutcome = (id: string | number, data: QuoteOutcome) =>
 export const convertQuoteToLoad = (
   id: string | number,
   data: { driver_id?: string; vehicle_id?: string } = {},
-) => postData({ url: `quotes/${id}/convert_to_load/`, data });
+) => postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
@@ -400,14 +385,14 @@ export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
 // Web patches the detail resource directly (there is no update_status action —
 // POST there returns "method not allowed").
 export const updateLoadStatus = (id: string | number, status: string) =>
-  patchData({ url: `loads/${id}/`, data: { status } });
+  patchData<Record<string, unknown>>({ url: `loads/${id}/`, data: { status } });
 
 // Assigns (or clears) both at once — the endpoint takes null to unassign.
 export const assignLoadDriver = (
   id: string | number,
   driver_id: number | null,
   vehicle_id: number | null,
-) => postData({ url: `loads/${id}/assign_driver/`, data: { driver_id, vehicle_id } });
+) => postData<Record<string, unknown>>({ url: `loads/${id}/assign_driver/`, data: { driver_id, vehicle_id } });
 
 export const convertLoadToInvoice = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `loads/${id}/convert_to_invoice/`, data: {} });

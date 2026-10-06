@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import { View } from 'react-native';
 import { Txt, Mono, Icon } from '@/components/ui';
-import { status as statusHues } from '@/theme/tokens';
+import { useTheme } from '@/theme/ThemeProvider';
 import { parseBlocks } from '../markdown/parseBlocks';
 import { Markdown, type NavigateFn } from '../markdown/Markdown';
 import { ActionChips } from './ActionChips';
@@ -28,6 +28,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   onConfirmProposal?: (p: Proposal) => void;
   onDismissProposal?: (p: Proposal) => void;
 }) {
+  const { colors } = useTheme();
   const blocks = useMemo(() => parseBlocks(msg.content), [msg.content]);
 
   return (
@@ -40,9 +41,9 @@ export const AssistantMessage = memo(function AssistantMessage({
 
       {msg.degraded && (
         <View className="mt-1.5 flex-row items-start gap-1.5">
-          <Icon name="alert" size={12} color={statusHues.warning} />
-          <Mono className="flex-1 text-micro" style={{ color: statusHues.warning }}>
-            Rules engine — AI is unavailable, so this answer is basic. Try again shortly.
+          <Icon name="alert" size={12} color={colors.warningDot} />
+          <Mono className="flex-1 text-caption" style={{ color: colors.warning }}>
+            Answered by the rules engine because AI is unavailable, so it is basic. Try again shortly.
           </Mono>
         </View>
       )}

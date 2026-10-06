@@ -3,7 +3,10 @@ import { View, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Mono } from './Text';
 import { Icon } from './icons';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues } from '@/theme/tokens';
+import { TAP_MIN } from '@/theme/tokens';
+
+// The sm buttons draw 32 tall; hitSlop reaches TAP_MIN (web rule R7).
+const SM_HIT_SLOP = { top: (TAP_MIN - 32) / 2, bottom: (TAP_MIN - 32) / 2, left: 2, right: 2 };
 
 /**
  * The circular tick a row shows in selection mode — same shape the
@@ -36,12 +39,12 @@ export function SelectionDot({ selected, disabled }: { selected: boolean; disabl
 }
 
 /**
- * "Select all" + "Delete" as a pair of real, sharp-cornered `sm` buttons
- * (matching `Button`'s own `size="sm"` — `primitives.tsx`) that live in the
- * host's own header while selecting — Customers and Fleet both swap their
- * native/AppHeader for a contextual one and drop this pair in as
- * `headerRight`. No floating bar: the app's own 2px-radius language stays
- * consistent, and the tab bar never needs to get out of the way.
+ * "Select all" + "Delete" as a pair of real `sm` buttons with the standard
+ * control radius (matching `Button`'s own `size="sm"` — `primitives.tsx`) that
+ * live in the host's own header while selecting — Customers and Fleet both
+ * swap their native/AppHeader for a contextual one and drop this pair in as
+ * `headerRight`. No floating bar: the buttons stay in the app's normal radius
+ * language, and the tab bar never needs to get out of the way.
  *
  * Quotes, invoices, loads and trips PROTECT the records a fleet most wants to
  * clean up, so a partial result (some deleted, some kept with a reason) is
@@ -99,12 +102,14 @@ export function SelectionActions({
       {onSelectAll && (
         <TouchableOpacity
           onPress={onSelectAll}
-          activeOpacity={0.85}
+          activeOpacity={0.7}
+          hitSlop={SM_HIT_SLOP}
           accessibilityRole="button"
+          accessibilityLabel={allSelected ? 'Deselect all' : 'Select all'}
           className="min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-line-active bg-surface px-2.5"
         >
           <Icon name="check" size={14} color={colors.fg} strokeWidth={2.2} />
-          <Mono className="text-nano uppercase tracking-wide text-fg">
+          <Mono className="text-caption font-medium text-fg">
             {allSelected ? 'Deselect all' : 'Select all'}
           </Mono>
         </TouchableOpacity>
@@ -112,20 +117,21 @@ export function SelectionActions({
       <TouchableOpacity
         onPress={confirm}
         disabled={count === 0 || busy}
-        activeOpacity={0.85}
+        activeOpacity={0.7}
+        hitSlop={SM_HIT_SLOP}
         accessibilityRole="button"
         accessibilityLabel={`Delete ${count} ${label}`}
         accessibilityState={{ disabled: count === 0 || busy }}
-        className={`min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-danger bg-danger-bg px-2.5 ${
+        className={`min-h-[32px] flex-row items-center justify-center gap-1 rounded-control border border-line-active bg-surface px-2.5 ${
           count === 0 ? 'opacity-40' : ''
         }`}
       >
         {busy ? (
-          <ActivityIndicator size="small" color={statusHues.danger} />
+          <ActivityIndicator size="small" color={colors.danger} />
         ) : (
           <>
-            <Icon name="trash" size={14} color={statusHues.danger} strokeWidth={2.2} />
-            <Mono className="text-nano uppercase tracking-wide text-danger">
+            <Icon name="trash" size={14} color={colors.danger} strokeWidth={2.2} />
+            <Mono className="text-caption font-medium text-danger">
               {count > 0 ? count : ''}
             </Mono>
           </>

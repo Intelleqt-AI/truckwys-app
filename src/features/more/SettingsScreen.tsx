@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Pressable, Alert, Modal, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -23,6 +22,7 @@ import {
   EmptyState,
   StatCard,
   Badge,
+  Banner,
   SwipeRow,
   SelectionDot,
   type IconName,
@@ -30,11 +30,9 @@ import {
 import { ListSkeleton } from '@/components/feedback';
 import { fetchData, mediaUrl } from '@/lib/api/client';
 import { asArray, num, str, pick } from '@/lib/api/list';
-import { status as statusHues } from '@/theme/tokens';
 import { useAuthStore } from '@/stores/authStore';
 import { useRole, canAccessSettingsSection, canSeeInsights, visibleTabs } from '@/lib/access';
 import { INDUSTRY_OPTIONS } from '@/lib/companyOptions';
-import { WEB_APP_URL } from '@/lib/legal';
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore';
 import {
   useCompanyProfile,
@@ -68,8 +66,19 @@ import {
   type NotificationPrefs,
 } from './api';
 import { normalizeVehicleType } from '@/features/bookings/api';
+import { InvoiceNumberingSection } from '@/features/finance/InvoiceNumberingSection';
+import { ComingSoonNote, ProviderCards } from '@/features/accounting/components/ProviderCards';
+import { FleetTrackingCards } from '@/features/integrations/FleetTrackingCards';
+import { ApiKeysCard, WebhooksCard } from '@/features/integrations/DeveloperCards';
 import { vehicleTypeDeleteCopy } from './validation';
-import { formatCurrency, formatDate, formatRelativeTime, parseNum } from '@/lib/formatters';
+import {
+  formatCurrency,
+  formatDate,
+  formatRelativeTime,
+  parseNum,
+  roundTo,
+  decimalMax,
+} from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
@@ -88,10 +97,11 @@ const SECTIONS: { key: string; label: string; icon: IconName }[] = [
   { key: 'security', label: 'Security', icon: 'lock' },
   { key: 'company', label: 'Company details', icon: 'building' },
   { key: 'vehicle-types', label: 'Vehicle types', icon: 'truck' },
-  { key: 'users', label: 'Users & permissions', icon: 'users' },
+  { key: 'users', label: 'Users and permissions', icon: 'users' },
   { key: 'billing', label: 'Billing', icon: 'card' },
+  { key: 'invoice-numbering', label: 'Invoice numbering', icon: 'receipt' },
   { key: 'integrations', label: 'Integrations', icon: 'plug' },
-  { key: 'risk', label: 'Risk-Scoring API', icon: 'shield' },
+  { key: 'risk', label: 'Payment risk API', icon: 'shield' },
 ];
 
 export function SettingsScreen({ route, navigation }: Props) {
@@ -106,7 +116,6 @@ export function SettingsScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow="Settings"
       title={current?.label ?? 'Settings'}
       onBack={() => navigation.goBack()}
     >
@@ -135,6 +144,7 @@ export function SettingsScreen({ route, navigation }: Props) {
       {section === 'vehicle-types' && <VehicleTypesSection />}
       {section === 'users' && <UsersSection />}
       {section === 'billing' && <BillingSection navigation={navigation} />}
+      {section === 'invoice-numbering' && <InvoiceNumberingSection />}
       {section === 'integrations' && <IntegrationsSection />}
       {section === 'risk' && (
         <Txt className="text-callout text-muted">
@@ -157,17 +167,20 @@ function SettingsMenu({
   return (
     <Group>
       {sections.map((s, i) => (
-        <Pressable
+        <TouchableOpacity
           key={s.key}
           onPress={() => onOpen(s.key)}
-          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={s.label}
+          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 ${
             i === sections.length - 1 ? '' : 'border-b border-line-row'
           }`}
         >
           <Icon name={s.icon} size={19} color={colors.muted} />
           <Txt className="flex-1 text-body text-fg">{s.label}</Txt>
           <Icon name="chevronRight" size={16} color={colors.faint} />
-        </Pressable>
+        </TouchableOpacity>
       ))}
     </Group>
   );
@@ -192,17 +205,20 @@ function DirectorySection({
   return (
     <Group label="Directory">
       {rows.map((r, i) => (
-        <Pressable
+        <TouchableOpacity
           key={r.key}
           onPress={r.onPress}
-          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover ${
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={r.label}
+          className={`min-h-[52px] flex-row items-center gap-3 px-4 py-3 ${
             i === rows.length - 1 ? '' : 'border-b border-line-row'
           }`}
         >
           <Icon name={r.icon} size={19} color={colors.muted} />
           <Txt className="flex-1 text-body text-fg">{r.label}</Txt>
           <Icon name="chevronRight" size={16} color={colors.faint} />
-        </Pressable>
+        </TouchableOpacity>
       ))}
     </Group>
   );
@@ -243,9 +259,9 @@ function UploadButton({
   const { colors } = useTheme();
   if (uploading) {
     return (
-      <View className="min-h-[48px] flex-row items-center justify-center gap-2 rounded-control border border-line-active bg-surface px-4">
+      <View className="min-h-[44px] flex-row items-center justify-center gap-2 rounded-control border border-line-active bg-surface px-4">
         <ActivityIndicator size="small" color={colors.fg} />
-        <Mono className="text-micro uppercase tracking-wide text-fg">Uploading</Mono>
+        <Mono className="text-callout font-medium text-fg">Uploading</Mono>
       </View>
     );
   }
@@ -353,7 +369,7 @@ function ProfileSection() {
         <View className="flex-1">
           <TextField
             label="First name"
-            placeholder="Jane"
+            placeholder="e.g. Jane"
             autoCapitalize="words"
             value={firstName}
             onChangeText={setFirstName}
@@ -362,7 +378,7 @@ function ProfileSection() {
         <View className="flex-1">
           <TextField
             label="Last name"
-            placeholder="Dlamini"
+            placeholder="e.g. Dlamini"
             autoCapitalize="words"
             value={lastName}
             onChangeText={setLastName}
@@ -371,7 +387,7 @@ function ProfileSection() {
       </View>
       <TextField
         label="Email"
-        placeholder="you@company.co.za"
+        placeholder="e.g. you@company.co.za"
         icon="send"
         autoCapitalize="none"
         keyboardType="email-address"
@@ -386,7 +402,7 @@ function ProfileSection() {
       />
       <TextField
         label="Phone"
-        placeholder="+27 82 123 4567"
+        placeholder="e.g. +27 82 123 4567"
         icon="phone"
         keyboardType="phone-pad"
         value={phone}
@@ -575,18 +591,21 @@ function VehicleTypesSection() {
         <Label className="text-muted">Vehicle types</Label>
         <View className="flex-row items-center gap-1">
           {sorted.length > 0 && (
-            <Pressable
+            <TouchableOpacity
               hitSlop={8}
-              className="px-2"
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={selectMode ? 'Done selecting' : 'Select vehicle types'}
+              className="min-h-[44px] justify-center px-2"
               onPress={() => {
                 setSelectMode((v) => !v);
                 setSelected(new Set());
               }}
             >
-              <Mono className="text-micro uppercase tracking-wide text-accent">
+              <Mono className="text-caption font-medium text-link">
                 {selectMode ? 'Done' : 'Select'}
               </Mono>
-            </Pressable>
+            </TouchableOpacity>
           )}
           {!selectMode && (
             <IconButton
@@ -609,7 +628,7 @@ function VehicleTypesSection() {
           title="Couldn't load vehicle types"
           body="Check your connection and try again."
           action={
-            <Button label="Retry" variant="secondary" icon="route" onPress={() => refetch()} />
+            <Button label="Retry" variant="secondary" icon="refresh" onPress={() => refetch()} />
           }
         />
       ) : sorted.length > 0 ? (
@@ -669,7 +688,7 @@ function VehicleTypesSection() {
                     deleteLabel={isOverride ? 'Reset' : 'Delete'}
                     onDelete={() => removeOne(r, tid, isOverride)}
                   >
-                    <Pressable
+                    <TouchableOpacity
                       onPress={() => {
                         if (selectMode) {
                           if (!isShared) toggleSel(tid);
@@ -678,7 +697,10 @@ function VehicleTypesSection() {
                         openEdit();
                       }}
                       disabled={isDeleting}
-                      className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3 active:bg-surface-hover"
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${str(pick(r, ['name']), 'Vehicle type')}${selectMode ? (isSel ? ', selected' : '') : ', edit'}`}
+                      className="min-h-[64px] flex-row items-center gap-3 bg-surface px-3.5 py-3"
                     >
                       {/* Not selectable when shared — batch-delete can't
                           touch a platform default, so its dot never fills
@@ -692,7 +714,7 @@ function VehicleTypesSection() {
                         <Icon
                           name="truck"
                           size={19}
-                          color={isActive ? colors.accent : colors.faint}
+                          color={isActive ? colors.fg : colors.faint}
                         />
                       </View>
                       <View className="flex-1">
@@ -710,7 +732,7 @@ function VehicleTypesSection() {
                           </Txt>
                         )}
                         {!!meta && (
-                          <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                          <Mono className="mt-0.5 text-caption text-faint" numberOfLines={1}>
                             {meta}
                           </Mono>
                         )}
@@ -720,7 +742,7 @@ function VehicleTypesSection() {
                       ) : (
                         !selectMode && <Icon name="chevronRight" size={16} color={colors.faint} />
                       )}
-                    </Pressable>
+                    </TouchableOpacity>
                   </SwipeRow>
                 </View>
               );
@@ -728,7 +750,7 @@ function VehicleTypesSection() {
           </View>
 
           {!selectMode && (
-            <Mono className="-mt-1 text-center text-nano text-faint">
+            <Mono className="-mt-1 text-center text-caption text-faint">
               Swipe a row left to delete
             </Mono>
           )}
@@ -862,6 +884,7 @@ function NotificationsSection() {
 
 function SecuritySection() {
   const demo = useDemo();
+  const { colors } = useTheme();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
@@ -1013,26 +1036,35 @@ function SecuritySection() {
       </Group>
 
       <Group label="Danger zone">
-        <Pressable
+        <TouchableOpacity
           onPress={() => setShowDelete(true)}
-          className="min-h-[52px] flex-row items-center gap-3 px-4 py-3 active:bg-surface-hover"
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+          className="min-h-[52px] flex-row items-center gap-3 px-4 py-3"
         >
-          <Icon name="x" size={18} color="#FF4949" />
+          <Icon name="x" size={18} color={colors.dangerDot} />
           <Txt className="flex-1 text-body text-danger">Delete account</Txt>
-        </Pressable>
+        </TouchableOpacity>
       </Group>
 
       {/* The endpoint requires the current password, and Alert.alert can't
           collect input — hence a real modal rather than a system dialog. */}
       {showDelete && (
         <Modal visible transparent animationType="fade" onRequestClose={closeDelete}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={closeDelete}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
             <KeyboardAvoidingView behavior="padding" className="w-full max-w-[420px]">
-              <Pressable
-                onPress={(e) => e.stopPropagation()}
+              {/* Swallows taps on the card so only the backdrop dismisses. */}
+              <TouchableOpacity
+                activeOpacity={1}
+                accessible={false}
+                onPress={() => {}}
                 className="rounded-panel border border-line bg-surface p-5"
               >
                 <Txt className="text-heading font-semibold text-fg">Delete account</Txt>
@@ -1066,9 +1098,9 @@ function SecuritySection() {
                     />
                   </View>
                 </View>
-              </Pressable>
+              </TouchableOpacity>
             </KeyboardAvoidingView>
-          </Pressable>
+          </TouchableOpacity>
         </Modal>
       )}
 
@@ -1088,13 +1120,23 @@ function SecuritySection() {
                 </Mono>
               </View>
               {!s.current && (
-                <Pressable hitSlop={8} onPress={() => revoke(s.id)}>
-                  <Mono className="text-micro uppercase text-danger">Revoke</Mono>
-                </Pressable>
+                <TouchableOpacity
+                  hitSlop={8}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Revoke session on ${s.device}`}
+                  className="min-h-[44px] justify-center"
+                  onPress={() => revoke(s.id)}
+                >
+                  <Mono className="text-caption font-medium text-danger">Revoke</Mono>
+                </TouchableOpacity>
               )}
             </View>
           ))}
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={otherCount > 0 ? 'Log out other sessions' : 'Log out all sessions'}
             onPress={() =>
               otherCount > 0
                 ? Alert.alert(
@@ -1118,12 +1160,12 @@ function SecuritySection() {
                     ],
                   )
             }
-            className="border-t border-line-row px-4 py-3.5 active:bg-surface-hover"
+            className="min-h-[44px] justify-center border-t border-line-row px-4 py-3.5"
           >
-            <Mono className="text-micro uppercase text-danger">
+            <Mono className="text-caption font-medium text-danger">
               {otherCount > 0 ? 'Log out other sessions' : 'Log out all sessions'}
             </Mono>
-          </Pressable>
+          </TouchableOpacity>
         </Group>
       )}
 
@@ -1136,13 +1178,13 @@ function SecuritySection() {
             >
               <View
                 className="h-2 w-2 rounded-pill"
-                style={{ backgroundColor: ACTIVITY_TONE[a.event] ?? statusHues.info }}
+                style={{ backgroundColor: colors[ACTIVITY_TONE[a.event] ?? 'infoDot'] }}
               />
               <View className="flex-1">
                 <Txt className="text-caption text-fg">
                   {ACTIVITY_LABEL[a.event] ?? (a.action === 'LOGIN' ? 'Signed in' : 'Signed out')}
                 </Txt>
-                <Mono className="mt-0.5 text-micro text-faint" numberOfLines={1}>
+                <Mono className="mt-0.5 text-caption text-faint" numberOfLines={1}>
                   {[a.device, a.ip, formatRelativeTime(a.time)].filter(Boolean).join(' · ')}
                 </Mono>
               </View>
@@ -1199,12 +1241,12 @@ const ACTIVITY_LABEL: Record<string, string> = {
   revoked_others: 'Other sessions revoked',
   revoked_all: 'All sessions revoked',
 };
-const ACTIVITY_TONE: Record<string, string> = {
-  login: statusHues.success,
-  logout: statusHues.info,
-  revoked: statusHues.danger,
-  revoked_others: statusHues.danger,
-  revoked_all: statusHues.danger,
+const ACTIVITY_TONE: Record<string, 'successDot' | 'infoDot' | 'dangerDot'> = {
+  login: 'successDot',
+  logout: 'infoDot',
+  revoked: 'dangerDot',
+  revoked_others: 'dangerDot',
+  revoked_all: 'dangerDot',
 };
 
 const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC'].map((p) => ({
@@ -1261,6 +1303,17 @@ function CompanySection() {
   const [fuelZone, setFuelZone] = useState<'INLAND' | 'COASTAL'>('INLAND');
   const [livePrice, setLivePrice] = useState<Record<string, unknown> | null>(null);
   const [fetchingLive, setFetchingLive] = useState(false);
+  // Banking details, shown in a "How to pay" block on invoices (PDF, email and
+  // the online copy) once a bank name and account number are both filled in.
+  const [bankName, setBankName] = useState('');
+  const [bankHolder, setBankHolder] = useState('');
+  const [bankAccount, setBankAccount] = useState('');
+  const [bankBranch, setBankBranch] = useState('');
+  const [bankType, setBankType] = useState('none');
+  const [payRefHint, setPayRefHint] = useState('');
+  // An invoice is raised when a load is delivered. 'no' leaves it as a draft to
+  // check and send; 'yes' emails the customer straight away.
+  const [autoEmail, setAutoEmail] = useState('no');
 
   useEffect(() => {
     if (seeded || !data) return;
@@ -1296,6 +1349,13 @@ function CompanySection() {
     seedNum(['cross_border_crossings_per_year'], setCrossingsPerYear);
     setFuelZone(str(pick(data, ['fuel_zone'])) === 'COASTAL' ? 'COASTAL' : 'INLAND');
     setAllowCrossBorder(pick(data, ['allow_cross_border']) === false ? 'no' : 'yes');
+    setBankName(str(pick(data, ['bank_name'])));
+    setBankHolder(str(pick(data, ['bank_account_holder'])));
+    setBankAccount(str(pick(data, ['bank_account_number'])));
+    setBankBranch(str(pick(data, ['bank_branch_code'])));
+    setBankType(str(pick(data, ['bank_account_type']), 'none') || 'none');
+    setPayRefHint(str(pick(data, ['payment_reference_hint'])));
+    setAutoEmail(pick(data, ['auto_email_invoices']) === true ? 'yes' : 'no');
     const logo = str(pick(data, ['logo_url']));
     if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
     setSeeded(true);
@@ -1343,14 +1403,68 @@ function CompanySection() {
     if (crossingsNum != null && (crossingsNum < 1 || crossingsNum > 5000)) {
       return toast.error('Border crossings per year must be between 1 and 5000');
     }
+    // validityDays/slaHours/crossingsPerYear are all plain IntegerFields — a
+    // comma value like "7,5" passes every check above (parseNum reads it as
+    // 7.5, well inside every range) but 400s server-side as "A valid integer
+    // is required.", not the DecimalField digit-count message but the same
+    // class of bug.
+    for (const [label, n] of [
+      ['Quote validity', validityNum],
+      ['SLA hours', slaHoursNum],
+      ['Border crossings per year', crossingsNum],
+    ] as const) {
+      if (n != null && !Number.isInteger(n)) return toast.error(`${label} must be a whole number`);
+    }
 
+    // Banking details: spaces and hyphens are fine (the server strips them), but
+    // what is left must be digits. Blank clears the field. A bank name and an
+    // account number only make sense together.
+    const accountDigits = bankAccount.replace(/[\s-]/g, '');
+    if (accountDigits && !/^\d{6,20}$/.test(accountDigits)) {
+      return toast.error('Account number must be 6 to 20 digits');
+    }
+    const branchDigits = bankBranch.replace(/[\s-]/g, '');
+    if (branchDigits && !/^\d{4,10}$/.test(branchDigits)) {
+      return toast.error('Branch code must be 4 to 10 digits');
+    }
+    if (!!bankName.trim() !== !!accountDigits) {
+      return toast.error('Enter both a bank name and an account number, or leave both blank');
+    }
+
+    // Company's rate/price columns are DecimalField(…, decimal_places=N)
+    // with no server-side rounding — round to each column's own precision so
+    // a value with more decimals than that (a still-focused field's blur
+    // reformat hasn't run, or the field has no `decimals` prop at all)
+    // doesn't get the whole save rejected.
+    //
     // Only send a numeric field when it has a value — an empty box must leave
     // the stored default alone rather than zeroing it.
-    const optionalNum = (v: string) => (v.trim() ? (parseNum(v) ?? undefined) : undefined);
+    const optionalNum = (v: string, dp: number) =>
+      v.trim() ? (parseNum(v) != null ? roundTo(parseNum(v)!, dp) : undefined) : undefined;
     // For the nullable per-fuel-type prices, blank has to mean "clear it", which
     // needs an explicit null: optionalNum omits the key entirely, so a price
     // could be set but never removed.
-    const clearableNum = (v: string) => (v.trim() ? (parseNum(v) ?? null) : null);
+    const clearableNum = (v: string, dp: number) =>
+      v.trim() ? (parseNum(v) != null ? roundTo(parseNum(v)!, dp) : null) : null;
+
+    // default_base_rate_per_km (8,2), default_toll_rate_per_km (6,3), the
+    // four fuel prices (8,4) — an oversized typed value (more whole digits
+    // than the column allows) is caught here rather than round-tripping to a
+    // server 400, same reasoning as decimalMax elsewhere in this file.
+    const BASE_RATE_MAX = decimalMax(8, 2);
+    const TOLL_RATE_MAX = decimalMax(6, 3);
+    const FUEL_PRICE_MAX = decimalMax(8, 4);
+    for (const [label, v, max] of [
+      ['Base rate / km', baseRate, BASE_RATE_MAX],
+      ['Toll rate / km', tollRate, TOLL_RATE_MAX],
+      ['Diesel price', fuelPrice, FUEL_PRICE_MAX],
+      ['Petrol price', fuelPetrol, FUEL_PRICE_MAX],
+      ['Electric price', fuelElectric, FUEL_PRICE_MAX],
+      ['Hybrid price', fuelHybrid, FUEL_PRICE_MAX],
+    ] as const) {
+      const n = parseNum(v);
+      if (n != null && n > max) return toast.error(`${label} is too large`);
+    }
 
     setBusy(true);
     try {
@@ -1371,21 +1485,29 @@ function CompanySection() {
         },
         contact: { phone: phone.trim(), email: email.trim(), support_email: supportEmail.trim() },
         allow_cross_border: allowCrossBorder === 'yes',
+        auto_email_invoices: autoEmail === 'yes',
+        // Blank is sent as null so a field can be cleared as well as set.
+        bank_name: bankName.trim() || null,
+        bank_account_holder: bankHolder.trim() || null,
+        bank_account_number: accountDigits || null,
+        bank_branch_code: branchDigits || null,
+        bank_account_type: bankType === 'none' ? null : bankType,
+        payment_reference_hint: payRefHint.trim() || null,
         // PositiveIntegerField, NOT NULL with a factory default of 24 — a
         // blank box falls back to that rather than clearing, same shape as
         // diesel below.
-        cross_border_crossings_per_year: optionalNum(crossingsPerYear) ?? 24,
-        default_quote_validity_days: optionalNum(validityDays),
-        default_base_rate_per_km: optionalNum(baseRate),
-        default_toll_rate_per_km: optionalNum(tollRate),
+        cross_border_crossings_per_year: optionalNum(crossingsPerYear, 0) ?? 24,
+        default_quote_validity_days: optionalNum(validityDays, 0),
+        default_base_rate_per_km: optionalNum(baseRate, 2),
+        default_toll_rate_per_km: optionalNum(tollRate, 3),
         fuel_zone: fuelZone,
         // Diesel is NOT NULL with a 23.50 factory default, so a blank box falls
         // back to that rather than clearing — matching the web page.
-        fuel_price_per_litre: optionalNum(fuelPrice) ?? DIESEL_DEFAULT_PRICE,
-        fuel_price_petrol: clearableNum(fuelPetrol),
-        fuel_price_electric: clearableNum(fuelElectric),
-        fuel_price_hybrid: clearableNum(fuelHybrid),
-        default_sla_hours: optionalNum(slaHours),
+        fuel_price_per_litre: optionalNum(fuelPrice, 4) ?? DIESEL_DEFAULT_PRICE,
+        fuel_price_petrol: clearableNum(fuelPetrol, 4),
+        fuel_price_electric: clearableNum(fuelElectric, 4),
+        fuel_price_hybrid: clearableNum(fuelHybrid, 4),
+        default_sla_hours: optionalNum(slaHours, 0),
       });
       invalidateFor(qc, 'company');
       toast.success();
@@ -1475,11 +1597,18 @@ function CompanySection() {
   );
   const liveNote = (() => {
     if (!livePrice || pick(livePrice, ['success']) === false || liveDiesel <= 0) return '';
+    // The price is the 50ppm wholesale list price from a given day; say which
+    // day (effective_from, in SAST), falling back to the month it was fetched.
+    const effective = str(pick(livePrice, ['effective_from']));
     const updated = str(pick(livePrice, ['last_updated']));
+    const grade = str(pick(livePrice, ['diesel_grade']));
     const warning = str(pick(livePrice, ['stale_warning']));
     const zoneLabel = fuelZone === 'COASTAL' ? 'coastal' : 'inland';
-    const parts = [`Live national diesel ${formatCurrency(liveDiesel)}/L (${zoneLabel})`];
-    if (updated) parts.push(`updated ${formatDate(updated)}`);
+    const parts = [
+      `Live national diesel ${formatCurrency(liveDiesel)}/L (${[grade, zoneLabel].filter(Boolean).join(' ')})`,
+    ];
+    if (effective) parts.push(`effective ${formatDate(effective.slice(0, 10))}`);
+    else if (updated) parts.push(`updated ${formatDate(updated)}`);
     if (warning) parts.push(warning);
     return parts.join(' · ');
   })();
@@ -1607,6 +1736,84 @@ function CompanySection() {
         value={supportEmail}
         onChangeText={setSupportEmail}
       />
+
+      <Label className="mt-1 text-muted">Banking details</Label>
+      <Txt className="-mt-2 text-caption text-faint">
+        Shown in a &quot;How to pay&quot; section on the invoices you send (PDF, invoice email and
+        online invoice) once a bank name and account number are filled in. Until then, invoices ask
+        customers to contact you for banking details.
+      </Txt>
+      <TextField
+        label="Bank name"
+        placeholder="e.g. FNB"
+        maxLength={100}
+        value={bankName}
+        onChangeText={setBankName}
+      />
+      <TextField
+        label="Account holder"
+        placeholder={companyName || 'Registered account name'}
+        maxLength={200}
+        value={bankHolder}
+        onChangeText={setBankHolder}
+      />
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <TextField
+            label="Account number"
+            placeholder="Digits only"
+            keyboardType="number-pad"
+            maxLength={30}
+            value={bankAccount}
+            onChangeText={setBankAccount}
+          />
+        </View>
+        <View className="flex-1">
+          <TextField
+            label="Branch code"
+            placeholder="e.g. 250655"
+            keyboardType="number-pad"
+            maxLength={14}
+            value={bankBranch}
+            onChangeText={setBankBranch}
+          />
+        </View>
+      </View>
+      <SelectField
+        label="Account type"
+        options={[
+          { label: 'Not specified', value: 'none' },
+          { label: 'Cheque / current', value: 'CHEQUE' },
+          { label: 'Savings', value: 'SAVINGS' },
+          { label: 'Transmission', value: 'TRANSMISSION' },
+        ]}
+        value={bankType}
+        onSelect={setBankType}
+      />
+      <TextField
+        label="Payment reference wording (optional)"
+        placeholder="Please use the invoice number as your payment reference."
+        maxLength={200}
+        value={payRefHint}
+        onChangeText={setPayRefHint}
+      />
+      <Txt className="-mt-1 text-caption text-faint">Replaces the default wording on invoices.</Txt>
+
+      <Label className="mt-1 text-muted">Invoicing</Label>
+      <SelectField
+        label="Email invoices on delivery"
+        options={[
+          { label: 'No, keep as a draft', value: 'no' },
+          { label: 'Yes, email the customer', value: 'yes' },
+        ]}
+        value={autoEmail}
+        onSelect={setAutoEmail}
+      />
+      <Txt className="-mt-1 text-caption text-faint">
+        An invoice is raised automatically when a load is delivered. With No, it waits as a draft
+        for you to check and send. With Yes, it is emailed to the customer straight away and marked
+        sent. A customer with no email address always gets a draft.
+      </Txt>
 
       <Label className="mt-1 text-muted">Quote defaults</Label>
       <SelectField
@@ -1775,7 +1982,7 @@ function CompanySection() {
 // Web's six. CUSTOMER and PARTNER exist on the model but neither client
 // exposes them for staff invites.
 const ROLES = ['ADMIN', 'MANAGER', 'OPERATOR', 'DISPATCHER', 'VIEWER', 'DRIVER'].map((r) => ({
-  label: r,
+  label: r.charAt(0) + r.slice(1).toLowerCase(),
   value: r,
 }));
 
@@ -1842,7 +2049,7 @@ function UsersSection() {
         <Label className="text-muted">Invite a teammate</Label>
         <TextField
           label="Email"
-          placeholder="colleague@company.co.za"
+          placeholder="e.g. colleague@company.co.za"
           icon="send"
           autoCapitalize="none"
           keyboardType="email-address"
@@ -1869,7 +2076,7 @@ function UsersSection() {
               {/* The backend refuses a self role-change ("You cannot change
                   your own role"), so don't offer the control. */}
               {String(u.id) === String(meId) ? (
-                <Mono className="text-micro uppercase text-faint">You</Mono>
+                <Mono className="text-caption font-medium text-faint">You</Mono>
               ) : (
                 <>
                   <View style={{ width: 120 }}>
@@ -1929,15 +2136,11 @@ function useNextPaymentLabel(nextBillingAt: string): string {
   return label;
 }
 
-const CHARGE_TONE = (status: string) =>
-  status === 'complete'
-    ? statusHues.success
-    : status === 'pending'
-      ? statusHues.warning
-      : statusHues.danger;
-
 /** One charge row, shared by the preview and the full-history screen. */
 function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
+  const { colors } = useTheme();
+  const chargeTone = (status: string) =>
+    status === 'complete' ? colors.success : status === 'pending' ? colors.warning : colors.danger;
   return (
     <View className={`px-4 py-3 ${last ? '' : 'border-b border-line-row'}`}>
       <View className="flex-row items-center justify-between">
@@ -1947,10 +2150,10 @@ function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
         <Mono className="text-caption text-fg">{formatCurrency(c.amount)}</Mono>
       </View>
       <View className="mt-1 flex-row items-center gap-2">
-        <Mono className="text-micro text-faint">
+        <Mono className="text-caption text-faint">
           {[c.createdAt ? formatDate(c.createdAt) : '', c.reference].filter(Boolean).join(' · ')}
         </Mono>
-        <Mono className="text-micro uppercase" style={{ color: CHARGE_TONE(c.status) }}>
+        <Mono className="text-caption capitalize" style={{ color: chargeTone(c.status) }}>
           {c.status}
         </Mono>
       </View>
@@ -1963,6 +2166,7 @@ function ChargeRow({ c, last }: { c: BillingCharge; last?: boolean }) {
 // it's the same reason there's no sign-up here — so this shows everything the
 // web page shows but sends people there to actually change the plan.
 function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
+  const { colors } = useTheme();
   const { data } = useBillingStatus();
   const { data: history } = useBillingHistory();
   const d = data ?? {};
@@ -1994,32 +2198,22 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   return (
     <View className="gap-4">
       {suspended && (
-        <View className="flex-row items-start gap-2.5 rounded-control border border-danger bg-danger-bg p-3">
-          <Icon name="alert" size={17} color="#FF4949" />
-          <Txt className="flex-1 text-sub text-muted">
-            Your subscription is suspended. You can still view existing data and manage drivers and
-            vehicles, but new quotes and invoices are blocked until payment is settled.
-          </Txt>
-        </View>
+        <Banner
+          tone="danger"
+          message="Your subscription is suspended. You can still view existing data and manage drivers and vehicles, but new quotes and invoices are blocked until payment is settled."
+        />
       )}
       {!suspended && cancelling && (
-        <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color="#F59E0B" />
-          <Txt className="flex-1 text-sub text-muted">
-            Cancelling
-            {subEnd ? ` — access continues until ${formatDate(subEnd)}` : ''}. Quoting and invoicing
-            keep working until then.
-          </Txt>
-        </View>
+        <Banner
+          tone="warning"
+          message={`Cancelling${subEnd ? `. Access continues until ${formatDate(subEnd)}` : ''}. Quoting and invoicing keep working until then.`}
+        />
       )}
       {!suspended && !cancelling && graceDays > 0 && (
-        <View className="flex-row items-start gap-2.5 rounded-control border border-warning bg-warning-bg p-3">
-          <Icon name="alert" size={17} color="#F59E0B" />
-          <Txt className="flex-1 text-sub text-muted">
-            Payment is overdue — {graceDays} day{graceDays === 1 ? '' : 's'} of grace remaining
-            {graceExpires ? ` (until ${formatDate(graceExpires)})` : ''}.
-          </Txt>
-        </View>
+        <Banner
+          tone="warning"
+          message={`Payment is overdue. ${graceDays} day${graceDays === 1 ? '' : 's'} of grace remaining${graceExpires ? ` (until ${formatDate(graceExpires)})` : ''}.`}
+        />
       )}
 
       {failedItems.length > 0 && (
@@ -2031,7 +2225,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
                 label={str(pick(item, ['label']), 'Charge')}
                 hint={`Failed ${formatDate(str(pick(item, ['failed_at'])))}`}
                 value={formatCurrency(num(pick(item, ['amount'])))}
-                valueColor={statusHues.warning}
+                valueColor={colors.warning}
                 mono={false}
               />
             ))}
@@ -2069,7 +2263,7 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
       </Group>
 
       {!!countdown && (
-        <Mono className="text-caption text-accent" style={{ fontVariant: ['tabular-nums'] }}>
+        <Mono className="text-caption text-muted" style={{ fontVariant: ['tabular-nums'] }}>
           {countdown}
         </Mono>
       )}
@@ -2105,33 +2299,39 @@ function BillingSection({ navigation }: { navigation: Props['navigation'] }) {
   );
 }
 
+// Same three groups as the web's Integrations page. Accounting (Xero,
+// QuickBooks Online): one card per provider to connect, and Manage opens the
+// full Accounting screen (features/accounting); the old integrations/xero/
+// endpoints are gone, everything is under integrations/accounting/. Fleet
+// tracking and Developers live in features/integrations.
 function IntegrationsSection() {
-  const { data } = useQuery({
-    queryKey: ['xero-status'],
-    queryFn: () => fetchData('integrations/xero/status/') as Promise<Record<string, unknown>>,
-    retry: false,
-  });
-  const connected = Boolean(pick(data ?? {}, ['connected', 'is_connected']));
   return (
-    <View className="gap-4">
-      <Group>
-        <View className="flex-row items-center justify-between px-4 py-3.5">
-          <View>
-            <Txt className="text-callout text-fg">Xero</Txt>
-            <Txt className="mt-0.5 text-caption text-faint">Accounting sync</Txt>
-          </View>
-          <Mono className={`text-micro uppercase ${connected ? 'text-success' : 'text-faint'}`}>
-            {connected ? 'Connected' : 'Not connected'}
-          </Mono>
+    <View className="gap-6">
+      <View className="gap-3">
+        <View className="gap-1">
+          <Label className="text-muted">Accounting</Label>
+          <Txt className="text-sub text-muted">
+            Send invoices and bills to your books. Payments recorded there come back automatically.
+          </Txt>
         </View>
-      </Group>
-      <Button
-        label={connected ? 'Manage on web' : 'Connect on web'}
-        variant="secondary"
-        icon="link"
-        onPress={() => WebBrowser.openBrowserAsync(`${WEB_APP_URL}/settings/integrations/xero`)}
-        fullWidth
-      />
+        <ProviderCards />
+        <ComingSoonNote />
+      </View>
+      <View className="gap-3">
+        <View className="gap-1">
+          <Label className="text-muted">Fleet tracking</Label>
+          <Txt className="text-sub text-muted">Live vehicle positions and status.</Txt>
+        </View>
+        <FleetTrackingCards />
+      </View>
+      <View className="gap-3">
+        <View className="gap-1">
+          <Label className="text-muted">Developers</Label>
+          <Txt className="text-sub text-muted">Connect your own systems to TruckWys.</Txt>
+        </View>
+        <ApiKeysCard />
+        <WebhooksCard />
+      </View>
     </View>
   );
 }

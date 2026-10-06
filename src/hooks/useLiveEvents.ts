@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { connectLiveEvents, type LiveEvent } from '@/lib/liveEvents';
-import { invalidateForServerEvent } from '@/lib/queryInvalidation';
+import { ALL_DATA_TOPICS, invalidateForServerEvent, invalidateForTopics } from '@/lib/queryInvalidation';
 import { useAuthStore } from '@/stores/authStore';
 import { toast } from '@/lib/toast';
 
@@ -37,6 +37,11 @@ const EVENT_TITLES: Record<string, string> = {
   'subscription.cancelled': 'Subscription cancelled',
 };
 
+// Events whose title and body the backend words precisely; the toast uses them as is.
+const SERVER_WORDED_EVENTS = new Set(['invoice.auto_created']);
+
+const DATA_CHANGED_DEBOUNCE_MS = 250;
+
 export function useLiveEvents() {
   const qc = useQueryClient();
   const token = useAuthStore((s) => s.token);
@@ -59,7 +64,37 @@ export function useLiveEvents() {
   useEffect(() => {
     if (!token) return;
 
-    const handle = connectLiveEvents(token, (e: LiveEvent) => {
+    // data.changed pushes arrive in bursts (a payment fires invoice + payment,
+    // a delivery fires load + invoice + trip), so topics are collected for a
+    // moment and invalidated together, as the web app does.
+    const pending = new Set<string>();
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      flushTimer = null;
+      const topics = [...pending];
+      pending.clear();
+      invalidateForTopics(qc, topics);
+    };
+
+    const handle = connectLiveEvents(
+      token,
+      (e: LiveEvent) => {
+        if (e.event === 'data.changed') {
+          // Always refresh, including for our own change: the server's version
+          // of the record is the one to show. Never toasts.
+          for (const t of e.data?.topics ?? []) pending.add(t);
+          if (!flushTimer) flushTimer = setTimeout(flush, DATA_CHANGED_DEBOUNCE_MS);
+          return;
+        }
+        handleNamedEvent(e);
+      },
+      (isReconnect) => {
+        // Pushes sent while the socket was down are gone for good.
+        if (isReconnect) invalidateForTopics(qc, ALL_DATA_TOPICS);
+      },
+    );
+
+    function handleNamedEvent(e: LiveEvent) {
       // Always refresh, even for our own actions — the actor's device still
       // needs the server's version of the record.
       invalidateForServerEvent(qc, e.event);
@@ -79,14 +114,22 @@ export function useLiveEvents() {
       const isOwnAction = actor != null && String(actor) === String(userId ?? '');
       if (!e.message || isOwnAction) return;
 
-      const label = EVENT_TITLES[e.event] ?? 'Update';
-      const text = label === e.message ? label : `${label} — ${e.message}`;
+      // The server's own wording is exact for these: an auto-created invoice is
+      // now either emailed on delivery or left as a draft to review, so a fixed
+      // "Invoice raised" label would sometimes be wrong.
+      const label = SERVER_WORDED_EVENTS.has(e.event) ? '' : (EVENT_TITLES[e.event] ?? 'Update');
+      const body = e.data?.message && e.data.message !== e.message ? e.data.message : '';
+      const detail = [e.message, body].filter(Boolean).join(': ');
+      const text = !label || label === e.message ? detail || label : `${label}: ${e.message}`;
       const kind = (e.data?.type ?? '').toLowerCase();
       if (kind === 'success') toast.success(text);
       else if (kind === 'alert') toast.error(text);
       else toast.info(text);
-    });
+    }
 
-    return () => handle.close();
+    return () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      handle.close();
+    };
   }, [qc, token, userId]);
 }

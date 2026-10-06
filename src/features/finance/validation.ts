@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, decimalMax } from '@/lib/formatters';
+import { localDateISO } from '@/lib/dates';
+
+// Invoice.total_amount is DecimalField(max_digits=10, decimal_places=2). The
+// total is worked out by the server from the lines, so this is only the ceiling
+// the screen checks the previewed total against.
+const INVOICE_TOTAL_MAX = decimalMax(10, 2);
+// Expense.amount is DecimalField(max_digits=10, decimal_places=2).
+const EXPENSE_AMOUNT_MAX = decimalMax(10, 2);
 
 // Finance's zod schemas — same convention as `src/features/fleet/validation.ts`:
 // both the Add Expense and Create Invoice forms moved off imperative
@@ -15,7 +23,7 @@ import { parseNum } from '@/lib/formatters';
 // `NaN` for the comma-decimal / grouped-thousands input a South African
 // keyboard produces (see `src/lib/formatters.ts`).
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => localDateISO();
 
 const numericOptionalField = (label: string) =>
   z
@@ -28,23 +36,39 @@ const numericOptionalField = (label: string) =>
 // ── Expense ──────────────────────────────────────────────────────────────
 
 export function expenseSchema() {
-  return z.object({
-    category: z.string().trim().min(1, 'Category is required'),
-    description: z.string().trim().min(1, 'Description is required'),
-    amount: z
-      .string()
-      .trim()
-      .min(1, 'Amount is required')
-      .refine((v) => parseNum(v) != null, 'Enter a number, e.g. 1 250,00')
-      .refine((v) => (parseNum(v) ?? 0) > 0, 'Must be more than 0'),
-    date: z.string().trim().min(1, 'Date is required'),
-    litres: numericOptionalField('Litres'),
-    pricePerLitre: numericOptionalField('Price / litre'),
-    vehicle: z.string().optional(),
-    vendor: z.string().trim().optional(),
-    receipt: z.string().trim().optional(),
-    notes: z.string().trim().optional(),
-  });
+  return z
+    .object({
+      category: z.string().trim().min(1, 'Category is required'),
+      description: z.string().trim().min(1, 'Description is required'),
+      // Gross: what was paid, VAT included.
+      amount: z
+        .string()
+        .trim()
+        .min(1, 'Amount is required')
+        .refine((v) => parseNum(v) != null, 'Enter a number, e.g. 1 250,00')
+        .refine((v) => (parseNum(v) ?? 0) > 0, 'Must be more than 0')
+        .refine((v) => (parseNum(v) ?? 0) <= EXPENSE_AMOUNT_MAX, "That's too large an amount"),
+      // The VAT inside `amount`; worked out from it unless the person types their own.
+      tax_code: z.string().optional(),
+      vat_amount: numericOptionalField('VAT'),
+      date: z.string().trim().min(1, 'Date is required'),
+      litres: numericOptionalField('Litres'),
+      pricePerLitre: numericOptionalField('Price / litre'),
+      vehicle: z.string().optional(),
+      // The supplier's id; '' for none. `vendor` keeps the old free-text name of an
+      // expense raised before suppliers existed, and is only sent back as it was.
+      supplier: z.string().optional(),
+      vendor: z.string().trim().optional(),
+      receipt: z.string().trim().optional(),
+      notes: z.string().trim().optional(),
+    })
+    .superRefine((v, ctx) => {
+      const vat = parseNum(v.vat_amount ?? '');
+      const amount = parseNum(v.amount);
+      if (vat != null && amount != null && vat > amount) {
+        ctx.addIssue({ code: 'custom', path: ['vat_amount'], message: "VAT can't be more than the amount" });
+      }
+    });
 }
 export type ExpenseFormValues = z.infer<ReturnType<typeof expenseSchema>>;
 
@@ -56,8 +80,11 @@ export const EXPENSE_FIELD_ORDER: (keyof ExpenseFormValues)[] = [
   'litres',
   'pricePerLitre',
   'amount',
+  'tax_code',
+  'vat_amount',
   'date',
   'vehicle',
+  'supplier',
   'vendor',
   'receipt',
   'notes',
@@ -72,40 +99,38 @@ export function expenseWarnings(v: { date?: string }): Partial<Record<'date', st
 // ── Invoice ──────────────────────────────────────────────────────────────
 
 /**
- * `originalDueDate` grandfathers a DRAFT invoice that was created (and never
- * sent) with a due date that's since slipped into the past. Editing every
- * OTHER field on that invoice must still work — only setting a NEW past due
- * date is blocked. Pass `undefined` for a new invoice (nothing to grandfather).
+ * The invoice's header fields. The amounts are not here: they come from the
+ * lines (lib/finance/lines), which the server turns into totals.
+ *
+ * A due date in the past is allowed (a back-dated invoice, or a draft that has
+ * been sitting): the screen warns that it will go out already overdue. The only
+ * hard rule is the server's, that it isn't before the issue date.
  */
-export function invoiceSchema({ originalDueDate }: { originalDueDate?: string } = {}) {
-  return z.object({
-    customer: z.string().trim().min(1, 'Customer is required'),
-    subtotal: z
-      .string()
-      .trim()
-      .min(1, 'Amount is required')
-      .refine((v) => parseNum(v) != null, 'Enter a number, e.g. 12 500,00')
-      .refine((v) => (parseNum(v) ?? 0) > 0, 'Enter an amount'),
-    description: z.string().trim().optional(),
-    due_date: z
-      .string()
-      .trim()
-      .min(1, 'Due date is required')
-      .superRefine((v, ctx) => {
-        if (originalDueDate && v === originalDueDate) return;
-        if (v < todayISO()) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Due date can't be in the past" });
-        }
-      }),
-    payment_terms: z.string(),
-  });
+export function invoiceSchema() {
+  return z
+    .object({
+      customer: z.string().trim().min(1, 'Customer is required'),
+      issue_date: z.string().trim().min(1, 'Issue date is required'),
+      due_date: z.string().trim().min(1, 'Due date is required'),
+      payment_terms: z.string(),
+      description: z.string().trim().optional(),
+      status: z.enum(['DRAFT', 'SENT']),
+    })
+    .superRefine((v, ctx) => {
+      if (v.issue_date && v.due_date && v.due_date < v.issue_date) {
+        ctx.addIssue({ code: 'custom', path: ['due_date'], message: "Due date can't be before the issue date" });
+      }
+    });
 }
 export type InvoiceFormValues = z.infer<ReturnType<typeof invoiceSchema>>;
 
 export const INVOICE_FIELD_ORDER: (keyof InvoiceFormValues)[] = [
   'customer',
-  'subtotal',
+  'issue_date',
   'due_date',
   'payment_terms',
   'description',
 ];
+
+/** Invoice.total_amount is DecimalField(max_digits=10, decimal_places=2). */
+export const INVOICE_TOTAL_LIMIT = INVOICE_TOTAL_MAX;

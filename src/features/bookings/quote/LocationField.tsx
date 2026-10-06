@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
-import { Icon, Badge, Button, TextField, Txt, Label, Mono, INPUT_TEXT } from '@/components/ui';
+import { Icon, Badge, Button, Card, TextField, Txt, Label, Mono, INPUT_TEXT } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
@@ -210,7 +210,7 @@ function LocationFieldImpl({
         <BottomSheetTextInput
           className="flex-1 text-fg"
           placeholder={placeholder}
-          placeholderTextColor={colors.faint}
+          placeholderTextColor={colors.placeholder}
           value={text}
           onChangeText={(t) => {
             // A real keystroke means the settled value no longer applies, so
@@ -228,7 +228,7 @@ function LocationFieldImpl({
           style={[INPUT_TEXT, { paddingVertical: 12 }]}
         />
       </View>
-      {error && <Mono className="mt-1 text-micro text-danger">{error}</Mono>}
+      {error && <Mono className="mt-1 text-caption text-danger">{error}</Mono>}
       {/* Two ways in besides typing: the map, and raw coordinates. */}
       <View className="mt-2 flex-row items-center gap-2">
         {onPickOnMap && (
@@ -258,10 +258,10 @@ function LocationFieldImpl({
       </View>
 
       {coordMode && (
-        <View className="mt-2 gap-2 rounded-card border border-line bg-surface p-3">
+        <Card className="mt-2 gap-2 p-3">
           <TextField
             label="Latitude, longitude"
-            placeholder="-33.9249, 18.4241"
+            placeholder="e.g. -33.9249, 18.4241"
             value={coordText}
             onChangeText={(t) => {
               setCoordText(t);
@@ -293,13 +293,14 @@ function LocationFieldImpl({
               />
             </View>
           </View>
-        </View>
+        </Card>
       )}
       {focused && results.length > 0 && (
-        <View className="mt-2 overflow-hidden rounded-card border border-line bg-surface">
+        <Card className="mt-2">
           {results.map((r, i) => (
-            <Pressable
+            <TouchableOpacity
               key={`${r.label}-${i}`}
+              activeOpacity={0.7}
               onPress={() => {
                 // Settle on this label and discard any reply still in flight,
                 // so nothing can refill the list behind the selection.
@@ -310,17 +311,17 @@ function LocationFieldImpl({
                 setResults([]);
                 recordLocationPick(r.label, r.lat, r.lon);
               }}
-              className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3 active:bg-surface-hover"
+              className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3"
             >
               {r.isRecent && <Icon name="clock" size={13} color={colors.faint} />}
-              <Icon name="pin" size={15} color={r.foreign ? '#F59E0B' : colors.faint} />
+              <Icon name="pin" size={15} color={r.foreign ? colors.warningDot : colors.faint} />
               <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
                 {r.label}
               </Txt>
               {r.foreign && <Badge label={r.country || 'Cross-border'} tone="warning" />}
-            </Pressable>
+            </TouchableOpacity>
           ))}
-        </View>
+        </Card>
       )}
     </View>
   );

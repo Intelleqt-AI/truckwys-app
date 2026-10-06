@@ -1,5 +1,5 @@
 import { useState, type ComponentProps } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useForm, useWatch, Controller, type Control, type FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -15,15 +15,14 @@ import {
   SaveSuccessOverlay,
   type TextFieldProps,
 } from '@/components/ui';
-import { createVehicleType, updateVehicleType, deleteVehicleType } from './api';
+import { createVehicleType, updateVehicleType } from './api';
 import {
   vehicleTypeSchema,
   VEHICLE_TYPE_FIELD_ORDER,
-  vehicleTypeDeleteCopy,
   type VehicleTypeFormValues,
 } from './validation';
 import { num, str, pick } from '@/lib/api/list';
-import { parseNum } from '@/lib/formatters';
+import { parseNum, round2 } from '@/lib/formatters';
 import { toast } from '@/lib/toast';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
@@ -146,23 +145,19 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
   const editing = editId != null;
   const preview = (route.params?.preview ?? {}) as Record<string, unknown>;
   // Shared platform default (company: null — editable, backend copy-on-writes
-  // the PATCH into a new company-owned row; never deletable, the backend 403s
-  // it), this company's own override of one (overrides_shared_default: true —
-  // editable in place, "Reset" instead of "Delete"), or a fully custom type.
-  // Read straight off preview, not through pick() — pick() treats null the
-  // same as a missing key, which would erase the "shared" signal entirely
+  // the PATCH into a new company-owned row), or one of this company's own
+  // types. Read straight off preview, not through pick() — pick() treats null
+  // the same as a missing key, which would erase the "shared" signal entirely
   // (see normalizeVehicleType's comment in bookings/api.ts). Undefined
   // (pre-shared-catalogue backend) reads as not-shared, same reasoning.
   const isShared = preview.company === null;
-  const isOverride = !isShared && preview.overrides_shared_default === true;
   const qc = useQueryClient();
   const demo = useDemo();
 
   const [busy, setBusy] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const { control, handleSubmit, getValues, formState } = useForm<VehicleTypeFormValues>({
+  const { control, handleSubmit, formState } = useForm<VehicleTypeFormValues>({
     resolver: zodResolver(vehicleTypeSchema()),
     defaultValues: fromRecord(preview),
     mode: 'onBlur',
@@ -174,7 +169,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
 
   useUnsavedChangesGuard({
     navigation,
-    isDirty: () => formState.isDirty && !busy && !deleting && !saved,
+    isDirty: () => formState.isDirty && !busy && !saved,
     title: 'Discard changes?',
     message: editing
       ? "Your edits to this vehicle type haven't been saved."
@@ -192,24 +187,29 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
     void dismissKeyboard();
     setBusy(true);
     // capacity is in tons (web stores vehicle-type capacity as tons directly).
+    // Every numeric field here is a DecimalField(…, decimal_places=2) with no
+    // rounding on the backend — round2 so a value with more decimals than
+    // that (the blur-reformat only runs once the field loses focus) doesn't
+    // get the save rejected.
     const payload = {
       name: v.name.trim(),
       description: (v.description ?? '').trim(),
-      capacity: parseNum(v.capacity) ?? 0,
-      base_rate: parseNum(v.base_rate) ?? 0,
+      capacity: round2(parseNum(v.capacity) ?? 0),
+      base_rate: round2(parseNum(v.base_rate) ?? 0),
       fuel_type: v.fuel_type,
       // Left out when blank so the backend's own default (36 L/100km) stands
       // rather than being overwritten with a zero.
       ...(v.fuel_consumption_l_per_100km?.trim()
-        ? { fuel_consumption_l_per_100km: parseNum(v.fuel_consumption_l_per_100km) ?? undefined }
+        ? { fuel_consumption_l_per_100km: round2(parseNum(v.fuel_consumption_l_per_100km) ?? 0) }
         : {}),
       // Same reasoning — left out when blank so the backend's own 2% default
       // stands, rather than sending 0 (which would switch the fuel-weight
       // adjustment off entirely, unlike web which coerces a blank to 2).
       ...(v.fuel_consumption_sensitivity_pct?.trim()
         ? {
-            fuel_consumption_sensitivity_pct:
-              parseNum(v.fuel_consumption_sensitivity_pct) ?? undefined,
+            fuel_consumption_sensitivity_pct: round2(
+              parseNum(v.fuel_consumption_sensitivity_pct) ?? 0,
+            ),
           }
         : {}),
       active: v.active === 'true',
@@ -236,39 +236,9 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
     if (first) anchors.scrollToField(first);
   };
 
-  // Not offered at all for a shared default — see the button below, which
-  // never renders this while isShared, so `editing && isShared` can't reach
-  // here. Kept as a guard anyway rather than trusting the caller.
-  const confirmDelete = () => {
-    if (!editing || isShared) return;
-    if (demo.block(DEMO_UNAVAILABLE_MESSAGE)) return;
-    const copy = vehicleTypeDeleteCopy(getValues('name').trim() || 'this type', isOverride);
-    Alert.alert(copy.title, copy.message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: copy.confirmLabel,
-        style: 'destructive',
-        onPress: async () => {
-          setDeleting(true);
-          try {
-            await deleteVehicleType(editId);
-            invalidateFor(qc, 'vehicle-type');
-            toast.success();
-            navigation.goBack();
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : copy.errorMessage);
-          } finally {
-            setDeleting(false);
-          }
-        },
-      },
-    ]);
-  };
-
   return (
     <View className="flex-1">
       <SheetScreen
-        // eyebrow={editing ? 'Edit' : 'New vehicle type'}
         title={editing ? 'Edit vehicle type' : 'Add vehicle type'}
         variant="modal"
         onBack={() => navigation.goBack()}
@@ -285,7 +255,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
         <Animated.View className="gap-5" style={shakeStyle}>
           {isShared && (
             <Txt className="text-caption text-faint">
-              TruckWys platform default — saving creates your own copy, used only by your
+              TruckWys platform default. Saving creates your own copy, used only by your
               company.
             </Txt>
           )}
@@ -346,7 +316,7 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                   name="fuel_type"
                   anchors={anchors}
                   label="Fuel type"
-                  icon="dollar"
+                  icon="fuel"
                   options={FUEL_TYPE_OPTIONS}
                 />
               </View>
@@ -386,20 +356,6 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                 anchors={anchors}
                 options={ACTIVE_OPTIONS}
               />
-              {/* Nothing to delete/reset yet on a shared default — the
-              backend's own perform_destroy 403s a tenant trying, so the
-              button is hidden rather than left to fail on tap (mirrors
-              SettingsScreen's SwipeRow, which disables the same gesture). */}
-              {!isShared && (
-                <Button
-                  label={isOverride ? 'Reset vehicle type' : 'Delete vehicle type'}
-                  variant="danger"
-                  icon="trash"
-                  loading={deleting}
-                  onPress={confirmDelete}
-                  fullWidth
-                />
-              )}
             </View>
           )}
         </Animated.View>

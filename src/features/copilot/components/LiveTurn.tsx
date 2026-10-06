@@ -1,4 +1,4 @@
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { Txt, Mono, Icon } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { UserBubble } from './UserBubble';
@@ -55,13 +55,16 @@ export function LiveTurn({
           </View>
           {/* Web has no retry here and leaves the message stranded with no reply
               and nothing to tap. */}
-          <Pressable
+          <TouchableOpacity
             onPress={() => onRetry(turn.userText)}
+            activeOpacity={0.6}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityRole="button"
-            className="mt-2.5 self-start rounded-chip border border-accent px-2.5 py-1.5 active:opacity-60"
+            accessibilityLabel="Retry"
+            className="mt-2.5 self-start rounded-chip border border-line-active px-2.5 py-1.5"
           >
-            <Mono className="text-micro tracking-wide uppercase text-accent">Retry</Mono>
-          </Pressable>
+            <Mono className="text-caption font-medium text-link">Retry</Mono>
+          </TouchableOpacity>
         </View>
       )}
     </View>

@@ -45,7 +45,7 @@ export async function fileToText(file: PickedFile): Promise<string> {
   const spreadsheetExt = /\.(xlsx|xls|xlsm|ods)$/i.test(file.name);
   const hasOtherKnownExt = /\.[a-z0-9]+$/i.test(file.name) && !spreadsheetExt;
   if (hasOtherKnownExt) {
-    throw new Error('Unsupported file — use CSV or Excel');
+    throw new Error('Unsupported file. Use CSV or Excel.');
   }
 
   // xlsx, xls, xlsm, ods — read as a spreadsheet. Only the first sheet: a
@@ -58,7 +58,7 @@ export async function fileToText(file: PickedFile): Promise<string> {
   try {
     book = XLSX.read(base64, { type: 'base64', cellDates: false, raw: false });
   } catch {
-    throw new Error("Couldn't read that file — try saving it as CSV or Excel");
+    throw new Error("Couldn't read that file. Try saving it as CSV or Excel.");
   }
   const first = book.SheetNames[0];
   const sheet = first ? book.Sheets[first] : undefined;

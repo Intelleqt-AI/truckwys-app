@@ -1,5 +1,5 @@
 import { type ReactNode, type RefObject, useLayoutEffect, useCallback, useEffect, useRef, useState } from 'react';
-import { View, Pressable, RefreshControl, Platform, TouchableOpacity } from 'react-native';
+import { View, RefreshControl, Platform, TouchableOpacity } from 'react-native';
 import {
   KeyboardAwareScrollView,
   KeyboardStickyView,
@@ -9,12 +9,13 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Mono, Label } from './Text';
 import { Icon, type IconName } from './icons';
-import { AmbientGlow } from './layout';
 import { useTheme } from '@/theme/ThemeProvider';
+import { TAP_MIN } from '@/theme/tokens';
 
 // Fixed square so the icon centres AND the native iOS bar-button frame is
 // square — otherwise the iOS 26 glass capsule stretches into an oval ("not
-// round"). No background; press feedback via opacity.
+// round"). No background; press feedback via opacity. Drawn at 34; HEADER_HIT_SLOP
+// grows the hit area to TAP_MIN (web rule R7).
 const ICON_BTN = {
   width: 34,
   height: 34,
@@ -22,9 +23,7 @@ const ICON_BTN = {
   alignItems: 'center',
   justifyContent: 'center',
 } as const;
-const pressDim = ({ pressed }: { pressed: boolean }) => [ICON_BTN, { opacity: pressed ? 0.4 : 1 }];
-// Text actions size to their label (auto-width pill), not the icon square.
-const pressDimText = ({ pressed }: { pressed: boolean }) => ({ opacity: pressed ? 0.4 : 1 });
+const HEADER_HIT_SLOP = Math.ceil((TAP_MIN - ICON_BTN.width) / 2);
 
 // iOS 26 header items: the legacy headerRight/headerLeft render-prop wraps
 // custom views in a native "shared background" Liquid Glass group, and that
@@ -51,7 +50,7 @@ function HeaderItemIcon({
   return (
     <TouchableOpacity
       onPress={onPress}
-      hitSlop={8}
+      hitSlop={HEADER_HIT_SLOP}
       activeOpacity={0.4}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -70,10 +69,16 @@ function HeaderItemLabel({
   onPress: () => void;
 }) {
   return (
-    <TouchableOpacity onPress={onPress} hitSlop={8} activeOpacity={0.4} accessibilityRole="button">
+    <TouchableOpacity
+      onPress={onPress}
+      hitSlop={HEADER_HIT_SLOP}
+      activeOpacity={0.4}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
       <Mono
         numberOfLines={1}
-        className="px-1 text-micro uppercase tracking-wide text-accent"
+        className="px-1 text-callout font-medium text-link"
         style={{ fontWeight: '600' }}
       >
         {label}
@@ -150,57 +155,58 @@ export function SheetScreen({
   const renderAction = useCallback(
     () =>
       actionIcon ? (
-        <Pressable
+        <TouchableOpacity
           onPress={() => actionRef.current?.()}
-          hitSlop={8}
+          hitSlop={HEADER_HIT_SLOP}
+          activeOpacity={0.4}
           accessibilityRole="button"
           accessibilityLabel={actionLabel}
-          style={pressDim}
-          // Keeps the square in the native view tree: a flattened wrapper leaves
-          // iOS sizing its glass to something other than the 34x34 we asked for.
-          collapsable={false}
+          style={ICON_BTN}
         >
+          {/* collapsable={false} keeps the square in the native view tree: a
+              flattened wrapper leaves iOS sizing its glass to something other
+              than the 34x34 we asked for. */}
           <View style={ICON_BTN} collapsable={false}>
-            <Icon name={actionIcon} size={21} color={colors.accent} strokeWidth={2} />
+            <Icon name={actionIcon} size={21} color={colors.fg} strokeWidth={2} />
           </View>
-        </Pressable>
+        </TouchableOpacity>
       ) : (
-        <Pressable
+        <TouchableOpacity
           onPress={() => actionRef.current?.()}
-          hitSlop={8}
+          hitSlop={HEADER_HIT_SLOP}
+          activeOpacity={0.4}
           accessibilityRole="button"
           accessibilityLabel={actionLabel}
-          style={pressDimText}
         >
           <Mono
             numberOfLines={1}
-            className="px-1 text-micro uppercase tracking-wide text-accent"
+            className="px-1 text-callout font-medium text-link"
             style={{ fontWeight: '600' }}
           >
             {actionLabel}
           </Mono>
-        </Pressable>
+        </TouchableOpacity>
       ),
-    [actionLabel, actionIcon, colors.accent],
+    [actionLabel, actionIcon, colors.fg],
   );
 
   // Modals close with an X (clear "dismiss" affordance) rather than a Cancel word.
   const renderClose = useCallback(
     () => (
-      <Pressable
+      <TouchableOpacity
         onPress={() => backRef.current?.()}
-        hitSlop={8}
+        hitSlop={HEADER_HIT_SLOP}
+        activeOpacity={0.4}
         accessibilityRole="button"
         accessibilityLabel="Close"
-        style={pressDim}
-        collapsable={false}
+        style={ICON_BTN}
       >
         <View style={ICON_BTN} collapsable={false}>
-          <Icon name="x" size={22} color={colors.accent} strokeWidth={2} />
+          <Icon name="x" size={22} color={colors.fg} strokeWidth={2} />
         </View>
-      </Pressable>
+      </TouchableOpacity>
     ),
-    [colors.accent],
+    [colors.fg],
   );
 
   const iosRightItems = useCallback(
@@ -212,7 +218,7 @@ export function SheetScreen({
             icon={actionIcon}
             label={actionLabel}
             onPress={() => actionRef.current?.()}
-            color={colors.accent}
+            color={colors.fg}
           />
         ) : (
           <HeaderItemLabel label={actionLabel ?? ''} onPress={() => actionRef.current?.()} />
@@ -220,7 +226,7 @@ export function SheetScreen({
         hidesSharedBackground: true,
       },
     ],
-    [actionLabel, actionIcon, colors.accent],
+    [actionLabel, actionIcon, colors.fg],
   );
 
   const iosLeftItems = useCallback(
@@ -233,13 +239,13 @@ export function SheetScreen({
             label="Close"
             size={22}
             onPress={() => backRef.current?.()}
-            color={colors.accent}
+            color={colors.fg}
           />
         ),
         hidesSharedBackground: true,
       },
     ],
-    [colors.accent],
+    [colors.fg],
   );
 
   // A boolean, not onAction itself — the function's identity changes every
@@ -277,7 +283,6 @@ export function SheetScreen({
 
   return (
     <View className="flex-1 bg-bg-deep">
-      <AmbientGlow />
       <KeyboardAwareScrollView
         ref={scrollRef}
         className="flex-1"
@@ -304,7 +309,7 @@ export function SheetScreen({
             <RefreshControl
               refreshing={!!refreshing}
               onRefresh={onRefresh}
-              tintColor={colors.accent}
+              tintColor={colors.faint}
             />
           ) : undefined
         }

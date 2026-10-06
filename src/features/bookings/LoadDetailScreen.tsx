@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Alert, Modal, Pressable, Image } from 'react-native';
+import { View, Alert, Modal, TouchableOpacity, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,10 +19,12 @@ import {
   Txt,
   Mono,
   Label,
+  Banner,
+  Card,
 } from '@/components/ui';
-import { ErrorState } from '@/components/feedback';
+import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { RouteMap } from '@/components/RouteMap';
-import { useLoad, updateLoadStatus, uploadLoadPod } from './api';
+import { useLoad, updateLoadStatus, uploadLoadPod, seedLoad } from './api';
 import { assignedIds } from './AssignDriverVehicleScreen';
 import { useSubscription } from '@/hooks/useSubscription';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL, stepIndexFor } from './constants';
@@ -30,8 +32,11 @@ import { num, str, pick, asArray } from '@/lib/api/list';
 import { mediaUrl } from '@/lib/api/client';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { formatCurrency, formatDate, formatNumber } from '@/lib/formatters';
+import type { CustomerPrice } from '@/lib/vat';
+import { invoiceDisplayNumber } from '@/lib/invoiceStatus';
+import { staleWork, staleLabel, staleAction } from '@/lib/staleWork';
 import { useTheme } from '@/theme/ThemeProvider';
-import { status as statusHues, radius } from '@/theme/tokens';
+import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
@@ -39,8 +44,8 @@ import type { AppStackParamList } from '@/navigation/types';
 type Props = NativeStackScreenProps<AppStackParamList, 'LoadDetail'>;
 
 export function LoadDetailScreen({ route, navigation }: Props) {
-  const { id, preview } = route.params;
-  const { data, isError, refetch } = useLoad(id, preview);
+  const { id, preview, title } = route.params;
+  const { data, error, isError, isPending, refetch } = useLoad(id, preview);
   const { colors } = useTheme();
   const qc = useQueryClient();
   const subscription = useSubscription();
@@ -52,8 +57,25 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const [deliverBusy, setDeliverBusy] = useState(false);
   const [uploadDeliverBusy, setUploadDeliverBusy] = useState(false);
 
+  // A 404 means the load was deleted or moved, which retrying can't fix.
+  if (isError && !data && (error as { status?: number } | null)?.status === 404) {
+    return (
+      <SheetScreen title="Load" onBack={() => navigation.goBack()}>
+        <NotFoundState what="Load" onBack={() => navigation.goBack()} />
+      </SheetScreen>
+    );
+  }
   if (isError && !data) return <ErrorState onRetry={refetch} message="Couldn't load this booking." />;
-  const l = (data ?? {}) as Record<string, unknown>;
+  // Nothing cached and no list-row preview (e.g. opened from a notification):
+  // say it's loading rather than rendering a zeroed "PENDING / Unassigned" load.
+  if (isPending && !data) {
+    return (
+      <SheetScreen title={title ?? 'Load'} onBack={() => navigation.goBack()}>
+        <DetailSkeleton />
+      </SheetScreen>
+    );
+  }
+  const l =(data ?? {}) as Record<string, unknown>;
 
   const status = str(pick(l, ['status']), 'PENDING').toUpperCase();
   const idx = stepIndexFor(status);
@@ -61,7 +83,34 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const rate = num(pick(l, ['rate']));
   const distance = num(pick(l, ['distance']));
   const total = num(pick(l, ['total_amount']));
+  // Price excl. VAT, VAT and total incl. VAT as the customer is shown them (same
+  // rule as the quote it came from: 15%, or 0% international; backend quote_vat).
+  const rawPrice = pick(l, ['customer_price']);
+  const customerPrice =
+    rawPrice && typeof rawPrice === 'object' && !Array.isArray(rawPrice)
+      ? (rawPrice as CustomerPrice)
+      : undefined;
+  const vatShown = !!customerPrice?.vat_registered;
   const ratePerKm = distance ? rate / distance : 0;
+  const fuelSurcharge = num(pick(l, ['fuel_surcharge']));
+  const additional = num(pick(l, ['additional_charges', 'additional']));
+  // The lines shown must add up to the total. When the stored total carries
+  // charges that were never broken down on this order, say so in one line
+  // instead of leaving a silent gap.
+  const notItemised = Math.round((total - (rate + fuelSurcharge + additional)) * 100) / 100;
+  // What fuel was expected to cost (the quote's fuel line) against what was
+  // spent (approved FUEL expenses logged on this order's trips). Null when
+  // there is no such figure; the block hides itself when both are null.
+  const fuelEst = pick(l, ['fuel_cost_estimated']) != null ? num(pick(l, ['fuel_cost_estimated'])) : null;
+  const fuelAct = pick(l, ['fuel_cost_actual']) != null ? num(pick(l, ['fuel_cost_actual'])) : null;
+  const fuelDiff = fuelEst != null && fuelAct != null ? Math.round((fuelAct - fuelEst) * 100) / 100 : null;
+  // Open too long, or past its delivery date: not current work.
+  const stale = staleWork({
+    status,
+    delivery_date: str(pick(l, ['delivery_date'])) || null,
+    pickup_date: str(pick(l, ['pickup_date'])) || null,
+    created_at: str(pick(l, ['created_at'])) || null,
+  });
   const invoiced = status === 'INVOICED' || !!pick(l, ['invoice_id', 'invoice']);
   const hasPod = !!pick(l, ['pod_signature', 'pod_received_by', 'pod_document']);
   const podDocumentUrl = str(pick(l, ['pod_document']));
@@ -142,8 +191,12 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         };
       }
       case 'INVOICED': {
-        const invoiceNumber = str(pick(l, ['invoice_number', 'invoice']));
-        return { ...base, meta: invoiceNumber ? `Invoice ${invoiceNumber}` : undefined };
+        // A draft invoice carries a placeholder number until it is sent.
+        const invoiceNumber = invoiceDisplayNumber({ invoice_number: pick(l, ['invoice_number', 'invoice']) }, '');
+        return {
+          ...base,
+          meta: invoiceNumber === 'Draft' ? 'Invoice drafted' : invoiceNumber ? `Invoice ${invoiceNumber}` : undefined,
+        };
       }
       default:
         return base;
@@ -153,7 +206,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   // is to leave every stage muted (idx is -1) and cap the list with its own
   // terminal row, rather than guessing which stage it was cancelled from.
   if (status === 'CANCELLED') {
-    timelineSteps.push({ label: 'Cancelled', done: true, current: false, color: statusHues.danger });
+    timelineSteps.push({ label: 'Cancelled', done: true, current: false, color: colors.dangerDot });
   }
 
   const refresh = () => invalidateFor(qc, 'load');
@@ -162,7 +215,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     if (subscription.blocked) return toast.error(subscription.notice ?? 'Subscription inactive');
     setBusy(true);
     try {
-      await updateLoadStatus(id, next);
+      seedLoad(qc, await updateLoadStatus(id, next), id);
       refresh();
       toast.success();
     } catch (e) {
@@ -214,7 +267,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     try {
       const name = asset.fileName ?? `pod-${id}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
-      await uploadLoadPod(id, { uri: asset.uri, name, type });
+      // seedLoad ignores the response unless it is a load record.
+      seedLoad(qc, await uploadLoadPod(id, { uri: asset.uri, name, type }), id);
       // A POD is what makes an invoice Fast Pay-eligible, so this moves the
       // capital lists too ('load' covers them).
       refresh();
@@ -229,7 +283,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const skipAndDeliver = async () => {
     setDeliverBusy(true);
     try {
-      await updateLoadStatus(id, 'DELIVERED');
+      seedLoad(qc, await updateLoadStatus(id, 'DELIVERED'), id);
       refresh();
       setShowDeliverModal(false);
       toast.success();
@@ -248,7 +302,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     try {
       const name = asset.fileName ?? `pod-${id}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
-      await uploadLoadPod(id, { uri: asset.uri, name, type });
+      seedLoad(qc, await uploadLoadPod(id, { uri: asset.uri, name, type }), id);
       // Backend flips IN_TRANSIT -> DELIVERED as a side effect of this call.
       refresh();
       setShowDeliverModal(false);
@@ -262,7 +316,6 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
   return (
     <SheetScreen
-      eyebrow="Load detail"
       title={str(pick(l, ['load_number', 'reference']), 'Load')}
       onBack={() => navigation.goBack()}
       footer={
@@ -272,7 +325,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           <View className="gap-2.5">
             {invoiced && invoiceId && (
               <Button
-                label="See invoice"
+                label="View invoice"
                 icon="receipt"
                 variant="secondary"
                 onPress={() => nav.openInvoice(invoiceId)}
@@ -303,6 +356,18 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         </View>
       </Group>
 
+      {/* Stale work is never shown as current: say how long and what to do. */}
+      {stale && (
+        <View className="mb-5">
+          <Banner
+            tone="warning"
+            message={`Still ${STATUS_LABEL(status).toLowerCase()}, ${
+              stale.overdue ? `${staleLabel(stale).days} past its delivery date` : `open ${staleLabel(stale).text}`
+            }. ${staleAction({ status })}.`}
+          />
+        </View>
+      )}
+
       {/* Update status — single dropdown (current + valid next states) */}
       {transitions.length > 0 && (
         <View className="mb-5">
@@ -321,7 +386,12 @@ export function LoadDetailScreen({ route, navigation }: Props) {
       {/* Metrics */}
       <View className="mb-5 flex-row flex-wrap gap-3">
         <View className="flex-row" style={{ width: '47.5%' }}>
-          <StatCard label="Total amount" value={formatCurrency(total, { maximumFractionDigits: 0 })} />
+          <StatCard
+            label={vatShown ? 'Total incl. VAT' : 'Total amount'}
+            value={formatCurrency(vatShown ? num(customerPrice?.total_incl_vat) : total, {
+              maximumFractionDigits: 0,
+            })}
+          />
         </View>
         <View className="flex-row" style={{ width: '47.5%' }}>
           <StatCard label="Distance" value={`${formatNumber(distance)} km`} />
@@ -339,7 +409,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Route */}
       <SectionLabel>Route</SectionLabel>
-      <View className="mb-5 rounded-card border border-line bg-surface p-4">
+      <Card className="mb-5 p-4">
         <View className="flex-row gap-3">
           <View className="items-center pt-1">
             <View style={{ width: 10, height: 10, borderRadius: 10, backgroundColor: colors.accent }} />
@@ -354,11 +424,11 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                 marginVertical: 4,
               }}
             />
-            <Icon name="pin" size={16} color="#22C55E" />
+            <Icon name="pin" size={16} color={colors.successDot} />
           </View>
           <View className="flex-1">
-            <Label className="text-faint" style={{ fontSize: 9 }}>
-              Pickup · {formatDate(str(pick(l, ['pickup_date'])) || new Date().toISOString())}
+            <Label className="text-faint">
+              Pickup · {formatDate(str(pick(l, ['pickup_date'])))}
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg">
               {str(pick(l, ['pickup_location', 'pickup_city']), '—')}
@@ -369,7 +439,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
             </Txt>
             {stopsRaw.length > 0 && (
               <View className="my-2">
-                <Label className="text-faint" style={{ fontSize: 9 }}>
+                <Label className="text-faint">
                   Stops ({stopsRaw.length})
                 </Label>
                 {stopsRaw.map((s, i) => (
@@ -380,8 +450,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
               </View>
             )}
             <Mono className="my-3 text-caption text-faint">{str(pick(l, ['cargo']), 'General cargo')}</Mono>
-            <Label className="text-faint" style={{ fontSize: 9 }}>
-              Delivery · {formatDate(str(pick(l, ['delivery_date'])) || new Date().toISOString())}
+            <Label className="text-faint">
+              Delivery · {formatDate(str(pick(l, ['delivery_date'])))}
             </Label>
             <Txt className="mt-0.5 text-callout font-medium text-fg">
               {str(pick(l, ['delivery_location', 'delivery_city']), '—')}
@@ -392,7 +462,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
             </Txt>
           </View>
         </View>
-      </View>
+      </Card>
 
       {hasRouteCoords && (
         <View className="mb-5">
@@ -407,14 +477,69 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Financials */}
       <Group label="Financials">
-        <DetailRow label="Base rate" value={formatCurrency(rate)} />
-        <DetailRow label="Fuel surcharge" value={formatCurrency(num(pick(l, ['fuel_surcharge'])))} />
-        <DetailRow label="Additional" value={formatCurrency(num(pick(l, ['additional_charges', 'additional'])))} />
+        {/* The per-km figure is a rate, not a summand, so it sits under Base
+            rate as a note rather than among the lines that add up. */}
+        <DetailRow
+          label="Base rate"
+          hint={ratePerKm > 0 ? `${formatCurrency(ratePerKm)}/km` : undefined}
+          value={formatCurrency(rate)}
+        />
+        <DetailRow label="Fuel surcharge" value={formatCurrency(fuelSurcharge)} />
+        <DetailRow label="Additional charges" value={formatCurrency(additional)} />
+        {Math.abs(notItemised) > 0.5 && (
+          <DetailRow
+            label="Not itemised"
+            hint={
+              str(pick(l, ['quote_number']))
+                ? `The total includes charges not broken down here. Quote ${str(pick(l, ['quote_number']))} has the full breakdown.`
+                : 'The total includes charges that were not entered as separate lines.'
+            }
+            value={formatCurrency(notItemised)}
+          />
+        )}
         <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
-          <Txt className="text-callout font-semibold text-fg">Total</Txt>
-          <Mono className="text-heading font-semibold text-accent">{formatCurrency(total)}</Mono>
+          <Txt className="text-callout font-semibold text-fg">{vatShown ? 'Total excl. VAT' : 'Total'}</Txt>
+          <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
         </View>
+        {vatShown ? (
+          <>
+            <DetailRow
+              label={customerPrice?.vat_label || 'VAT'}
+              value={formatCurrency(num(customerPrice?.vat_amount))}
+            />
+            <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
+              <Txt className="text-callout font-semibold text-fg">Total incl. VAT</Txt>
+              <Mono className="text-heading font-semibold text-fg">
+                {formatCurrency(num(customerPrice?.total_incl_vat))}
+              </Mono>
+            </View>
+          </>
+        ) : null}
       </Group>
+
+      {(fuelEst != null || fuelAct != null) && (
+        <Group label="Fuel cost">
+          <DetailRow
+            label="Estimated"
+            hint="The fuel line of the quote this order came from"
+            value={fuelEst != null ? formatCurrency(fuelEst) : 'Not recorded'}
+          />
+          <DetailRow
+            label="Actual"
+            hint="Approved fuel expenses logged on this order's trips"
+            value={fuelAct != null ? formatCurrency(fuelAct) : 'Not recorded'}
+            last={fuelDiff == null || Math.abs(fuelDiff) < 0.5}
+          />
+          {fuelDiff != null && Math.abs(fuelDiff) >= 0.5 && (
+            <DetailRow
+              label="Difference"
+              value={fuelDiff > 0 ? `${formatCurrency(fuelDiff)} over` : `${formatCurrency(-fuelDiff)} under`}
+              valueColor={fuelDiff > 0 ? colors.danger : undefined}
+              last
+            />
+          )}
+        </Group>
+      )}
 
       {/* Assignment */}
       <Group
@@ -449,21 +574,23 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {showDeliverModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowDeliverModal(false)}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={() => setShowDeliverModal(false)}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => {}}
               className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
-              <Txt className="text-heading font-semibold text-fg">Mark as delivered</Txt>
+              <Txt className="text-heading font-semibold text-fg">Proof of delivery</Txt>
               <Txt className="mb-4 mt-1.5 text-sub text-muted">
-                Attach a proof of delivery now, or skip it — you can still add one later from Upload POD.
+                Attach a proof of delivery now, or skip it. You can still add one later from Upload POD.
               </Txt>
               <View className="gap-2.5">
                 <Button
-                  label="Upload POD & set delivered"
+                  label="Upload POD and mark delivered"
                   icon="download"
                   loading={uploadDeliverBusy}
                   disabled={deliverBusy}
@@ -471,7 +598,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
                 <Button
-                  label="Skip & set delivered"
+                  label="Skip and mark delivered"
                   variant="secondary"
                   loading={deliverBusy}
                   disabled={uploadDeliverBusy}
@@ -486,19 +613,21 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
               </View>
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
 
       {showPodPreview && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowPodPreview(false)}>
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={1}
             onPress={() => setShowPodPreview(false)}
-            className="flex-1 items-center justify-center bg-black/65 px-6"
+            className="flex-1 items-center justify-center bg-backdrop px-6"
           >
-            <Pressable
-              onPress={(e) => e.stopPropagation()}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => {}}
               className="w-full max-w-[420px] rounded-panel border border-line bg-surface p-5"
             >
               <Txt className="text-heading font-semibold text-fg">Proof of delivery</Txt>
@@ -524,7 +653,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                 )
               ) : (
                 <Txt className="mb-4 text-sub text-muted">
-                  No document file was attached — only a receipt name is on record.
+                  No document file was attached. Only a receipt name is on record.
                 </Txt>
               )}
               <View className="gap-2.5">
@@ -544,8 +673,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
                   fullWidth
                 />
               </View>
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
     </SheetScreen>

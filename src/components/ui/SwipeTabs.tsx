@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 import PagerView from 'react-native-pager-view';
+import { useReducedMotion } from 'react-native-reanimated';
 import { UnderlineTabs } from './layout';
 
 // Swipeable in-screen tabs: an UnderlineTabs bar synced to a native PagerView.
-// Swiping left/right changes the tab; tapping a tab animates the pager.
+// Swiping left/right changes the tab; tapping a tab animates the pager (jumps
+// straight there when Reduce Motion is on). The active underline is
+// UnderlineTabs' neutral `border-fg`, not accent.
 export function SwipeTabs<T extends string>({
   tabs,
   value,
@@ -24,6 +27,7 @@ export function SwipeTabs<T extends string>({
   lazy?: boolean;
 }) {
   const ref = useRef<PagerView>(null);
+  const reduceMotion = useReducedMotion();
   const index = Math.max(0, tabs.findIndex((t) => t.value === value));
   const pageRef = useRef(index);
   const [visited, setVisited] = useState<Set<number>>(() => new Set([index]));
@@ -31,9 +35,10 @@ export function SwipeTabs<T extends string>({
   useEffect(() => {
     if (pageRef.current !== index) {
       pageRef.current = index;
-      ref.current?.setPage(index);
+      if (reduceMotion) ref.current?.setPageWithoutAnimation(index);
+      else ref.current?.setPage(index);
     }
-  }, [index]);
+  }, [index, reduceMotion]);
 
   return (
     <View className="flex-1">

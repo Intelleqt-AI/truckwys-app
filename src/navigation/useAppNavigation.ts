@@ -13,8 +13,8 @@ export function useAppNavigation() {
       nav.navigate('Tabs', { screen: tab, params } as never),
     openQuote: (id: string | number, preview?: Record<string, unknown>) =>
       nav.navigate('QuoteDetail', { id, preview }),
-    openLoad: (id: string | number, preview?: Record<string, unknown>) =>
-      nav.navigate('LoadDetail', { id, preview }),
+    openLoad: (id: string | number, preview?: Record<string, unknown>, title?: string) =>
+      nav.navigate('LoadDetail', { id, preview, title }),
     openVehicle: (id: string | number, preview?: Record<string, unknown>) =>
       nav.navigate('VehicleDetail', { id, preview }),
     openDriver: (id: string | number, preview?: Record<string, unknown>) =>

@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable, Modal } from 'react-native';
+import { View, TouchableOpacity, Modal } from 'react-native';
 import { Button, Label, Txt, Mono } from '@/components/ui';
 import { formatCurrency } from '@/lib/formatters';
 
@@ -38,10 +38,11 @@ function RateBreakdownModalImpl({
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable className="flex-1 justify-center bg-black/60 px-6" onPress={onClose}>
-        <Pressable
+      <TouchableOpacity activeOpacity={1} className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
+        <TouchableOpacity
+          activeOpacity={1}
           className="rounded-panel border border-line bg-elevated p-4"
-          onPress={(e) => e.stopPropagation()}
+          onPress={() => {}}
         >
           <Label className="mb-3 text-muted">Base rate per km</Label>
           <Txt className="mb-2 text-sub text-muted">
@@ -63,13 +64,13 @@ function RateBreakdownModalImpl({
               </View>
             ))}
           </View>
-          <Txt className="mt-3 text-micro text-faint">
+          <Txt className="mt-3 text-caption text-faint">
             Change them in Settings → Company Details, or Settings → Vehicle Types. Editing the
             box here only affects this quote.
           </Txt>
           <Button label="Close" variant="secondary" onPress={onClose} fullWidth className="mt-4" />
-        </Pressable>
-      </Pressable>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }

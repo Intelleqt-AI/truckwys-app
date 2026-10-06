@@ -1,14 +1,11 @@
-import { View, Modal, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Txt, Mono, Label, Icon, EmptyState } from '@/components/ui';
+import { View, TouchableOpacity, Alert } from 'react-native';
+import { Txt, Mono, Label, Icon, EmptyState, Button, AppSheet } from '@/components/ui';
+import { ListSkeleton } from '@/components/feedback';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { ConversationSummary } from '../types';
 
-// Past conversations.
-//
-// A plain RN Modal, matching features/bookings/AssignSheet.tsx, rather than
-// @gorhom/bottom-sheet — that package is a dependency but is used nowhere in
-// src/, and introducing a second sheet idiom for one screen isn't worth it.
+// Past conversations, in the shared AppSheet (@gorhom/bottom-sheet). Always
+// mounted by the caller and driven by `open`, so the exit animation can play.
 //
 // There is no rename: the backend has no PATCH route for a conversation and
 // titles are generated server-side from the first message.
@@ -25,6 +22,7 @@ function relTime(iso: string): string {
 }
 
 export function ConversationSheet({
+  open,
   conversations,
   loading,
   activeId,
@@ -33,6 +31,7 @@ export function ConversationSheet({
   onNewChat,
   onClose,
 }: {
+  open: boolean;
   conversations: ConversationSummary[];
   loading?: boolean;
   activeId: number | null;
@@ -42,99 +41,93 @@ export function ConversationSheet({
   onClose: () => void;
 }) {
   const { colors } = useTheme();
-  const insets = useSafeAreaInsets();
 
   const confirmDelete = (c: ConversationSummary) =>
-    Alert.alert('Delete conversation?', `"${c.title}" will be removed for good.`, [
+    Alert.alert('Delete this conversation?', `"${c.title}" and its messages will be removed. This can't be undone.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => onDelete(c.id) },
     ]);
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable onPress={onClose} className="flex-1 justify-end bg-black/60">
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          className="max-h-[76%] rounded-t-panel border-t border-line bg-bg-deep"
-          style={{ paddingBottom: insets.bottom + 8 }}
+    <AppSheet open={open} onClose={onClose} maxHeight={0.76} scroll>
+      <View className="flex-row items-center justify-between border-b border-line px-4 py-3">
+        <Txt className="text-heading font-semibold text-fg">Conversations</Txt>
+        <TouchableOpacity
+          onPress={onClose}
+          hitSlop={12}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
-          <View className="flex-row items-center justify-between border-b border-line px-4 py-3">
-            <Txt className="text-heading font-semibold text-fg">Conversations</Txt>
-            <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
-              <Icon name="x" size={22} color={colors.muted} />
-            </Pressable>
-          </View>
+          <Icon name="x" size={22} color={colors.muted} />
+        </TouchableOpacity>
+      </View>
 
-          <Pressable
-            onPress={() => {
-              onNewChat();
-              onClose();
-            }}
-            accessibilityRole="button"
-            className="m-4 flex-row items-center justify-center gap-2 rounded-control bg-accent py-3 active:opacity-70"
-          >
-            <Icon name="plus" size={16} color={colors.onAccent} />
-            <Mono className="text-micro tracking-wide uppercase text-on-accent">New chat</Mono>
-          </Pressable>
+      <View className="m-4">
+        <Button
+          label="New chat"
+          icon="plus"
+          fullWidth
+          onPress={() => {
+            onNewChat();
+            onClose();
+          }}
+        />
+      </View>
 
-          {loading && !conversations.length ? (
-            <View className="items-center py-10">
-              <ActivityIndicator color={colors.accent} />
-            </View>
-          ) : conversations.length === 0 ? (
-            <View className="px-4 pb-6">
-              <EmptyState
-                icon="sparkle"
-                title="No conversations yet"
-                body="Ask the Copilot something and it will be saved here."
-              />
-            </View>
-          ) : (
-            <ScrollView className="px-4" contentContainerStyle={{ paddingBottom: 12, gap: 8 }}>
-              <Label className="text-faint">History</Label>
-              {conversations.map((c) => {
-                const active = c.id === activeId;
-                return (
-                  <Pressable
-                    key={c.id}
-                    onPress={() => {
-                      onOpen(c.id);
-                      onClose();
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    className="flex-row items-center gap-3 rounded-card border bg-surface px-3.5 py-3 active:opacity-70"
-                    style={{
-                      borderColor: active ? colors.accent : colors.line,
-                      borderLeftWidth: active ? 2 : 1,
-                    }}
-                  >
-                    <View className="flex-1">
-                      <Txt numberOfLines={1} className="text-callout text-fg">
-                        {c.title}
-                      </Txt>
-                      <Mono className="mt-0.5 text-micro text-faint">
-                        {c.messageCount} msgs · {relTime(c.updatedAt)}
-                      </Mono>
-                    </View>
-                    <Pressable
-                      hitSlop={10}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        confirmDelete(c);
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Delete ${c.title}`}
-                    >
-                      <Icon name="x" size={17} color={colors.faint} />
-                    </Pressable>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          )}
-        </Pressable>
-      </Pressable>
-    </Modal>
+      {loading && !conversations.length ? (
+        <View className="px-4 pb-4">
+          <ListSkeleton rows={3} />
+        </View>
+      ) : conversations.length === 0 ? (
+        <View className="px-4 pb-6">
+          <EmptyState
+            icon="sparkle"
+            title="No conversations yet"
+            body="Ask the Copilot something and it will be saved here."
+          />
+        </View>
+      ) : (
+        <View className="gap-2 px-4 pb-3">
+          <Label className="text-faint">History</Label>
+          {conversations.map((c) => {
+            const active = c.id === activeId;
+            return (
+              <TouchableOpacity
+                key={c.id}
+                onPress={() => {
+                  onOpen(c.id);
+                  onClose();
+                }}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                className={`flex-row items-center gap-3 rounded-card border px-3.5 py-3 ${
+                  active ? 'border-line-strong bg-raised' : 'border-line bg-surface'
+                }`}
+              >
+                <View className="flex-1">
+                  <Txt numberOfLines={1} className="text-callout text-fg">
+                    {c.title}
+                  </Txt>
+                  <Mono className="mt-0.5 text-caption text-faint">
+                    {c.messageCount} messages · {relTime(c.updatedAt)}
+                  </Mono>
+                </View>
+                <TouchableOpacity
+                  hitSlop={14}
+                  activeOpacity={0.6}
+                  onPress={() => confirmDelete(c)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${c.title}`}
+                >
+                  <Icon name="x" size={17} color={colors.faint} />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+    </AppSheet>
   );
 }

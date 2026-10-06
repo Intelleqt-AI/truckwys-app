@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { View, Pressable } from 'react-native';
+import { View, TouchableOpacity } from 'react-native';
 import { Group, TextField, Mono, Icon } from '@/components/ui';
 import { formatCurrency } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
@@ -65,7 +65,7 @@ function CostOverridesImpl({
   return (
     <Group
       label="Adjustments"
-      action={overridden ? 'RESET' : undefined}
+      action={overridden ? 'Reset' : undefined}
       onAction={overridden ? onResetAll : undefined}
     >
       <View className="gap-3 p-3">
@@ -123,17 +123,18 @@ function CostOverridesImpl({
             R/km Popover. Same shape as RevertHint, minus the "tap to use"
             wording since this doesn't revert anything. */}
         {rateSource && (
-          <Pressable
+          <TouchableOpacity
+            activeOpacity={0.6}
             onPress={onRatePress}
             accessibilityRole="button"
             accessibilityLabel={`${rateSource}. Show how this was worked out`}
             className="-mt-1 flex-row items-center gap-1"
           >
-            <Mono className="shrink text-micro text-faint" numberOfLines={1}>
+            <Mono className="shrink text-caption text-faint" numberOfLines={1}>
               {rateSource}
             </Mono>
             <Icon name="chevronRight" size={13} color={colors.faint} />
-          </Pressable>
+          </TouchableOpacity>
         )}
       </View>
     </Group>
@@ -152,17 +153,18 @@ function CostOverridesImpl({
 function RevertHint({ label, onPress }: { label: string; onPress: () => void }) {
   const { colors } = useTheme();
   return (
-    <Pressable
+    <TouchableOpacity
+      activeOpacity={0.6}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${label}. Tap to use it`}
       className="-mt-1 flex-row items-center gap-1"
     >
-      <Mono className="shrink text-micro text-faint" numberOfLines={1}>
+      <Mono className="shrink text-caption text-faint" numberOfLines={1}>
         {label} · tap to use
       </Mono>
       <Icon name="chevronRight" size={13} color={colors.faint} />
-    </Pressable>
+    </TouchableOpacity>
   );
 }
 

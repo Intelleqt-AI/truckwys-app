@@ -11,16 +11,23 @@
 // Hermes' ICU is partial, though: `notation: 'compact'` is unreliable, which is
 // why formatCurrencyCompact below is hand-rolled.
 
+// A true minus sign (U+2212), as the web and the backend's emails and PDFs use
+// ("−R 4 200"), instead of the hyphen Intl emits. parseNum below reads both.
+const MINUS = '−';
+const typographicMinus = (formatted: string) => formatted.replace(/^-/, MINUS);
+
 export const formatCurrency = (
   amount: number | null | undefined,
   options: Intl.NumberFormatOptions = {},
 ): string => {
   const n = Number(amount);
-  return new Intl.NumberFormat('en-ZA', {
-    style: 'currency',
-    currency: 'ZAR',
-    ...options,
-  }).format(amount == null || isNaN(n) ? 0 : n);
+  return typographicMinus(
+    new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency: 'ZAR',
+      ...options,
+    }).format(amount == null || isNaN(n) ? 0 : n),
+  );
 };
 
 export const formatNumber = (
@@ -28,7 +35,7 @@ export const formatNumber = (
   options: Intl.NumberFormatOptions = {},
 ): string => {
   if (value == null || isNaN(Number(value))) return '0';
-  return new Intl.NumberFormat('en-ZA', options).format(Number(value));
+  return typographicMinus(new Intl.NumberFormat('en-ZA', options).format(Number(value)));
 };
 
 /** Takes a fraction (0..1). For a 0..100 value use formatPercent instead. */
@@ -69,7 +76,8 @@ export const parseNum = (input: string | number | null | undefined): number | nu
 
   // Drop every space-like grouping char Intl may have emitted, plus the rand
   // symbol / currency code if the value was round-tripped from a display string.
-  let s = input.replace(/\s/g, '').replace(/ZAR|R/gi, '');
+  // U+2212 is how the app itself writes a negative amount.
+  let s = input.replace(/\s/g, '').replace(/ZAR|R/gi, '').replace(/−/g, '-');
   if (!s) return null;
 
   const negative = s.startsWith('-');
@@ -95,6 +103,42 @@ export const parseNum = (input: string | number | null | undefined): number | nu
   return negative ? -n : n;
 };
 
+/**
+ * Round a number to `dp` decimal places, as a number (not a display string).
+ *
+ * Every money/weight/rate column on the backend is a Django
+ * DecimalField(max_digits, decimal_places) with no server-side rounding —
+ * nothing there quantizes what comes in, it's a straight validation check.
+ * Plain JS float arithmetic (unit conversions like tons*1000, subtractions
+ * like suggestedPrice - total, sums like subtotal + vat) routinely lands on
+ * values like 16100.000000000002 or 1.3099999999999998, which blow past
+ * either the field's total digit count or its decimal-place count and get
+ * the whole save rejected with DRF's "Ensure that there are no more than N
+ * digits in total" / "no more than N decimal places". Round every number at
+ * the point it's about to be sent, to that column's own decimal_places.
+ */
+export const roundTo = (n: number, dp: number): number => Number(n.toFixed(dp));
+
+/** decimal_places=2 — the overwhelmingly common case (money, weight, distance). */
+export const round2 = (n: number): number => roundTo(n, 2);
+
+/**
+ * Native map projections and pasted links can carry 15-17 significant digits
+ * of floating-point noise. The backend's lat/lng columns are
+ * DecimalField(max_digits=12, decimal_places=7), so anything unrounded blows
+ * past max_digits and the save is rejected outright.
+ */
+export const roundCoord = (n: number): number => roundTo(n, 7);
+
+/**
+ * The largest value a DecimalField(max_digits, decimal_places) column
+ * accepts — for a zod `.max()` so an oversized typed value (e.g. nine digits
+ * into a (10,2) column) surfaces as an inline field error instead of a
+ * server-round-trip toast. E.g. decimalMax(10, 2) === 99999999.99.
+ */
+export const decimalMax = (maxDigits: number, decimalPlaces: number): number =>
+  Number((Math.pow(10, maxDigits - decimalPlaces) - Math.pow(10, -decimalPlaces)).toFixed(decimalPlaces));
+
 export const formatDistance = (kilometres: number): string => `${formatNumber(kilometres)} km`;
 
 export const formatDuration = (hours: number): string => {
@@ -109,7 +153,14 @@ export const formatDate = (
   date: string | Date,
   options: Intl.DateTimeFormatOptions = {},
 ): string => {
-  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  // A bare YYYY-MM-DD is a calendar date, not a UTC instant: new Date() would
+  // read it as UTC midnight and show the previous day on a device west of UTC.
+  const dateOnly = typeof date === 'string' ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) : null;
+  const dateObj = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : typeof date === 'string'
+      ? new Date(date)
+      : date;
   if (isNaN(dateObj.getTime())) return '—';
   return new Intl.DateTimeFormat('en-GB', {
     day: 'numeric',
@@ -123,12 +174,10 @@ export const formatDateTime = (date: string | Date): string =>
   formatDate(date, { hour: '2-digit', minute: '2-digit', hour12: false });
 
 // Truckwys operates in South Africa — currency is always ZAR regardless of
-// device region, and web's live clock (Overview.tsx's formatDate/formatTime)
-// always computes with an explicit Africa/Johannesburg timezone regardless of
-// what timezone the browser itself is in. These match that exactly, for the
-// same reason: "what time is it for the business" must never depend on which
-// timezone the viewing device happens to be set to (a phone in Bangladesh
-// showing its own local time here would just be showing the wrong time).
+// device region, and web's Home date (Overview.tsx) always computes with an
+// explicit Africa/Johannesburg timezone regardless of what timezone the
+// browser itself is in. This matches that, for the same reason: "what day is
+// it for the business" must never depend on the viewing device's timezone.
 const SAST = 'Africa/Johannesburg';
 
 export const formatOperationalDate = (date: Date): string =>
@@ -139,19 +188,6 @@ export const formatOperationalDate = (date: Date): string =>
     month: 'short',
     year: 'numeric',
   });
-
-// Seconds + a trailing "SAST" label, matching web's clock exactly. The
-// "SAST" is hardcoded rather than derived — this app is always South Africa
-// time, same reasoning as currency always being ZAR regardless of device
-// region, so it isn't worth threading through as a parameter.
-export const formatOperationalTime = (date: Date): string =>
-  `${date.toLocaleTimeString('en-ZA', {
-    timeZone: SAST,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  })} SAST`;
 
 export const formatRelativeTime = (date: string | Date): string => {
   const dateObj = typeof date === 'string' ? new Date(date) : date;
@@ -188,7 +224,7 @@ export const formatCompactNumber = (value: number): string => {
 export const formatCurrencyCompact = (amount: number | null | undefined): string => {
   const n = Number(amount);
   if (amount == null || isNaN(n)) return 'R 0';
-  const sign = n < 0 ? '-' : '';
+  const sign = n < 0 ? MINUS : '';
   const abs = Math.abs(n);
   if (abs >= 1_000_000) {
     const m = formatNumber(abs / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 });

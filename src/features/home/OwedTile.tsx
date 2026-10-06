@@ -38,7 +38,7 @@ export function OwedTile({
         adjustsFontSizeToFit
         minimumFontScale={0.55}
         className="mt-1.5 tracking-display text-accent"
-        style={{ fontSize: 20, fontWeight: '600' }}
+        style={{ fontSize: 20, lineHeight: 26, fontWeight: '600' }}
       >
         {value}
       </Mono>

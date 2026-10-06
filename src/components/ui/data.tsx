@@ -75,7 +75,7 @@ export function StatCard({
         adjustsFontSizeToFit
         minimumFontScale={0.55}
         className={`${compact ? 'mt-1.5' : 'mt-2'} tracking-display ${emphasis ? 'text-accent' : 'text-fg'}`}
-        style={{ fontSize: compact ? 20 : 24, fontWeight: '600' }}
+        style={{ fontSize: compact ? 20 : 24, lineHeight: compact ? 26 : 30, fontWeight: '600' }}
       >
         {value}
       </Mono>

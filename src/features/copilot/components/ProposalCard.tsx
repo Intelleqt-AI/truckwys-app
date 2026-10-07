@@ -52,8 +52,7 @@ export function ProposalCard({
         <View key={w.code + w.title} className="mx-3.5 mt-3 flex-row gap-2 rounded-chip bg-surface-hover p-2.5">
           <Icon name="alert" size={14} color={w.severity === 'block' ? colors.dangerDot : colors.warningDot} />
           <Txt className="flex-1 text-caption" style={{ color: w.severity === 'block' ? colors.danger : colors.warning }}>
-            {w.title}
-            {w.detail ? ` ${w.detail}` : ''}
+            {w.detail ? `${w.title.replace(/\.$/, '')}. ${w.detail}` : w.title}
           </Txt>
         </View>
       ))}
@@ -95,7 +94,15 @@ export function ProposalCard({
         {pending ? (
           <View className="flex-row gap-2.5">
             <Button
-              label={proposal.requiresAcknowledgement ? `${proposal.confirmText} anyway` : proposal.confirmText}
+              label={
+                proposal.sends
+                  ? proposal.requiresAcknowledgement
+                    ? 'Send anyway'
+                    : 'Send'
+                  : proposal.requiresAcknowledgement
+                    ? `${proposal.confirmText} anyway`
+                    : proposal.confirmText
+              }
               icon="check"
               loading={busy}
               onPress={onConfirm}

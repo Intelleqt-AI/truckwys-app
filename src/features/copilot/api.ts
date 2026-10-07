@@ -85,6 +85,7 @@ export function parseProposal(v: unknown): Proposal | null {
     result: parseResult(o.result),
     priceWarnings: parsePriceWarnings(o.price_warnings),
     requiresAcknowledgement: o.requires_acknowledgement === true,
+    sends: op === 'SEND' || o.sends === true || o.will_send === true,
   };
 }
 

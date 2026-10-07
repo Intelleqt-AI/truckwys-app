@@ -106,6 +106,7 @@ import {
 import { QuoteWarnings } from './quote/QuoteWarnings';
 import { CostFloorModal } from './quote/CostFloorModal';
 import { useServerCosting } from './quote/useServerCosting';
+import { analysisPayload } from './quote/analysisPayload';
 import { buildQuotePayload } from './quote/payload';
 import { compactStoredSnapshot } from './quote/routeSnapshot';
 import { LocationField } from './quote/LocationField';
@@ -1104,23 +1105,23 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     ],
   );
   // The quote rules' inputs for the analysis and the market check (§8).
-  const costingPayload = {
-    trip_type: tripType,
+  const costingPayload = analysisPayload({
+    tripType,
     legs: costs.legs,
-    one_way_distance_km: costs.distance || null,
-    duration_minutes: costs.duration || null,
-    vehicle_type_id: costs.truckId,
-    include_empty_return: returnLoadBooked ? false : null,
-    tolls_unknown: !costs.tollKnown,
-    tolls_confirmed_none: tollsConfirmedNone,
-    toll_cost_one_way: costs.tollKnown ? costs.tollCost / costs.legs : null,
-    driver_cost_is_override: driverEdited,
-    is_international: crossesBorder,
-    cross_border_cost: costs.crossBorderCost,
-    distance_estimated: costs.distanceEstimated,
-    distance_confirmed: distanceConfirmed,
-    use_official_fuel: useOfficialDiesel,
-  };
+    oneWayKm: costs.distance,
+    durationMinutes: costs.duration,
+    truckId: costs.truckId,
+    returnLoadBooked,
+    tollKnown: costs.tollKnown,
+    tollCost: costs.tollCost,
+    tollsConfirmedNone,
+    driverEdited,
+    international: crossesBorder,
+    borderCost: costs.crossBorderCost,
+    distanceEstimated: costs.distanceEstimated,
+    distanceConfirmed,
+    useOfficialFuel: useOfficialDiesel,
+  });
 
   // The rate the price works out to (the default price's, or the typed one).
   const effectiveRateNum = costs.priceIsDefault ? costs.ratePerKmShown : baseRateNum;
@@ -1191,8 +1192,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           // analysis resolved — see the customerId dep below.
           customer_id: customerId ? parseInt(customerId, 10) : null,
           skip_narrative: true,
-          // The full costing payload (newer backends price the floor with the
-          // quote rules; older ones ignore the extra keys).
+          // The full costing payload (quote/analysisPayload.ts): trip_type,
+          // legs, one_way_distance_km, duration_minutes, vehicle_type_id,
+          // include_empty_return, toll flags, driver_cost_is_override,
+          // is_international and border costs. Older backends ignore them.
           ...costingPayload,
         }).catch(() => null),
       ]);

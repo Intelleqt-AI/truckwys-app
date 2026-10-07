@@ -74,6 +74,15 @@ import {
   saShortDate,
 } from '@/features/bookings/quote/rules';
 import { capacityTons } from '@/features/bookings/quote/types';
+import {
+  baseRateError,
+  companyFieldErrors,
+  electricError,
+  hybridError,
+  ownPricePerLitreError,
+  priceText,
+  type CompanyBox,
+} from './companyFieldErrors';
 import { InvoiceNumberingSection } from '@/features/finance/InvoiceNumberingSection';
 import { ComingSoonNote, ProviderCards } from '@/features/accounting/components/ProviderCards';
 import { FleetTrackingCards } from '@/features/integrations/FleetTrackingCards';
@@ -1261,10 +1270,13 @@ const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC']
 }));
 
 function CompanySection() {
-  const { data } = useCompanyProfile();
+  const { data, isError: profileError } = useCompanyProfile();
   const qc = useQueryClient();
   const demo = useDemo();
   const [seeded, setSeeded] = useState(false);
+  // Inline errors per box: the client checks and the server's 400 field errors.
+  const [boxErrors, setBoxErrors] = useState<Partial<Record<CompanyBox, string>>>({});
+  const clearBox = (b: CompanyBox) => setBoxErrors((e) => (e[b] ? { ...e, [b]: undefined } : e));
   const [busy, setBusy] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
 
@@ -1367,12 +1379,21 @@ function CompanySection() {
     };
     seedNum(['default_quote_validity_days'], setValidityDays);
     // Web reads default_base_rate_per_km; older records used base_rate_per_km.
-    seedNum(['default_base_rate_per_km', 'base_rate_per_km', 'base_rate'], setBaseRate);
+    // Comma decimal, like every price box ("33,50").
+    setBaseRate(priceText(pick(data, ['default_base_rate_per_km', 'base_rate_per_km', 'base_rate'])));
     seedNum(['default_toll_rate_per_km'], setTollRate);
     const diesel = dieselInputFromApi(data, livePrice);
-    setFuelPrice(diesel.mode === 'OWN' && diesel.own_price != null ? String(diesel.own_price) : '');
+    // The stored own price shows even on Official (kept, like petrol), with
+    // a comma decimal ("29,11").
+    setFuelPrice(
+      pick(data, ['fuel_price_own']) != null
+        ? priceText(pick(data, ['fuel_price_own']))
+        : diesel.mode === 'OWN' && diesel.own_price != null
+          ? priceText(diesel.own_price)
+          : '',
+    );
     setDieselMode(diesel.mode === 'OWN' && diesel.own_price != null ? 'OWN' : 'LIVE');
-    seedNum(['fuel_price_petrol'], setFuelPetrol);
+    setFuelPetrol(priceText(pick(data, ['fuel_price_petrol'])));
     setPetrolMode(
       str(pick(data, ['fuel_price_petrol_mode'])).toUpperCase() === 'OWN' && num(pick(data, ['fuel_price_petrol'])) > 0
         ? 'OWN'
@@ -1502,11 +1523,23 @@ function CompanySection() {
       if (n != null && n > max) return toast.error(`${label} is too large`);
     }
 
-    if (dieselMode === 'OWN' && parseNum(fuelPrice) == null) {
-      setDieselError('Enter your price, or choose Official price');
-      return toast.error('Enter your diesel price');
+    if (dieselMode === 'OWN') {
+      const err = ownPricePerLitreError(parseNum(fuelPrice));
+      if (err) {
+        setDieselError(err);
+        return toast.error('Check your diesel price');
+      }
     }
     setDieselError('');
+    const localErrors: Partial<Record<CompanyBox, string>> = {};
+    const eErr = electricError(parseNum(fuelElectric));
+    if (eErr) localErrors.electric = eErr;
+    const hErr = hybridError(parseNum(fuelHybrid));
+    if (hErr) localErrors.hybrid = hErr;
+    const bErr = baseRateError(parseNum(baseRate));
+    if (bErr) localErrors.baseRate = bErr;
+    setBoxErrors(localErrors);
+    if (Object.keys(localErrors).length) return toast.error('Check the highlighted prices');
     if (petrolRule && petrolMode === 'OWN') {
       const p = parseNum(fuelPetrol);
       if (p == null) {
@@ -1560,11 +1593,11 @@ function CompanySection() {
         fuel_zone: fuelZone,
         // Own price set ⇒ OWN; empty ⇒ LIVE (official). A newer backend takes
         // the mode fields; an older one reads 23,50 as "use the live price".
+        // Official keeps the stored own price (not cleared), like petrol.
         ...(data && 'fuel_price_mode' in data
-          ? {
-              fuel_price_mode: ownDiesel != null ? 'OWN' : 'LIVE',
-              fuel_price_own: ownDiesel,
-            }
+          ? ownDiesel != null
+            ? { fuel_price_mode: 'OWN', fuel_price_own: ownDiesel }
+            : { fuel_price_mode: 'LIVE' }
           : { fuel_price_per_litre: ownDiesel ?? LEGACY_DIESEL_SENTINEL }),
         // Petrol: a newer backend takes the mode (+ the own price when it's
         // OWN; Official leaves the stored own price alone). An older one only
@@ -1583,7 +1616,18 @@ function CompanySection() {
       invalidateFor(qc, 'company');
       toast.success();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not update company');
+      // Field errors go to their box; the toast says where to look.
+      const fieldErrs = companyFieldErrors((e as { data?: unknown }).data);
+      if (fieldErrs.diesel) setDieselError(fieldErrs.diesel);
+      if (fieldErrs.petrol) setPetrolError(fieldErrs.petrol);
+      setBoxErrors(fieldErrs);
+      toast.error(
+        Object.keys(fieldErrs).length
+          ? 'Check the highlighted prices'
+          : e instanceof Error
+            ? e.message
+            : 'Could not update company',
+      );
     } finally {
       setBusy(false);
     }
@@ -1854,10 +1898,14 @@ function CompanySection() {
       <TextField
         label="Base rate / km"
         prefix="R"
-        placeholder="e.g. 33.00"
+        placeholder="e.g. 33,00"
         keyboardType="decimal-pad"
         value={baseRate}
-        onChangeText={setBaseRate}
+        onChangeText={(v) => {
+          setBaseRate(v);
+          clearBox('baseRate');
+        }}
+        error={boxErrors.baseRate}
       />
       <Txt className="-mt-1 text-caption text-faint">Used when a truck has no rate of its own.</Txt>
       {/* No toll rate per km: quotes never guess tolls from distance any
@@ -1880,7 +1928,6 @@ function CompanySection() {
           label="Refresh"
           icon="refresh"
           variant="secondary"
-          size="sm"
           loading={fetchingLive}
           onPress={loadLivePrice}
         />
@@ -1907,6 +1954,7 @@ function CompanySection() {
             { label: 'My own price', value: 'OWN' },
           ]}
           value={dieselMode}
+          tall
           onChange={(v) => {
             setDieselMode(v === 'OWN' ? 'OWN' : 'LIVE');
             setDieselError('');
@@ -1942,6 +1990,7 @@ function CompanySection() {
                   { label: 'ULP 93', value: '93' },
                 ]}
                 value={petrolGradeChoice}
+                tall
                 onChange={(v) => setPetrolGradeChoice(v === '93' ? '93' : '95')}
               />
             </View>
@@ -1960,6 +2009,7 @@ function CompanySection() {
                 { label: 'My own price', value: 'OWN' },
               ]}
               value={petrolMode}
+              tall
               onChange={(v) => {
                 setPetrolMode(v === 'OWN' ? 'OWN' : 'LIVE');
                 setPetrolError('');
@@ -2000,7 +2050,11 @@ function CompanySection() {
               placeholder="Not set"
               keyboardType="decimal-pad"
               value={fuelHybrid}
-              onChangeText={setFuelHybrid}
+              onChangeText={(v) => {
+                setFuelHybrid(v);
+                clearBox('hybrid');
+              }}
+              error={boxErrors.hybrid}
             />
           </View>
         </View>
@@ -2011,11 +2065,22 @@ function CompanySection() {
         placeholder="Not set"
         keyboardType="decimal-pad"
         value={fuelElectric}
-        onChangeText={setFuelElectric}
+        onChangeText={(v) => {
+          setFuelElectric(v);
+          clearBox('electric');
+        }}
+        error={boxErrors.electric}
       />
       <Txt className="-mt-1 text-caption text-faint">Electric trucks: no official price, so quotes use this.</Txt>
 
-      <Button label="Save changes" loading={busy} onPress={save} fullWidth />
+      {/* Never save over a profile that hasn't loaded (or failed to). */}
+      <Button
+        label={profileError ? "Couldn't load settings" : 'Save changes'}
+        loading={busy}
+        disabled={!seeded || profileError}
+        onPress={save}
+        fullWidth
+      />
     </View>
   );
 }

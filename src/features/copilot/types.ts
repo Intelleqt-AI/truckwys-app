@@ -52,6 +52,8 @@ export interface Proposal {
   priceWarnings?: ProposalPriceWarning[];
   /** Executing needs acknowledge_price_warnings: true (an explicit confirm). */
   requiresAcknowledgement?: boolean;
+  /** Executing sends the quote to the customer. */
+  sends?: boolean;
 }
 
 export interface ProposalPriceWarning {

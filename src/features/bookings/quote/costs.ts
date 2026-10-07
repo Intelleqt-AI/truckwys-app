@@ -288,7 +288,8 @@ export function computeCosts({
     include_empty_return: returnLoadBooked ? false : null,
     settings: {
       include_empty_return_default: typeof includeDefault === 'boolean' ? includeDefault : null,
-      empty_return_min_km: nullIfNotPositive(pick(c, ['empty_return_min_km'])),
+      // 0 means 0 (always include); only an unset value takes the default.
+      empty_return_min_km: c.empty_return_min_km != null && c.empty_return_min_km !== '' ? num(c.empty_return_min_km) : null,
     },
     minimum_charge: nullIfNotPositive(pick(c, ['minimum_charge'])),
     default_price_per_km: nullIfNotPositive(pick(c, ['default_base_rate_per_km'])),

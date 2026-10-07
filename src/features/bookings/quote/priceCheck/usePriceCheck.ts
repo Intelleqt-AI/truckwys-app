@@ -50,6 +50,8 @@ export interface PriceCheckInputs {
   costFloor?: number | null;
   /** The floor includes an empty run home. */
   emptyReturnIncluded?: boolean;
+  /** The quote rules' inputs (trip, km, truck id, toll/driver flags, border). */
+  costingPayload?: Record<string, unknown>;
   fuelCost: number;
   fuelLitres: number;
   fuelConsumption: number;
@@ -211,6 +213,7 @@ export function usePriceCheck(p: PriceCheckInputs) {
           pickup_date: p.pickupDate || null,
           // §8: the check prices against the floor and a fuel-normalised market
           // of sent, one-way quotes. Extra keys are ignored by older backends.
+          ...(p.costingPayload ?? {}),
           cost_floor: p.costFloor ?? null,
           include_empty_return: !!p.emptyReturnIncluded,
           one_way_only: true,
@@ -237,13 +240,16 @@ export function usePriceCheck(p: PriceCheckInputs) {
     setLoadingSince(null);
     if (controller.signal.aborted) return;
 
+    // Newer backends answer a blocked quote (an unknown cost) with null
+    // prices: that is no result, not a figure.
     const valid =
       !!body &&
       body.success === true &&
       !!body.combinations &&
       !!body.cost_breakdown &&
       !!body.default_choice_key &&
-      !!body.combinations[body.default_choice_key];
+      !!body.combinations[body.default_choice_key] &&
+      typeof body.combinations[body.default_choice_key]!.price_zar === 'number';
     if (!valid) {
       const f = classify(err, err ? null : body);
       if (f.code === 'unavailable' && f.missing) {

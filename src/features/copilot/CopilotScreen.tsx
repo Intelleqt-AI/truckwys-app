@@ -331,7 +331,16 @@ export function CopilotScreen({ navigation }: Props) {
       setProposalBusy(true);
       const convId = conversationId;
       try {
-        const outcome = await executeProposal(p.id);
+        // Confirming a card that shows its price warnings is the acknowledgement.
+        const outcome = await executeProposal(p.id, !!p.requiresAcknowledgement || (p.priceWarnings?.length ?? 0) > 0);
+        if (outcome.status === 'needs_acknowledgement') {
+          // Stays pending: the card now lists the warnings and asks again.
+          patchProposal(qc, convId, p.id, {
+            requiresAcknowledgement: true,
+            priceWarnings: outcome.priceWarnings ?? p.priceWarnings ?? [],
+          });
+          return;
+        }
         patchProposal(qc, convId, p.id, { status: outcome.status, result: outcome.result });
         if (outcome.status === 'executed') {
           appendMessages(qc, convId, [

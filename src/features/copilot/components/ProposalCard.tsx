@@ -48,9 +48,19 @@ export function ProposalCard({
         </View>
       )}
 
+      {(proposal.priceWarnings ?? []).map((w) => (
+        <View key={w.code + w.title} className="mx-3.5 mt-3 flex-row gap-2 rounded-chip bg-surface-hover p-2.5">
+          <Icon name="alert" size={14} color={w.severity === 'block' ? colors.dangerDot : colors.warningDot} />
+          <Txt className="flex-1 text-caption" style={{ color: w.severity === 'block' ? colors.danger : colors.warning }}>
+            {w.title}
+            {w.detail ? ` ${w.detail}` : ''}
+          </Txt>
+        </View>
+      ))}
+
       {!!proposal.analysisSummary && (
         <View className="mx-3.5 mt-3 rounded-chip border border-line p-2.5">
-          <Label className="mb-1 text-faint">AI analysis</Label>
+          <Label className="mb-1 text-faint">Analysis</Label>
           <Txt className="text-caption text-muted">{proposal.analysisSummary}</Txt>
         </View>
       )}
@@ -85,7 +95,7 @@ export function ProposalCard({
         {pending ? (
           <View className="flex-row gap-2.5">
             <Button
-              label={proposal.confirmText}
+              label={proposal.requiresAcknowledgement ? `${proposal.confirmText} anyway` : proposal.confirmText}
               icon="check"
               loading={busy}
               onPress={onConfirm}

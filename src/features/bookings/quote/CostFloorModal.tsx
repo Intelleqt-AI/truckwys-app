@@ -15,6 +15,7 @@ const SHORT: Record<string, string> = {
   operating_return: 'Operating costs',
   tolls_return: 'Tolls',
   driver_return: 'Driver allowance',
+  border_return: 'Border fees',
 };
 
 const amount = (v: number | null) => (v === null ? '—' : formatCurrency(v));

@@ -292,6 +292,8 @@ export const WIN_REASON_COPY: Record<string, string> = {
   no_market_rate: 'No lane benchmark yet',
   outside_training_range: 'No similar quotes yet',
   prediction_failed: "Couldn't score this quote",
+  floor_incomplete: 'Costs not complete yet',
+  model_curve_unusable: 'Not enough similar quotes',
 };
 
 /** One line per item for "Show details". */

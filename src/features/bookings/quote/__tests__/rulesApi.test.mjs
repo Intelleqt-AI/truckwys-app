@@ -30,10 +30,8 @@ test('period starts 00:01 SAST on the first Wednesday', () => {
 });
 
 test('old backend: 23,50, empty and the zone\'s official figure all mean LIVE', () => {
-  // Backend _is_live_echo: only the company zone's 50ppm figure is an echo
-  // (an inland fleet's 31,9269 is the coastal price: its own).
-  assert.equal(dieselInputFromApi({ fuel_zone: 'INLAND', fuel_price_per_litre: 31.9269 }, oldLive, { now: NOW }).mode, 'OWN');
-  for (const v of ['23.50', null, '32.7989']) {
+  // Backend _is_live_echo: either zone's 50ppm figure is an echo.
+  for (const v of ['23.50', null, '32.7989', 31.9269]) {
     const d = dieselInputFromApi({ fuel_zone: 'INLAND', fuel_price_per_litre: v }, oldLive, { now: NOW });
     assert.equal(d.mode, 'LIVE', String(v));
     assert.equal(resolveDieselInput(d).price, 32.7989);
@@ -262,4 +260,11 @@ test('below-cost action says minimum when the minimum charge wins', async () => 
   const c = computeCosting({ ...base, minimum_charge: 30000, price: 6000 });
   const w = phoneWarning(c.warnings.find((x) => x.code === 'below_floor'), c, c.target_margin_pct);
   assert.equal(w.actions[0].label, 'Price at minimum · R 30 000');
+});
+
+test('timestamps are SAST with offset, as the backend emits them', async () => {
+  const { isoSast } = await import('../rules.ts');
+  assert.equal(isoSast('2026-10-06T22:01:00Z'), '2026-10-07T00:01:00+02:00');
+  assert.equal(isoSast('2026-10-07T00:01:00.500+02:00'), '2026-10-07T00:01:00+02:00');
+  assert.equal(isoSast(null), null);
 });

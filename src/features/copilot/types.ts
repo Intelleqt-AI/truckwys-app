@@ -48,6 +48,17 @@ export interface Proposal {
   confirmText: string;
   status: ProposalStatus;
   result: ProposalResult | null;
+  /** Quote proposals priced below cost / target (newer backends). */
+  priceWarnings?: ProposalPriceWarning[];
+  /** Executing needs acknowledge_price_warnings: true (an explicit confirm). */
+  requiresAcknowledgement?: boolean;
+}
+
+export interface ProposalPriceWarning {
+  code: string;
+  severity: string;
+  title: string;
+  detail?: string;
 }
 
 /** A navigation chip. `route` is a WEB path; resolve via lib/notificationLink. */

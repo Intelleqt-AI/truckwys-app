@@ -231,10 +231,14 @@ export interface DieselResolution {
   source: DieselSource;
 }
 
-const isoUtc = (v: unknown): string | null => {
+/** ISO 8601 in SAST with its offset ("2026-10-07T00:01:00+02:00"), as the backend's iso(). */
+export const isoSast = (v: unknown): string | null => {
   const t = parseTime(v);
-  return t === null ? null : new Date(t).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  if (t === null) return null;
+  const d = new Date(Math.floor(t / 1000) * 1000 + SAST_MS);
+  return `${d.toISOString().slice(0, 19)}+02:00`;
 };
+const isoUtc = isoSast;
 
 /** Port of quote_costing.resolve_diesel. */
 export function resolveDieselInput(d: Partial<DieselInput> | null | undefined): DieselResolution {
@@ -405,18 +409,14 @@ export function officialFromLive(live: Loose, zone: FuelZone): { price: number |
 }
 
 /**
- * The official 50ppm figure(s) an old client could have been shown for this
- * zone (backend _is_live_echo): the zone price in force. 500ppm figures never
- * count, so a fleet's own R 29,11 isn't mistaken for the 500ppm R 29,1111.
+ * The official 50ppm figures an old client could have been shown (backend
+ * _is_live_echo): either zone (a zone change in the same save shows the other
+ * zone). 500ppm figures never count, so a fleet's own R 29,11 isn't mistaken
+ * for the 500ppm R 29,1111.
  */
-function officialEchoFigures(live: Loose, zone: FuelZone): number[] {
+function officialEchoFigures(live: Loose, _zone: FuelZone): number[] {
   if (!live || live.success === false || isFallbackSource(live.source)) return [];
-  return [
-    live.zone === zone ? live.zone_price : null,
-    zone === 'COASTAL' ? live.coastal_price : live.inland_price,
-    zone === 'COASTAL' ? live.diesel_coastal : live.diesel_inland,
-    live.previous_zone_price,
-  ]
+  return [live.zone_price, live.inland_price, live.coastal_price, live.diesel_inland, live.diesel_coastal]
     .map(pos)
     .filter((n): n is number => n !== null);
 }
@@ -899,7 +899,8 @@ export type LineKey =
   | 'fuel_return'
   | 'operating_return'
   | 'tolls_return'
-  | 'driver_return';
+  | 'driver_return'
+  | 'border_return';
 
 export const LINE_LABELS: Record<LineKey, string> = {
   fuel: 'Fuel',
@@ -911,6 +912,7 @@ export const LINE_LABELS: Record<LineKey, string> = {
   operating_return: 'Operating costs, empty return',
   tolls_return: 'Tolls, empty return',
   driver_return: 'Driver nights, empty return',
+  border_return: 'Border fees, empty return',
 };
 
 export interface CostingLine {
@@ -1322,6 +1324,24 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
           : 'Unknown',
       { nights: returnNights, rate_per_night: rate },
     );
+    if (drAmt === null && !warnings.some((w) => w.code === 'driver_nights_unknown')) {
+      // The loaded driver line was entered, but without the driving time the
+      // return nights are unknown: a null line always blocks.
+      warnings.push(
+        warning(
+          'driver_nights_unknown',
+          'block',
+          'Driving time is unknown',
+          'Enter the driver cost, or recalculate the route.',
+          null,
+          ['enter_driver_cost', 'recalculate_route'],
+        ),
+      );
+    }
+    if (inp.international && border !== null && border > 0) {
+      // The empty truck crosses the border(s) back: the same costs per crossing.
+      add('border_return', 'empty_return', cents(border), 'Border costs crossing back, empty');
+    }
   }
 
   if (op === null && distance !== null) complete = false;

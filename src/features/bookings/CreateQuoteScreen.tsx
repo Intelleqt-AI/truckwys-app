@@ -1103,6 +1103,25 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       serverCosting,
     ],
   );
+  // The quote rules' inputs for the analysis and the market check (§8).
+  const costingPayload = {
+    trip_type: tripType,
+    legs: costs.legs,
+    one_way_distance_km: costs.distance || null,
+    duration_minutes: costs.duration || null,
+    vehicle_type_id: costs.truckId,
+    include_empty_return: returnLoadBooked ? false : null,
+    tolls_unknown: !costs.tollKnown,
+    tolls_confirmed_none: tollsConfirmedNone,
+    toll_cost_one_way: costs.tollKnown ? costs.tollCost / costs.legs : null,
+    driver_cost_is_override: driverEdited,
+    is_international: crossesBorder,
+    cross_border_cost: costs.crossBorderCost,
+    distance_estimated: costs.distanceEstimated,
+    distance_confirmed: distanceConfirmed,
+    use_official_fuel: useOfficialDiesel,
+  };
+
   // The rate the price works out to (the default price's, or the typed one).
   const effectiveRateNum = costs.priceIsDefault ? costs.ratePerKmShown : baseRateNum;
 
@@ -1172,6 +1191,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           // analysis resolved — see the customerId dep below.
           customer_id: customerId ? parseInt(customerId, 10) : null,
           skip_narrative: true,
+          // The full costing payload (newer backends price the floor with the
+          // quote rules; older ones ignore the extra keys).
+          ...costingPayload,
         }).catch(() => null),
       ]);
       if (id === aiReq.current) {
@@ -1218,6 +1240,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     costs.fuelUsage,
     costs.fuelPrice,
     costs.floor,
+    costs.tollKnown,
+    returnLoadBooked,
+    crossesBorder,
+    driverEdited,
     pickup,
     delivery,
     pricedTruckName,
@@ -1391,6 +1417,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     customerId: customerId || null,
     costFloor: costs.floor,
     emptyReturnIncluded: costs.emptyReturnIncluded,
+    costingPayload,
     fuelCost: costs.fuelCost,
     fuelLitres: costs.fuelLitres,
     fuelConsumption: costs.consumption,

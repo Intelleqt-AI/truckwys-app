@@ -134,8 +134,7 @@ function FuelCostNote({ control }: { control: Control<VehicleTypeFormValues> }) 
   const fuelType = useWatch({ control, name: 'fuel_type' });
   return (
     <Txt className="-mt-1 text-caption text-faint">
-      Quotes for this type are costed at your company&apos;s {(fuelType || 'diesel').toLowerCase()}{' '}
-      price, scaled up or down from Fuel use as a quote&apos;s load moves away from Capacity.
+      Fuel use at full load. Empty runs at 70%. Priced on your {(fuelType || 'diesel').toLowerCase()} price.
     </Txt>
   );
 }
@@ -202,16 +201,8 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
       ...(v.fuel_consumption_l_per_100km?.trim()
         ? { fuel_consumption_l_per_100km: round2(parseNum(v.fuel_consumption_l_per_100km) ?? 0) }
         : {}),
-      // Same reasoning — left out when blank so the backend's own 2% default
-      // stands, rather than sending 0 (which would switch the fuel-weight
-      // adjustment off entirely, unlike web which coerces a blank to 2).
-      ...(v.fuel_consumption_sensitivity_pct?.trim()
-        ? {
-            fuel_consumption_sensitivity_pct: round2(
-              parseNum(v.fuel_consumption_sensitivity_pct) ?? 0,
-            ),
-          }
-        : {}),
+      // Fuel sensitivity is no longer a setting (QUOTE-RULES §4: burn scales
+      // with the load ratio), so it is never sent.
       active: v.active === 'true',
     };
     try {
@@ -332,18 +323,6 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                 />
               </View>
             </View>
-            {/* How much fuel use climbs per tonne once a quote's load passes
-            Capacity above — same field web calls "Fuel Sensitivity". Blank
-            leaves the backend's own 2%/tonne default in place. */}
-            <VTText
-              control={control}
-              name="fuel_consumption_sensitivity_pct"
-              anchors={anchors}
-              label="Fuel sensitivity (%/ton over capacity)"
-              placeholder="e.g. 2"
-              keyboardType="numeric"
-              numeric
-            />
             <FuelCostNote control={control} />
           </View>
 

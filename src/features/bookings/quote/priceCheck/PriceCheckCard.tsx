@@ -274,7 +274,13 @@ function Stats({ pc }: { pc: PriceCheck }) {
         >
           {moneyWhole(total)}
         </Txt>
-        <Txt className="mt-0.5 text-caption text-muted">{quoteNote}</Txt>
+        {combo.below_floor || combo.below_target ? (
+          <Txt className={`mt-0.5 text-caption font-medium ${combo.below_floor ? 'text-danger' : 'text-warning'}`}>
+            {combo.below_floor ? 'Below cost' : 'Below target margin'}
+          </Txt>
+        ) : (
+          <Txt className="mt-0.5 text-caption text-muted">{quoteNote}</Txt>
+        )}
       </View>
       <View className="flex-1 rounded-control border border-line bg-surface-hover p-3">
         <Txt className="text-caption text-faint">Win chance</Txt>

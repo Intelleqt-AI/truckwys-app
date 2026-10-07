@@ -101,6 +101,9 @@ export interface Combination {
   margin_zar: number;
   margin_pct: number;
   win_probability: number | null;
+  /** Newer backends: the price is under the cost floor / under floor ÷ (1 − target). */
+  below_floor?: boolean;
+  below_target?: boolean;
 }
 
 export interface WinModel {

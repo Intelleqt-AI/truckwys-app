@@ -18,6 +18,8 @@ export interface ServerCosting {
   inputs: CostingInputs;
   floor: number | null;
   warnings: QuoteWarning[];
+  /** The server's suggested truck for this load (resolution.suggested_vehicle_type_id). */
+  suggestedVehicleTypeId: number | string | null;
 }
 
 /**
@@ -44,6 +46,12 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
             inputs: res.inputs as CostingInputs,
             floor: typeof res.floor === 'number' ? res.floor : null,
             warnings: Array.isArray(res.warnings) ? (res.warnings as QuoteWarning[]) : [],
+            suggestedVehicleTypeId:
+              ((res.resolution as Record<string, unknown> | undefined)?.suggested_vehicle_type_id as
+                | number
+                | string
+                | null
+                | undefined) ?? null,
           },
         });
       } catch (e) {

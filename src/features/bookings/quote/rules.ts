@@ -192,6 +192,8 @@ export interface DieselInput {
   official_stale: boolean;
   use_official: boolean;
   override_price: number | null;
+  /** Diesel unless the truck runs on another fuel (priced on the company's own price for it). */
+  fuel_type?: string;
 }
 
 export interface DieselResolution {
@@ -199,6 +201,7 @@ export interface DieselResolution {
   mode: 'LIVE' | 'OWN';
   own_price: number | null;
   own_set_at: string | null;
+  fuel_type: string;
   official_price: number | null;
   official_effective_from: string | null;
   official_stale: boolean;
@@ -225,6 +228,7 @@ export function resolveDieselInput(d: Partial<DieselInput> | null | undefined): 
     mode,
     own_price: own,
     own_set_at: isoUtc(x.own_set_at),
+    fuel_type: x.fuel_type || 'Diesel',
     official_price: official,
     official_effective_from: isoUtc(x.official_effective_from),
     official_stale: official !== null ? !!x.official_stale : false,
@@ -240,16 +244,26 @@ export function dieselWarnings(diesel: DieselResolution, litresTotal: number | n
   const out: QuoteWarning[] = [];
   const zoneTxt = diesel.zone === 'COASTAL' ? 'coastal' : 'inland';
   if (diesel.source === 'missing') {
-    out.push(
-      warning(
-        'diesel_missing',
-        'block',
-        'No diesel price available',
-        'No official price on record; set your own in settings.',
-        null,
-        ['retry_diesel', 'update_own'],
-      ),
-    );
+    const fuel = String(diesel.fuel_type || 'Diesel').toLowerCase();
+    if (fuel === 'diesel') {
+      out.push(
+        warning(
+          'diesel_missing',
+          'block',
+          'No diesel price available',
+          'No official price on record; set your own in settings.',
+          null,
+          ['retry_diesel', 'update_own'],
+        ),
+      );
+    } else {
+      const unit = fuel === 'electric' ? 'kWh' : 'litre';
+      out.push(
+        warning('diesel_missing', 'block', `No ${fuel} price set`, `Set your ${fuel} price per ${unit} in settings.`, null, [
+          'update_own',
+        ], { fuel_type: fuel }),
+      );
+    }
     return out;
   }
   if (diesel.source === 'own' && diesel.official_price) {
@@ -395,6 +409,12 @@ export function dieselInputFromApi(
   }
   const serverStale = ((server?.official ?? null) as Loose)?.stale;
   const fromT = parseTime(off.from);
+  // Older than the previous period: unusable (missing), not merely stale.
+  const now = opts.now ?? new Date();
+  if (!server && fromT !== null && fromT < currentPeriodStart(new Date(currentPeriodStart(now).getTime() - 1)).getTime()) {
+    off.price = null;
+    off.from = null;
+  }
   const stale =
     off.price !== null &&
     (typeof serverStale === 'boolean'
@@ -443,11 +463,15 @@ export function ratedBurn(t: TruckLike | null | undefined): number | null {
 /** Smallest capacity ≥ load; tie → lowest rated burn. Null when nothing fits. */
 export function suggestTruck<T extends TruckLike>(types: T[], loadT: number): T | null {
   if (!(loadT > 0)) return null;
+  // Backend suggest_vehicle: every listed type with a capacity and a rated
+  // burn; key (capacity, burn, id).
   const fits = types
-    .map((t) => ({ t, cap: capacityTonnes(t.capacity) }))
-    .filter((x): x is { t: T; cap: number } => x.cap !== null && x.cap >= loadT);
+    .map((t) => ({ t, cap: capacityTonnes(t.capacity), burn: ratedBurn(t) }))
+    .filter(
+      (x): x is { t: T; cap: number; burn: number } => x.cap !== null && x.burn !== null && x.cap >= loadT,
+    );
   if (!fits.length) return null;
-  fits.sort((a, b) => a.cap - b.cap || (ratedBurn(a.t) ?? Infinity) - (ratedBurn(b.t) ?? Infinity));
+  fits.sort((a, b) => a.cap - b.cap || a.burn - b.burn || Number(a.t.id ?? 0) - Number(b.t.id ?? 0));
   return fits[0]!.t;
 }
 
@@ -511,13 +535,17 @@ export function fleetReferenceClass(types: FleetTypeLike[] | null | undefined): 
       if (t.company !== null && t.company !== undefined) counts.set(vehicleClass(t), (counts.get(vehicleClass(t)) ?? 0) + 1);
     }
   }
+  // Most trucks wins; a tie goes to the heavier class (never scaled up onto a
+  // smaller truck by a guess).
   let best: string | null = null;
-  let bestN = 0;
   for (const [cls, n] of counts) {
-    if (n > bestN) {
+    const b = best === null ? -1 : counts.get(best)!;
+    if (
+      best === null ||
+      n > b ||
+      (n === b && (OPERATING_CLASS_DEFAULTS[cls] ?? 0) > (OPERATING_CLASS_DEFAULTS[best] ?? 0))
+    )
       best = cls;
-      bestN = n;
-    }
   }
   return best;
 }
@@ -884,38 +912,39 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
   const userAmount = toNum(driver.amount);
   const suggested = nights !== null && rate !== null ? cents(nights * rate) : nights === 0 ? 0.0 : null;
   let drvAmt: number | null;
-  let drvSource: 'user' | 'suggested';
+  let drvSource: 'user' | 'suggested' | 'missing';
   if (userAmount !== null && userAmount >= 0) {
     drvAmt = cents(userAmount);
     drvSource = 'user';
+  } else if (suggested === null && nights) {
+    // Nights away but no allowance rate anywhere: R 0, and said so (warn).
+    drvAmt = 0.0;
+    drvSource = 'missing';
+    warnings.push(
+      warning(
+        'driver_allowance_missing',
+        'warn',
+        'No driver allowance rate set',
+        `${nights} night${plural(nights)} away priced at R 0; enter the driver cost or set a rate.`,
+        null,
+        ['enter_driver_cost', 'update_allowance'],
+      ),
+    );
   } else {
     drvAmt = suggested;
     drvSource = 'suggested';
   }
   if (drvAmt === null) {
-    if (nights === null) {
-      warnings.push(
-        warning(
-          'driver_nights_unknown',
-          'block',
-          'Driving time is unknown',
-          'Enter the driver cost, or recalculate the route.',
-          null,
-          ['enter_driver_cost', 'recalculate_route'],
-        ),
-      );
-    } else {
-      warnings.push(
-        warning(
-          'driver_allowance_missing',
-          'block',
-          'Driver nights have no allowance',
-          `${nights} night${plural(nights)} away: enter the driver cost or set a rate.`,
-          null,
-          ['enter_driver_cost', 'update_allowance'],
-        ),
-      );
-    }
+    warnings.push(
+      warning(
+        'driver_nights_unknown',
+        'block',
+        'Driving time is unknown',
+        'Enter the driver cost, or recalculate the route.',
+        null,
+        ['enter_driver_cost', 'recalculate_route'],
+      ),
+    );
   }
   add(
     'driver',
@@ -923,7 +952,9 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     drvAmt,
     drvSource === 'user'
       ? 'Your figure'
-      : rate !== null && nights
+      : drvSource === 'missing'
+        ? `${nights} night${plural(nights)} at R 0: no allowance rate set`
+        : rate !== null && nights
         ? `${nights} night${plural(nights)} × ${fmtRand(rate, 2)}`
         : nights === 0
           ? 'No night away'
@@ -965,14 +996,14 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     );
     returnNights = nightsOne !== null && nightsTwo !== null ? nightsTwo - nightsOne : null;
     const drAmt =
-      returnNights !== null && rate !== null ? cents(returnNights * rate) : returnNights === 0 ? 0.0 : null;
-    if (drAmt === null && drvAmt !== null) {
+      returnNights !== null && rate !== null ? cents(returnNights * rate) : returnNights !== null ? 0.0 : null;
+    if (returnNights && rate === null && !warnings.some((w) => w.code === 'driver_allowance_missing')) {
       warnings.push(
         warning(
           'driver_allowance_missing',
-          'block',
-          'Driver nights have no allowance',
-          `${returnNights} extra night${plural(returnNights)} coming home: set a rate per night.`,
+          'warn',
+          'No driver allowance rate set',
+          `${returnNights} extra night${plural(returnNights)} coming home priced at R 0; set a rate per night.`,
           null,
           ['update_allowance'],
         ),
@@ -984,7 +1015,9 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
       drAmt,
       rate !== null && returnNights
         ? `${returnNights} extra night${plural(returnNights)} × ${fmtRand(rate, 2)}`
-        : returnNights === 0
+        : returnNights
+          ? `${returnNights} extra night${plural(returnNights)} at R 0: no allowance rate set`
+          : returnNights === 0
           ? 'No extra night'
           : 'Unknown',
       { nights: returnNights, rate_per_night: rate },

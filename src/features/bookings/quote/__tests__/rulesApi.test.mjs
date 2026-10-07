@@ -101,3 +101,32 @@ test('suggested truck: smallest that carries the load, then lowest burn', () => 
   assert.equal(suggestTruck(types, 31)?.name, 'Superlink');
   assert.equal(suggestTruck(types, 40), null);
 });
+
+test('old backend: a price from before the previous period is unusable', () => {
+  const d = dieselInputFromApi({ fuel_zone: 'INLAND' }, { ...oldLive, effective_from: '2026-08-05T00:01:00+02:00' }, { now: NOW });
+  assert.equal(resolveDieselInput(d).source, 'missing');
+});
+
+test('a non-diesel truck with no company price is missing, named by its fuel', async () => {
+  const { computeCosting } = await import('../rules.ts');
+  const c = computeCosting({
+    distance_km: 100,
+    duration_minutes: 90,
+    load_kg: 1000,
+    vehicle: { id: 1, name: 'Van', capacity: 2, rated_burn_l_per_100km: 12 },
+    diesel: { zone: 'INLAND', mode: 'OWN', own_price: null, fuel_type: 'Electric' },
+    operating_cost_per_km: 8,
+    tolls: { one_way: 0 },
+  });
+  const w = c.warnings.find((x) => x.code === 'diesel_missing');
+  assert.equal(w.title, 'No electric price set');
+  assert.equal(w.severity, 'block');
+});
+
+test('suggestion skips a truck with no rated burn', () => {
+  const types = [
+    { id: 1, name: 'Unrated', capacity: 20 },
+    { id: 2, name: 'Rated', capacity: 30, fuel_consumption_l_per_100km: 36 },
+  ];
+  assert.equal(suggestTruck(types, 15)?.name, 'Rated');
+});

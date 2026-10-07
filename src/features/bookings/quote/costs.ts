@@ -183,11 +183,26 @@ export function computeCosts({
   const isDiesel = fuelField === 'fuel_price_per_litre';
   const otherFuelPrice = isDiesel ? null : nullIfNotPositive(pick(company ?? {}, [fuelField]));
   const fuelFromMarketCheck = aiFuelPrice != null && aiFuelPrice > 0;
-  const dieselInput = dieselInputFromApi(company, liveFuel, {
-    now,
-    useOfficial: !!useOfficialDiesel,
-    overridePrice: fuelFromMarketCheck ? (aiFuelPrice as number) : otherFuelPrice,
-  });
+  // Only diesel has an official price: another fuel is priced on the
+  // company's own price for it (backend build_inputs), else it's missing.
+  const dieselInput: CostingInputs['diesel'] = isDiesel
+    ? dieselInputFromApi(company, liveFuel, {
+        now,
+        useOfficial: !!useOfficialDiesel,
+        overridePrice: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
+      })
+    : {
+        zone: str(pick(company ?? {}, ['fuel_zone'])) === 'COASTAL' ? 'COASTAL' : 'INLAND',
+        mode: 'OWN',
+        own_price: otherFuelPrice,
+        own_set_at: null,
+        official_price: null,
+        official_effective_from: null,
+        official_stale: false,
+        use_official: false,
+        override_price: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
+        fuel_type: fuelType,
+      };
   const companyDiesel = dieselInputFromApi(company, liveFuel, { now });
 
   // Tolls (§6): the route's figure per direction; a failed lookup is unknown,

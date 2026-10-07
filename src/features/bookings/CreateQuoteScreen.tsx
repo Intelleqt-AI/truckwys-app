@@ -708,7 +708,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       const fuelUsed = num(pick(q, ['fuel_price_used'])) || num(snap.fuel_price_per_litre_used);
       savedPricingRef.current = {
         total: num(pick(q, ['total_amount'])),
-        floor: snap.cost_floor != null ? num(snap.cost_floor) : null,
+        // The backend's own snapshot first (Quote.cost_floor), else the copy
+        // in route_snapshot (older backends).
+        floor:
+          pick(q, ['cost_floor']) != null
+            ? num(pick(q, ['cost_floor']))
+            : snap.cost_floor != null
+              ? num(snap.cost_floor)
+              : null,
         fuelLitres: num(pick(q, ['fuel_litres'])) || num(snap.fuel_litres) || null,
         fuelPrice: fuelUsed || null,
         pricedAt:
@@ -773,10 +780,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // Every quote is priced on a real truck (§3). With none chosen, the
   // suggested one for the load is used: smallest capacity that carries it,
   // tie → lowest rated burn. The person can change it.
-  const suggestedTruck = useMemo(
-    () => suggestTruck(vtypes ?? [], weightTons ?? 0),
-    [vtypes, weightTons],
-  );
+  // The server's suggestion wins when it has one (newer backends).
+  const [serverSuggestedId, setServerSuggestedId] = useState<string | null>(null);
+  const suggestedTruck = useMemo(() => {
+    const local = suggestTruck(vtypes ?? [], weightTons ?? 0);
+    const fromServer =
+      serverSuggestedId != null ? (vtypes ?? []).find((v) => String(v.id) === serverSuggestedId) : null;
+    return fromServer ?? local;
+  }, [vtypes, weightTons, serverSuggestedId]);
   const pricedTruckName = vehicleType || suggestedTruck?.name || '';
 
   // The rate follows the suggested truck until the person types a rate.
@@ -931,6 +942,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice],
   );
   const serverCosting = useServerCosting(serverPayload);
+  const nextServerSuggested =
+    serverCosting?.suggestedVehicleTypeId != null ? String(serverCosting.suggestedVehicleTypeId) : null;
+  useEffect(() => {
+    setServerSuggestedId(nextServerSuggested);
+  }, [nextServerSuggested]);
 
   // ── Cost breakdown ──────────────────────────────────────────────────────
   // quote/costs.ts: the price lines, and the cost floor, margin and warnings

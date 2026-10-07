@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -75,13 +75,12 @@ import {
 } from '@/features/bookings/quote/rules';
 import { capacityTons } from '@/features/bookings/quote/types';
 import {
-  baseRateError,
   companyFieldErrors,
-  electricError,
-  hybridError,
   ownPricePerLitreError,
+  priceBoxPlan,
   priceText,
   type CompanyBox,
+  type PriceBoxes,
 } from './companyFieldErrors';
 import { InvoiceNumberingSection } from '@/features/finance/InvoiceNumberingSection';
 import { ComingSoonNote, ProviderCards } from '@/features/accounting/components/ProviderCards';
@@ -1276,6 +1275,8 @@ function CompanySection() {
   const [seeded, setSeeded] = useState(false);
   // Inline errors per box: the client checks and the server's 400 field errors.
   const [boxErrors, setBoxErrors] = useState<Partial<Record<CompanyBox, string>>>({});
+  // The price boxes as loaded: only a changed box is checked and sent.
+  const loadedPricesRef = useRef<PriceBoxes>({ electric: null, hybrid: null, baseRate: null });
   const clearBox = (b: CompanyBox) => setBoxErrors((e) => (e[b] ? { ...e, [b]: undefined } : e));
   const [busy, setBusy] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
@@ -1400,8 +1401,8 @@ function CompanySection() {
         : 'LIVE',
     );
     setPetrolGradeChoice(str(pick(data, ['fuel_price_petrol_grade'])) === '93' ? '93' : '95');
-    seedNum(['fuel_price_electric'], setFuelElectric);
-    seedNum(['fuel_price_hybrid'], setFuelHybrid);
+    setFuelElectric(priceText(pick(data, ['fuel_price_electric'])));
+    setFuelHybrid(priceText(pick(data, ['fuel_price_hybrid'])));
     seedNum(['default_sla_hours'], setSlaHours);
     seedNum(['cross_border_crossings_per_year'], setCrossingsPerYear);
     setFuelZone(str(pick(data, ['fuel_zone'])) === 'COASTAL' ? 'COASTAL' : 'INLAND');
@@ -1415,6 +1416,17 @@ function CompanySection() {
     setAutoEmail(pick(data, ['auto_email_invoices']) === true ? 'yes' : 'no');
     const logo = str(pick(data, ['logo_url']));
     if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
+    loadedPricesRef.current = {
+      electric: parseNum(priceText(pick(data, ['fuel_price_electric']))),
+      hybrid: parseNum(priceText(pick(data, ['fuel_price_hybrid']))),
+      baseRate: parseNum(priceText(pick(data, ['default_base_rate_per_km', 'base_rate_per_km', 'base_rate']))),
+    };
+    // A stored out-of-range price shows on its box from the start.
+    setBoxErrors(
+      priceBoxPlan(loadedPricesRef.current, loadedPricesRef.current, {
+        petrolRule: hasPetrolRule(data, livePrice),
+      }).show,
+    );
     setSeeded(true);
   }, [data, seeded, liveLoaded, livePrice]);
 
@@ -1531,15 +1543,13 @@ function CompanySection() {
       }
     }
     setDieselError('');
-    const localErrors: Partial<Record<CompanyBox, string>> = {};
-    const eErr = electricError(parseNum(fuelElectric));
-    if (eErr) localErrors.electric = eErr;
-    const hErr = hybridError(parseNum(fuelHybrid));
-    if (hErr) localErrors.hybrid = hErr;
-    const bErr = baseRateError(parseNum(baseRate));
-    if (bErr) localErrors.baseRate = bErr;
-    setBoxErrors(localErrors);
-    if (Object.keys(localErrors).length) return toast.error('Check the highlighted prices');
+    const plan = priceBoxPlan(
+      { electric: parseNum(fuelElectric), hybrid: parseNum(fuelHybrid), baseRate: parseNum(baseRate) },
+      loadedPricesRef.current,
+      { petrolRule },
+    );
+    setBoxErrors({ ...plan.show, ...plan.block });
+    if (Object.keys(plan.block).length) return toast.error('Check the highlighted prices');
     if (petrolRule && petrolMode === 'OWN') {
       const p = parseNum(fuelPetrol);
       if (p == null) {
@@ -1588,7 +1598,8 @@ function CompanySection() {
         // diesel below.
         cross_border_crossings_per_year: optionalNum(crossingsPerYear, 0) ?? 24,
         default_quote_validity_days: optionalNum(validityDays, 0),
-        default_base_rate_per_km: optionalNum(baseRate, 2),
+        // Price boxes go only when changed (see priceBoxPlan).
+        ...(plan.send.baseRate ? { default_base_rate_per_km: optionalNum(baseRate, 2) } : {}),
         default_toll_rate_per_km: optionalNum(tollRate, 3),
         fuel_zone: fuelZone,
         // Own price set ⇒ OWN; empty ⇒ LIVE (official). A newer backend takes
@@ -1609,8 +1620,8 @@ function CompanySection() {
               ...(petrolMode === 'OWN' ? { fuel_price_petrol: clearableNum(fuelPetrol, 4) } : {}),
             }
           : { fuel_price_petrol: clearableNum(fuelPetrol, 4) }),
-        fuel_price_electric: clearableNum(fuelElectric, 4),
-        fuel_price_hybrid: clearableNum(fuelHybrid, 4),
+        ...(plan.send.electric ? { fuel_price_electric: clearableNum(fuelElectric, 4) } : {}),
+        ...(plan.send.hybrid ? { fuel_price_hybrid: clearableNum(fuelHybrid, 4) } : {}),
         default_sla_hours: optionalNum(slaHours, 0),
       });
       invalidateFor(qc, 'company');

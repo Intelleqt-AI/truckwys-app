@@ -62,3 +62,43 @@ export function priceText(v: unknown): string {
   const n = Number(v);
   return Number.isFinite(n) ? String(n).replace('.', ',') : '';
 }
+
+export interface PriceBoxes {
+  electric: number | null;
+  hybrid: number | null;
+  baseRate: number | null;
+}
+
+/**
+ * Which price boxes to check and send on Save. Only a box changed since load
+ * is checked and sent: a stored out-of-range figure is shown on its box but
+ * never blocks saving something else (and isn't sent back for the server to
+ * refuse). On a newer backend (petrolRule) hybrid trucks price on petrol: the
+ * hidden hybrid box is neither checked nor sent.
+ */
+export function priceBoxPlan(
+  now: PriceBoxes,
+  loaded: PriceBoxes,
+  opts: { petrolRule: boolean },
+): {
+  block: Partial<Record<CompanyBox, string>>;
+  show: Partial<Record<CompanyBox, string>>;
+  send: { electric: boolean; hybrid: boolean; baseRate: boolean };
+} {
+  const check: Record<keyof PriceBoxes, (v: number | null) => string | null> = {
+    electric: electricError,
+    hybrid: hybridError,
+    baseRate: baseRateError,
+  };
+  const block: Partial<Record<CompanyBox, string>> = {};
+  const show: Partial<Record<CompanyBox, string>> = {};
+  const send = { electric: false, hybrid: false, baseRate: false };
+  for (const key of ['electric', 'hybrid', 'baseRate'] as const) {
+    if (key === 'hybrid' && opts.petrolRule) continue;
+    const changed = now[key] !== loaded[key];
+    const err = check[key](now[key]);
+    send[key] = changed;
+    if (err) (changed ? block : show)[key] = err;
+  }
+  return { block, show, send };
+}

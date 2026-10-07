@@ -49,3 +49,22 @@ test('stored prices show with a comma decimal', () => {
   assert.equal(priceText(33), '33');
   assert.equal(priceText(null), '');
 });
+
+test('save plan: only changed boxes are checked and sent; hidden hybrid ignored on a newer backend', async () => {
+  const { priceBoxPlan } = await import('../companyFieldErrors.ts');
+  // Stored hybrid 0 and electric 25 (out of range), user only changes the base rate.
+  const loaded = { electric: 25, hybrid: 0, baseRate: 30 };
+  const now = { electric: 25, hybrid: 0, baseRate: 33 };
+  const newBackend = priceBoxPlan(now, loaded, { petrolRule: true });
+  assert.deepEqual(newBackend.block, {});
+  assert.deepEqual(newBackend.show, { electric: 'Between R 0 and R 20 per kWh' });
+  assert.deepEqual(newBackend.send, { electric: false, hybrid: false, baseRate: true });
+  // Old backend: hybrid box is visible; unchanged, so shown, not blocking.
+  const oldBackend = priceBoxPlan(now, loaded, { petrolRule: false });
+  assert.deepEqual(oldBackend.block, {});
+  assert.equal(oldBackend.show.hybrid, 'Between R 0 and R 100 per litre');
+  // A changed out-of-range value blocks.
+  const typed = priceBoxPlan({ ...now, electric: 30 }, loaded, { petrolRule: true });
+  assert.deepEqual(typed.block, { electric: 'Between R 0 and R 20 per kWh' });
+  assert.equal(typed.send.electric, true);
+});

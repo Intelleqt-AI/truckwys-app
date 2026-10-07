@@ -3,6 +3,7 @@ import { Txt, Mono, Label, Icon, Badge, Button } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Proposal } from '../types';
 import { OPERATION_TONE, STATUS_CHIP, toneText } from './proposalTone';
+import { settledText } from '../settledText';
 
 // A confirm-first write the agent has drafted.
 //
@@ -128,9 +129,15 @@ export function ProposalCard({
 function Settled({ proposal }: { proposal: Proposal }) {
   const { colors } = useTheme();
   const chip = STATUS_CHIP[proposal.status] ?? { text: proposal.status, tone: 'neutral' as const };
-  // SEND is "Sent", everything else is "Saved" — matching the web wording.
-  const text =
-    proposal.status === 'executed' && proposal.operation === 'SEND' ? '✓ Sent' : chip.text;
+  // A proposal that sent the quote says "✓ Sent to {customer}"; saves keep
+  // the chip's own wording.
+  const text = settledText({
+    status: proposal.status,
+    operation: proposal.operation,
+    sends: proposal.sends,
+    fields: proposal.fields,
+    chipText: chip.text,
+  });
   return (
     <View>
       <Mono className="text-caption font-medium" style={{ color: toneText(chip.tone, colors) }}>

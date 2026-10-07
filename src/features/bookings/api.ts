@@ -5,6 +5,7 @@ import { asArray, num, str, pick } from '@/lib/api/list';
 import { useInfiniteList } from '@/lib/api/useInfiniteList';
 import { normalizeQuote, normalizeLoad, type LoadLite } from '@/types/domain';
 import { roundTo } from '@/lib/formatters';
+import { parseErrorBody, sendBlockMessage } from './quote/sendBlock';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
 /**
@@ -282,8 +283,13 @@ export const recordLocationPick = (label: string, lat: number, lon: number) =>
     data: { location_text: label, lat: roundTo(lat, 6), lon: roundTo(lon, 6) },
   }).catch(() => {});
 
+// X-TW-Quote-Rules: 1 opts into the QUOTE-RULES response shape (unknown
+// fuel/tolls as null + tolls_unknown / distance_estimated flags). Without it
+// the backend keeps the legacy shape for already-shipped builds. A plain
+// header: OTA-safe, and older backends ignore it.
+export const QUOTE_RULES_HEADER = { 'X-TW-Quote-Rules': '1' };
 export const calculateRoute = (data: Record<string, unknown>) =>
-  postData<Record<string, unknown>>({ url: 'route/calculate/', data });
+  postData<Record<string, unknown>>({ url: 'route/calculate/', data, config: { headers: QUOTE_RULES_HEADER } });
 
 export const analyzeQuote = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'quotes/analyze/', data });
@@ -376,9 +382,28 @@ export const convertQuoteToLoad = (
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
 // Quote PDF is a GET that streams a PDF blob (web uses downloadBlob).
+//
+// A refused PDF (a draft with a blocking warning, §11) answers 400 JSON, which
+// with responseType 'blob' arrives as a Blob: read it and throw the block's
+// own title rather than "Request failed (400)".
 export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
-  const res = await api.get(`quotes/${id}/generate_pdf/`, { responseType: 'blob' });
-  return res.data as Blob;
+  try {
+    const res = await api.get(`quotes/${id}/generate_pdf/`, { responseType: 'blob' });
+    return res.data as Blob;
+  } catch (e) {
+    const data = (e as { data?: unknown }).data;
+    if (data && typeof (data as Blob).text === 'function') {
+      const body = parseErrorBody(await (data as Blob).text().catch(() => ''));
+      const msg = sendBlockMessage(body);
+      if (msg) {
+        const err = new Error(msg) as Error & { status?: number; data?: unknown };
+        err.status = (e as { status?: number }).status;
+        err.data = body;
+        throw err;
+      }
+    }
+    throw e;
+  }
 };
 
 // ── Load mutations / actions ────────────────────────────────────────────────

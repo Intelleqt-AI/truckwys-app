@@ -937,7 +937,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             trip_type: tripType,
             one_way_distance_km: routeOneWayKm,
             duration_minutes: routeMinutes || null,
-            load_kg: weightKg,
+            // No weight yet = unknown (server warns load_missing), never 0 t.
+            load_kg: weightKg > 0 ? weightKg : null,
             vehicle_type_id: pricedTruck.id,
             vehicle_type: pricedTruck.name,
             include_empty_return: returnLoadBooked ? false : null,

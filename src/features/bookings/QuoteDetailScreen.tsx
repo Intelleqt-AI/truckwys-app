@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, Share, Alert, Modal, TouchableOpacity } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -102,6 +102,10 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
+  // The pre-send check (§11) is a network call: one at a time, with the Send
+  // control showing progress while it runs.
+  const [sendChecking, setSendChecking] = useState(false);
+  const checkingRef = useRef(false);
   const [sendOpen, setSendOpen] = useState(false);
   // Which channel the preview is for; the send itself runs on confirm.
   const [sendPreview, setSendPreview] = useState<'email' | 'whatsapp' | null>(null);
@@ -290,16 +294,25 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     str(snapshot.priced_at) ||
     (snapshot.fuel_price_per_litre_used != null ? str(pick(q, ['created_at'])) : '');
   const guardedSend = async (go: () => void) => {
+    // A second tap while the check runs must not open a second sheet.
+    if (checkingRef.current || sendBusy) return;
+    checkingRef.current = true;
+    setSendChecking(true);
     let warnings: Record<string, unknown>[] | null = null;
     try {
       const res = await postData<Record<string, unknown>>({
         url: 'quotes/cost-breakdown/',
         data: { quote_id: Number(id) },
+        // A slow network falls back to the local check rather than hanging.
+        config: { timeout: 10000 },
       });
       const check = (res?.send_check ?? null) as Record<string, unknown> | null;
       if (check) warnings = asArray<Record<string, unknown>>(check.warnings);
     } catch {
-      warnings = null; // older backend or offline: the local check below
+      warnings = null; // older backend, offline or slow: the local check below
+    } finally {
+      checkingRef.current = false;
+      setSendChecking(false);
     }
     if (warnings === null) {
       const block = asArray<Record<string, unknown>>(pick(q, ['warnings'])).find((w) => w.severity === 'block');
@@ -498,7 +511,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
   const editQuote = () => navigation.navigate('CreateQuote', { quoteId: id });
   const changeStatus = (s: string) => {
-    if (s === status || statusBusy) return;
+    if (s === status || statusBusy || sendChecking) return;
     const go = () => run(setStatusBusy, () => patchQuote(id, { status: s }), 'Status updated');
     if (s === 'SENT') void guardedSend(go);
     else go();
@@ -587,7 +600,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     send: {
       label: status === 'SENT' ? 'Resend' : 'Send',
       icon: 'send' as IconName,
-      loading: sendBusy,
+      loading: sendBusy || sendChecking,
       onPress: () => void guardedSend(() => setSendOpen(true)),
     },
     edit: { label: 'Edit quote', icon: 'edit' as IconName, onPress: editQuote },
@@ -601,7 +614,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     menuActions.push({
       label: status === 'SENT' ? 'Resend' : 'Send',
       icon: 'send',
-      disabled: sendBusy,
+      disabled: sendBusy || sendChecking,
       onPress: () => void guardedSend(() => setSendOpen(true)),
     });
   }

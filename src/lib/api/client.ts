@@ -1,4 +1,5 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
+import { sendBlockMessage } from '@/features/bookings/quote/sendBlock';
 
 // Centralized API client — RN port of the web app's src/lib/Api.ts.
 // Auth is DRF per-device Token auth: header is `Authorization: Token <key>`
@@ -144,6 +145,10 @@ api.interceptors.response.use(
       const isFieldError = key !== 'error' && key !== 'detail' && key !== 'non_field_errors' && key !== '';
       serverMsg = isFieldError && msg ? `${humanizeFieldName(key)}: ${msg}` : msg;
     }
+
+    // A refused send/PDF/status change (§11): the blocking warning's own title.
+    const blockMsg = sendBlockMessage(data);
+    if (blockMsg) serverMsg = blockMsg;
 
     const err = new Error(
       serverMsg ||

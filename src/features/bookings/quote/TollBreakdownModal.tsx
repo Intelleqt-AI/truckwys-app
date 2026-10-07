@@ -1,16 +1,10 @@
 import { memo } from 'react';
-import { View, TouchableOpacity, Modal } from 'react-native';
-import { Button, Label, Txt, Mono } from '@/components/ui';
 import { num, pick, str } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
+import { BreakdownModal, type BreakdownRow } from './BreakdownModal';
 import type { CostBreakdown } from './costs';
 
-/**
- * Toll plaza breakdown — moved out of CreateQuoteScreen.tsx's render body
- * (Phase 2) verbatim, wrapped in memo. Stays mounted at the same tree
- * position as before (a sibling near the end of BottomSheetScrollView,
- * unaffected by the section restructuring since it's a Modal).
- */
+/** Toll plazas on the route, excl. VAT like the rest of the quote. */
 function TollBreakdownModalImpl({
   visible,
   onClose,
@@ -20,56 +14,23 @@ function TollBreakdownModalImpl({
   onClose: () => void;
   costs: CostBreakdown;
 }) {
+  const rows: BreakdownRow[] = costs.tollsUnavailable
+    ? [{ label: 'Route lookup', value: 'Failed', tone: 'danger' }]
+    : costs.tollBreakdown.map((b) => ({
+        label: `${str(pick(b, ['plaza']), 'Plaza')}${pick(b, ['route']) ? ` (${str(pick(b, ['route']))})` : ''}`,
+        value: formatCurrency(num(pick(b, ['tariff']))),
+      }));
+  if (!costs.tollsUnavailable && rows.length === 0) rows.push({ label: 'Plazas', value: 'None' });
+  if (costs.legs === 2 && costs.tollKnown) rows.push({ label: 'Legs', value: '× 2' });
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity activeOpacity={1} className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
-        <TouchableOpacity
-          activeOpacity={1}
-          className="rounded-panel border border-line bg-elevated p-4"
-          onPress={() => {}}
-        >
-          <Label className="mb-3 text-muted">Toll plazas on this route</Label>
-          {costs.tollsUnavailable ? (
-            <Txt className="text-callout text-warning">{costs.tollWarning}</Txt>
-          ) : costs.tollBreakdown.length === 0 ? (
-            <Txt className="text-callout text-muted">No SANRAL plazas matched on this route.</Txt>
-          ) : (
-            <View>
-              {costs.tollBreakdown.map((b, i) => (
-                <View
-                  key={i}
-                  className="flex-row items-center justify-between border-b border-line-row py-2"
-                >
-                  <Txt className="flex-1 text-sub text-fg" numberOfLines={1}>
-                    {str(pick(b, ['plaza']), 'Plaza')}
-                    {pick(b, ['route']) ? ` (${str(pick(b, ['route']))})` : ''}
-                  </Txt>
-                  <Mono className="text-sub text-muted">
-                    {formatCurrency(num(pick(b, ['tariff'])))}
-                  </Mono>
-                </View>
-              ))}
-              <View className="mt-2 flex-row items-center justify-between">
-                <Txt className="text-callout font-semibold text-fg">One way total</Txt>
-                <Mono className="text-callout font-semibold text-fg">
-                  {formatCurrency(costs.tollBreakdownOneWay)}
-                </Mono>
-              </View>
-              {costs.legs === 2 && (
-                <Mono className="mt-1 text-caption text-faint">
-                  × 2 for round trip = {formatCurrency(costs.tollBreakdownOneWay * 2)}
-                </Mono>
-              )}
-              <Txt className="mt-2 text-caption text-faint">
-                Tariffs exclude VAT, like the rest of the quote.
-                {costs.tollsEstimated ? ' This is an estimate, not a plaza match.' : ''}
-              </Txt>
-            </View>
-          )}
-          <Button label="Close" variant="secondary" onPress={onClose} fullWidth className="mt-4" />
-        </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
+    <BreakdownModal
+      visible={visible}
+      onClose={onClose}
+      title="Tolls excl. VAT"
+      rows={rows}
+      total={{ label: 'Tolls', value: costs.tollKnown ? formatCurrency(costs.tollCost) : '—' }}
+      note={costs.tollsEstimated && !costs.tollsUnavailable ? 'Estimated, not a plaza match.' : null}
+    />
   );
 }
 

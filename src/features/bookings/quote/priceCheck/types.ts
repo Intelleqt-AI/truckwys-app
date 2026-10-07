@@ -262,26 +262,18 @@ export function classify(
 }
 
 export function failureText(f: Failure, secsLeft: number | null): { title: string; text: string } {
-  const wait = secsLeft != null && secsLeft > 0 ? `Try again in ${secsLeft} s.` : 'Try again shortly.';
+  const wait = secsLeft != null && secsLeft > 0 ? `Retry in ${secsLeft} s` : 'Retry shortly';
   switch (f.code) {
     case 'unavailable':
-      return f.missing
-        ? { title: "Price check isn't available yet", text: 'Your quote works as normal.' }
-        : { title: "Price check isn't available right now", text: 'Your quote works as normal.' };
+      return { title: f.missing ? 'Not available yet' : 'Not available right now', text: '' };
     case 'cooldown':
       return { title: 'Checked a moment ago', text: wait };
     case 'throttled':
-      return { title: 'Too many checks this minute', text: wait };
+      return { title: 'Too many checks', text: wait };
     case 'budget':
-      return {
-        title: "Today's price checks are used up",
-        text: 'Your company has reached its daily limit. Checks start again at midnight, and your quote works as normal.',
-      };
+      return { title: "Today's checks used up", text: 'More from midnight' };
     default:
-      return {
-        title: "Couldn't check market prices",
-        text: 'Your quote is unaffected. Try again in a minute.',
-      };
+      return { title: "Couldn't check", text: 'Retry in a minute' };
   }
 }
 

@@ -14,6 +14,7 @@ import {
   Keyboard,
   useWindowDimensions,
   InteractionManager,
+  Alert,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native';
@@ -42,6 +43,7 @@ import {
   Icon,
   Txt,
   Label,
+  Toggle,
 } from '@/components/ui';
 import {
   useVehicleTypes,
@@ -70,7 +72,6 @@ import { num, str, pick, asArray } from '@/lib/api/list';
 import { useFinanceSettings } from '@/lib/finance/api';
 import { previewQuoteVat } from '@/lib/vat';
 import { formatDuration, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
-import { localDateISO } from '@/lib/dates';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
@@ -95,6 +96,10 @@ import {
   capacityTons,
 } from './quote/types';
 import { computeCosts } from './quote/costs';
+import { suggestTruck, saShortDate, signedRand, pricedInEarlierPeriod, type QuoteWarning } from './quote/rules';
+import { QuoteWarnings } from './quote/QuoteWarnings';
+import { CostFloorModal } from './quote/CostFloorModal';
+import { useServerCosting } from './quote/useServerCosting';
 import { buildQuotePayload } from './quote/payload';
 import { compactStoredSnapshot } from './quote/routeSnapshot';
 import { LocationField } from './quote/LocationField';
@@ -107,8 +112,6 @@ import {
   type QuoteJumpBarSection,
 } from './quote/QuoteJumpBar';
 import { RouteOptionChips } from './quote/RouteOptionChips';
-import { TruckSuggestionChips } from './quote/TruckSuggestionChips';
-import { suggestTrucks } from './quote/suggestions';
 import { PriceCheckCard, type GuardInfo } from './quote/priceCheck/PriceCheckCard';
 import { usePriceCheck } from './quote/priceCheck/usePriceCheck';
 import { moneyWhole, type Choice, type Review, type ItemKey } from './quote/priceCheck/types';
@@ -151,13 +154,6 @@ const SNAP = SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`);
 // recomputed per render.
 const SECTION_ORDER: SectionId[] = ['client', 'route', 'load', 'schedule', 'price'];
 
-// A load can't legally exceed the selected vehicle's rated capacity by more
-// than the Road Traffic Act's 5% tolerance — past that it's an offence, and
-// well past it it's not a chargeable "surcharge", it's a different kind of
-// job (abnormal-load permits, escorts, route approval). No legitimate price
-// bump exists below capacity, so this blocks the quote instead of pricing it
-// — mirrors web's QuoteBuilder.tsx weightBlockedMessage.
-const OVERLOAD_TOLERANCE = 1.05;
 
 // The fields the market price check's Apply writes, so Undo can put back exactly
 // what was there. Tolls travel as a group: a market figure (aiToll), or a typed
@@ -168,6 +164,7 @@ interface AiInputs {
   tollOverride: string;
   tollEdited: boolean;
   driverAllowance: string;
+  driverEdited: boolean;
   baseRatePerKm: string;
   serviceCharge: number;
 }
@@ -252,7 +249,35 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [benchmark, setBenchmark] = useState<Record<string, unknown> | null>(null);
   const [tollOverride, setTollOverride] = useState('');
   const [tollEdited, setTollEdited] = useState(false);
-  const [driverAllowance, setDriverAllowance] = useState('0');
+  // Driver nights out: the suggested allowance (nights × company rate) until the
+  // person types their own figure.
+  const [driverAllowance, setDriverAllowance] = useState('');
+  const [driverEdited, setDriverEdited] = useState(false);
+  // Trip shape and confirmations (QUOTE-RULES §5, §6).
+  const [returnLoadBooked, setReturnLoadBooked] = useState(false);
+  const [tollsConfirmedNone, setTollsConfirmedNone] = useState(false);
+  const [distanceConfirmed, setDistanceConfirmed] = useState(false);
+  // "Use official price" on this quote while the company prices on its own.
+  const [useOfficialDiesel, setUseOfficialDiesel] = useState(false);
+  // Bumped to force a fresh route calculation ("Recalculate route").
+  const [routeNonce, setRouteNonce] = useState(0);
+  // The rate box follows the suggested truck until the person types in it.
+  const rateTouchedRef = useRef(false);
+  // Reopening a saved quote (§11): the price it was saved at, and how the
+  // costs moved since. 'init' until the first current route lands.
+  const savedPricingRef = useRef<{
+    total: number;
+    floor: number | null;
+    fuelLitres: number | null;
+    fuelPrice: number | null;
+    pricedAt: string | null;
+  } | null>(null);
+  const [reopen, setReopen] = useState<
+    | { state: 'init' }
+    | { state: 'notice'; delta: number; since: string | null; oldMargin: number; newMargin: number }
+    | { state: 'kept'; earlierPeriod: boolean }
+    | { state: 'done' }
+  >({ state: 'init' });
   const [baseRatePerKm, setBaseRatePerKm] = useState('');
   const [serviceCharge, setServiceCharge] = useState(0);
   // Market figures applied from the price check. A fuel price replaces the
@@ -293,6 +318,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       tripType,
       tollEdited,
       driverAllowance,
+      driverEdited,
+      returnLoadBooked,
       baseRatePerKm,
       serviceCharge,
     ]);
@@ -312,8 +339,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const weightInvalid = weight.trim() !== '' && weightTons == null;
   const weightTooLarge = weightTons != null && weightTons > WEIGHT_MAX_TONS;
   const baseRateNum = parseNum(baseRatePerKm) ?? 0;
-  const driverNum = parseNum(driverAllowance) ?? 0;
+  const driverNum = driverEdited ? (parseNum(driverAllowance) ?? 0) : 0;
+  // An emptied box is not R 0: until a figure is typed the suggestion (or the
+  // warning that there is none) stands.
+  const driverOverride = driverEdited ? parseNum(driverAllowance) : null;
   const tollOverrideNum = parseNum(tollOverride) ?? 0;
+  // Same for tolls: "Enter tolls" opens the box; only a typed figure counts.
+  const tollTyped = tollEdited && parseNum(tollOverride) != null;
 
   const [routeData, setRouteData] = useState<Record<string, unknown> | null>(null);
   // The inputs routeData was calculated for. An edited quote starts with a stub
@@ -330,6 +362,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [fuelModal, setFuelModal] = useState(false);
   const [rateModal, setRateModal] = useState(false);
   const [borderModal, setBorderModal] = useState(false);
+  const [costModal, setCostModal] = useState(false);
   const [busy, setBusy] = useState<'draft' | 'send' | null>(null);
   // Validation surfacing (Phase 3): never on first paint, Weight shows its
   // error once the user leaves it, everything else waits for a Send attempt
@@ -652,13 +685,34 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
       setWeight(String((num(pick(q, ['weight'])) || 0) / 1000 || ''));
       setCargo(str(pick(q, ['cargo_description'])));
-      setDriverAllowance(String(num(pick(q, ['driver_allowance']))));
       setTollOverride(String(num(pick(q, ['toll_charges']))));
       lastStatusRef.current = str(pick(q, ['status'])).toUpperCase();
       // A market fuel price applied from the price check, and a typed or market
       // toll figure, are the person's choice, so they survive a reload. Tolls the
       // route itself supplied still do not pin: they follow the recalculated route.
       const snap = (pick(q, ['route_snapshot']) ?? {}) as Record<string, unknown>;
+      // Driver: a typed figure stays; a suggested one follows the route. Quotes
+      // saved before the snapshot defaulted to R 0, so only a non-zero amount
+      // there was typed.
+      const savedDriver = num(pick(q, ['driver_allowance']));
+      const driverWasTyped =
+        'driver_source' in snap ? snap.driver_source === 'user' : savedDriver > 0;
+      setDriverAllowance(driverWasTyped ? formatPlain(savedDriver) : '');
+      setDriverEdited(driverWasTyped);
+      setReturnLoadBooked(snap.return_load_booked === true);
+      setTollsConfirmedNone(snap.tolls_confirmed_none === true);
+      setDistanceConfirmed(snap.distance_confirmed === true);
+      setUseOfficialDiesel(snap.use_official === true);
+      rateTouchedRef.current = true;
+      const fuelUsed = num(pick(q, ['fuel_price_used'])) || num(snap.fuel_price_per_litre_used);
+      savedPricingRef.current = {
+        total: num(pick(q, ['total_amount'])),
+        floor: snap.cost_floor != null ? num(snap.cost_floor) : null,
+        fuelLitres: num(pick(q, ['fuel_litres'])) || num(snap.fuel_litres) || null,
+        fuelPrice: fuelUsed || null,
+        pricedAt:
+          str(pick(q, ['priced_at'])) || str(snap.priced_at) || str(pick(q, ['updated_at', 'created_at'])) || null,
+      };
       const fromMarket = (v: unknown) => ['market_check', 'ai_market'].includes(str(v));
       setAiFuel(
         fromMarket(snap.fuel_price_source) && num(snap.fuel_price_per_litre_used) > 0
@@ -715,42 +769,37 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     () => (customers ?? []).map((c) => ({ label: c.name, value: String(c.id) })),
     [customers],
   );
-  // With no vehicle type picked and a weight entered, offer up to three
-  // trucks the fleet owns that can carry the load — see quote/suggestions.ts.
-  // Declared before vtypeOptions, which unions in any suggested type the
-  // availability filter would otherwise drop.
-  const suggestions = useMemo(
-    () => suggestTrucks({ types: vtypes, tonnes: weightTons, cargo, vehicleType }),
-    [vtypes, weightTons, cargo, vehicleType],
+  // Every quote is priced on a real truck (§3). With none chosen, the
+  // suggested one for the load is used: smallest capacity that carries it,
+  // tie → lowest rated burn. The person can change it.
+  const suggestedTruck = useMemo(
+    () => suggestTruck(vtypes ?? [], weightTons ?? 0),
+    [vtypes, weightTons],
   );
+  const pricedTruckName = vehicleType || suggestedTruck?.name || '';
+
+  // The rate follows the suggested truck until the person types a rate.
+  useEffect(() => {
+    if (vehicleType || editing || rateTouchedRef.current || !suggestedTruck) return;
+    const vtRate = Number(suggestedTruck.base_rate) || 0;
+    const def = num(pick(company ?? {}, ['default_base_rate_per_km']));
+    const next = vtRate > 0 ? vtRate : def;
+    if (next > 0) setBaseRatePerKm(String(next));
+  }, [suggestedTruck, vehicleType, editing, company]);
 
   const vtypeOptions = useMemo(() => {
     const seen = new Set<string>();
     const base = (vtypes ?? [])
-      .filter((v) => (v.available_vehicle_count ?? 1) > 0)
+      .filter((v) => (v.available_vehicle_count ?? 1) > 0 || v.name === pricedTruckName)
       .filter((v) => (seen.has(v.name) ? false : (seen.add(v.name), true)))
       .map((v) => {
         const cap = capacityTons(v.capacity);
-        return { label: cap ? `${v.name} (${cap}t)` : v.name, value: v.name };
+        return { label: cap ? `${v.name} (${formatPlain(cap)} t)` : v.name, value: v.name };
       });
-    // The list above only covers types with a vehicle free today. A
-    // suggested or already-saved type outside that set still has to be
-    // selectable, or SelectField (which resolves its display label by
-    // looking the value up in `options`) renders the "Not decided yet"
-    // placeholder even though a type IS set — the tap/save would look like
-    // it did nothing. Mirrors web's extra-<option> union.
-    const extraNames = [vehicleType, ...suggestions.map((s) => s.name)].filter(
-      (n): n is string => !!n && !seen.has(n),
-    );
-    for (const n of extraNames) {
-      if (seen.has(n)) continue;
-      seen.add(n);
-      const v = (vtypes ?? []).find((x) => x.name === n);
-      const cap = v ? capacityTons(v.capacity) : null;
-      base.push({ label: cap ? `${n} (${cap}t)` : n, value: n });
-    }
+    // A saved type that's no longer in the list still has to show.
+    if (pricedTruckName && !seen.has(pricedTruckName)) base.push({ label: pricedTruckName, value: pricedTruckName });
     return base;
-  }, [vtypes, vehicleType, suggestions]);
+  }, [vtypes, pricedTruckName]);
 
   // Same four prerequisites as before, but as a list rather than a boolean, so
   // the footer and the Price section can name the one that's actually missing
@@ -761,35 +810,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   );
   const ready = priceGaps.length === 0;
 
-  // Overload guard (mirrors web's QuoteBuilder.tsx) — a plain function of the
-  // selected type's capacity and the entered weight, both already in tonnes,
-  // so this needs no debounce/effect like the route calc below. Runs ONLY
-  // when a vehicle type is selected: with no type there is no rated capacity
-  // to measure against, so vehicleCapacityTons is 0 and the check below
-  // no-ops — the owner assigns a truck that fits the load later.
-  //
-  // Deliberately raw Number(...), NOT capacityTons() — web ported the kg/
-  // tonnes normalisation into the fuel calc but never applied it here, so a
-  // kg-valued row (e.g. capacity: 20000) reads as a 20,000-tonne truck on web
-  // and the guard never fires. Bit-for-bit parity with web is the point: web
-  // is the pricing source of truth, and this app must show the exact same
-  // number/behaviour a company would see on the dashboard, quirk included. If
-  // this gets normalised, it must happen on web first.
-  const vehicleCapacityTons =
-    Number((vtypes ?? []).find((v) => v.name === vehicleType)?.capacity) || 0;
-  const weightBlockedMessage = useMemo(() => {
-    if (!vehicleCapacityTons || weightTons == null || weightTons <= vehicleCapacityTons) return '';
-    if (weightTons <= vehicleCapacityTons * OVERLOAD_TOLERANCE) {
-      return `${weightTons}t exceeds the ${vehicleType}'s rated capacity of ${vehicleCapacityTons}t. Even within the legal 5% tolerance this is an overload. Pick a larger vehicle or reduce the weight.`;
-    }
-    return `${weightTons}t is well beyond the ${vehicleType}'s ${vehicleCapacityTons}t capacity. This needs an abnormal-load permit (route approval, possibly escorts) and can't be priced through a standard quote.`;
-  }, [vehicleCapacityTons, weightTons, vehicleType]);
-
   // Route calc (debounced 500ms, stale-guarded).
   useEffect(() => {
     if (!ready || !pickup || !delivery) return;
     const id = ++routeReq.current;
-    const calcKey = routeKeyOf(pickup, delivery, stops, vehicleType, weightKg);
+    const calcKey = routeKeyOf(pickup, delivery, stops, pricedTruckName, weightKg);
     const t = setTimeout(async () => {
       setRouteBusy(true);
       try {
@@ -802,12 +827,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           dest_lat: delivery.lat,
           dest_lon: delivery.lon,
           dest_country: delivery.cc,
-          // Vehicle type is optional on the quote itself, but /route/calculate/
-          // still needs one to estimate fuel — 'Flatbed' is a reasonable
-          // stand-in for a route that isn't priced on it anyway (costs.ts
-          // infers its own reference truck from the load for the real fuel
-          // figure).
-          vehicle_type: vehicleType || 'Flatbed',
+          // The truck sets the toll class. 'Flatbed' only stands in while the
+          // fleet has no truck at all, and then the quote can't be priced.
+          vehicle_type: pricedTruckName || 'Flatbed',
           // No fallback needed: this effect only runs once `ready`, and
           // weight is one of the priceGaps, so weightKg is guaranteed
           // positive here.
@@ -837,7 +859,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, stops, vehicleType, weightKg]);
+  }, [ready, pickup, delivery, stops, pricedTruckName, weightKg, routeNonce]);
+
+  // A confirmation ("no tolls", "distance is right") belongs to the route it
+  // was given for: a new route asks again.
+  const confirmedForKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!routeCalcKey) return;
+    if (confirmedForKey.current && confirmedForKey.current !== routeCalcKey) {
+      setTollsConfirmedNone(false);
+      setDistanceConfirmed(false);
+    }
+    confirmedForKey.current = routeCalcKey;
+  }, [routeCalcKey]);
 
   const routes = useMemo(
     () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
@@ -858,18 +892,48 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       ? asArray(pick(currentRoute, ['toll_breakdown']))
       : asArray(pick(routeData ?? {}, ['toll_breakdown']));
     return JSON.stringify([
-      vehicleType,
+      pricedTruckName,
       (breakdown as Record<string, unknown>[]).map((b) => str(pick(b, ['plaza']))),
     ]);
-  }, [currentRoute, routeData, vehicleType]);
+  }, [currentRoute, routeData, pricedTruckName]);
   const aiTollOneWay = aiToll && aiToll.routeKey === tollRouteKey ? aiToll.oneWay : null;
-  const fuelTypeNow = str((vtypes ?? []).find((v) => v.name === vehicleType)?.fuel_type, 'Diesel');
+  const fuelTypeNow = str((vtypes ?? []).find((v) => v.name === pricedTruckName)?.fuel_type, 'Diesel');
   const aiFuelPrice = aiFuel && aiFuel.fuelType === fuelTypeNow ? aiFuel.pricePerL : null;
 
+  // The backend's costing for these inputs (newer backends only): supplies
+  // the approved driver allowance, the fleet's operating cost and the diesel
+  // resolution, so the figures here are the server's to the cent.
+  const pricedTruck = useMemo(
+    () => (vtypes ?? []).find((v) => v.name === pricedTruckName) ?? null,
+    [vtypes, pricedTruckName],
+  );
+  const routeOneWayKm = num(pick(currentRoute, ['distance_km'])) || num(pick(routeData ?? {}, ['distance_km']));
+  const routeMinutes =
+    num(pick(currentRoute, ['duration_minutes'])) ||
+    num(pick(currentRoute, ['duration_min'])) ||
+    num(pick(routeData ?? {}, ['duration_minutes']));
+  const serverPayload = useMemo<Record<string, unknown> | null>(
+    () =>
+      ready && routeData && pricedTruck && routeOneWayKm > 0
+        ? {
+            trip_type: tripType,
+            one_way_distance_km: routeOneWayKm,
+            duration_minutes: routeMinutes || null,
+            load_kg: weightKg,
+            vehicle_type_id: pricedTruck.id,
+            vehicle_type: pricedTruck.name,
+            include_empty_return: returnLoadBooked ? false : null,
+            use_official_fuel: useOfficialDiesel,
+            fuel_price_override: aiFuelPrice ?? null,
+          }
+        : null,
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice],
+  );
+  const serverCosting = useServerCosting(serverPayload);
+
   // ── Cost breakdown ──────────────────────────────────────────────────────
-  // computeCosts is the same computation as before, hoisted to quote/costs.ts
-  // (Phase 0 extraction) so it's a pure, testable function — this useMemo and
-  // its dep list are unchanged.
+  // quote/costs.ts: the price lines, and the cost floor, margin and warnings
+  // from the quote rules (quote/rules.ts, mirrored from the backend).
   const costs = useMemo(
     () =>
       computeCosts({
@@ -877,36 +941,50 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         routeData,
         tripType,
         vtypes,
-        vehicleType,
+        vehicleType: pricedTruckName,
         company,
         weightKg,
         baseRateNum,
-        tollEdited,
+        tollEdited: tollTyped,
         tollOverrideNum,
-        driverNum,
+        driverOverride,
         serviceCharge,
         liveFuel,
         aiFuelPrice,
+        useOfficialDiesel,
         aiTollOneWay,
+        returnLoadBooked,
+        tollsConfirmedNone,
+        distanceConfirmed,
+        serverInputs: serverCosting?.inputs ?? null,
       }),
     [
       currentRoute,
       routeData,
       tripType,
       vtypes,
-      vehicleType,
+      pricedTruckName,
       company,
       weightKg,
       baseRateNum,
-      tollEdited,
+      tollTyped,
       tollOverrideNum,
-      driverNum,
+      driverOverride,
       serviceCharge,
       liveFuel,
       aiFuelPrice,
+      useOfficialDiesel,
       aiTollOneWay,
+      returnLoadBooked,
+      tollsConfirmedNone,
+      distanceConfirmed,
+      serverCosting,
     ],
   );
+  // An overloaded truck has no legitimate price: the cost card gives way to
+  // the warning.
+  const overloadWarning = costs.warnings.find((w) => w.code === 'overload');
+  const weightBlockedMessage = overloadWarning ? overloadWarning.title : '';
 
   // Drop a stale analysis the moment a real cost input moves, so the card can't
   // go on showing numbers for a quote that no longer exists while the next
@@ -925,7 +1003,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // can't leave the card stuck on a skeleton.
     if (routeData && costs.total > 0 && pickup && delivery) setAiBusy(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [costs.directCost, vehicleType, weightKg, selectedRouteIndex]);
+  }, [costs.directCost, pricedTruckName, weightKg, selectedRouteIndex]);
 
   // AI analyze + guard (debounced 700ms, stale-guarded).
   useEffect(() => {
@@ -938,11 +1016,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       const [a, g] = await Promise.all([
         analyzeQuote({
           quote_total: costs.total,
-          direct_cost: costs.directCost,
+          // The cost floor (§7), so the analysis judges margin on real costs.
+          direct_cost: costs.floor ?? costs.directCost,
           distance_km: costs.chargeDistance,
           origin: extractCode(pickup.label),
           destination: extractCode(delivery.label),
-          vehicle_type: vehicleType,
+          vehicle_type: pricedTruckName,
           weight: weightKg,
           fuel_cost: costs.fuelCost,
           toll_cost: costs.tollCost,
@@ -958,15 +1037,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           skip_narrative: true,
         }).catch(() => null),
         guardQuote({
-          // Deliberately NOT costs.directCost: directCost === total -
-          // serviceCharge by construction, so total - directCost is
-          // identically serviceCharge (0 on a fresh quote, unchanged by the
-          // base rate), and the guard's margin_pct could never move. This is
-          // the true operating cost the guard is meant to measure against —
-          // fuel, tolls, cross-border and driver, deliberately excluding base
-          // rate and the AI markup. directCost itself stays untouched
-          // everywhere else it's used (see costs.ts).
-          total_cost: costs.fuelCost + costs.tollCost + costs.crossBorderCost + costs.driver,
+          // The cost floor (§7): every cost line incl. running costs and an
+          // empty return, never the price lines.
+          total_cost: costs.floor ?? costs.fuelCost + costs.tollCost + costs.crossBorderCost + costs.driver,
           quote_price: costs.total,
           distance_km: costs.chargeDistance,
           fuel_cost: costs.fuelCost,
@@ -983,7 +1056,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       // the call instead of sending one guaranteed to fail. Resetting
       // benchKey lets a type picked later refetch immediately rather than
       // matching a stale lane key from before it was cleared.
-      if (!vehicleType) {
+      if (!pricedTruckName) {
         benchKey.current = '';
         setBenchmark(null);
       } else {
@@ -991,10 +1064,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         // benchmark can't have changed, so skip it. Without this, every Apply
         // recommended and every keystroke in Tolls/Driver/Rate — none of which
         // touch origin/destination/vehicleType — re-fired this network call.
-        const lane = `${extractCode(pickup.label)}|${extractCode(delivery.label)}|${vehicleType}`;
+        const lane = `${extractCode(pickup.label)}|${extractCode(delivery.label)}|${pricedTruckName}`;
         if (benchKey.current !== lane) {
           benchKey.current = lane;
-          benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), vehicleType)
+          benchmarkQuote(extractCode(pickup.label), extractCode(delivery.label), pricedTruckName)
             .then((b) => id === aiReq.current && setBenchmark(b))
             .catch(() => null);
         }
@@ -1017,9 +1090,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     costs.driver,
     costs.fuelUsage,
     costs.fuelPrice,
+    costs.floor,
     pickup,
     delivery,
-    vehicleType,
+    pricedTruckName,
     weightKg,
     selectedRouteIndex,
     // Switching client alone should re-run analysis — the server derives a
@@ -1176,12 +1250,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const routeIsCurrent =
     !!routeData &&
     !routeBusy &&
-    routeCalcKey === routeKeyOf(pickup, delivery, stops, vehicleType, weightKg);
+    routeCalcKey === routeKeyOf(pickup, delivery, stops, pricedTruckName, weightKg);
   const pc = usePriceCheck({
     active:
       ready &&
       !routeBlockedMessage &&
       !weightBlockedMessage &&
+      // Never a market check on an unknown cost (tolls, diesel, distance).
+      !costs.blocked &&
       costs.total > 0 &&
       !(demo.quotaExceeded && !savedId.current),
     routeReady: routeIsCurrent,
@@ -1196,9 +1272,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     durationMinutes: costs.duration || null,
     origin: pickup?.label ?? '',
     destination: delivery?.label ?? '',
-    vehicleType,
+    vehicleType: pricedTruckName,
     weightKg,
     customerId: customerId || null,
+    costFloor: costs.floor,
+    emptyReturnIncluded: costs.emptyReturnIncluded,
     fuelCost: costs.fuelCost,
     fuelLitres: costs.fuelLitres,
     fuelConsumption: costs.consumption,
@@ -1221,6 +1299,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     tollOverride,
     tollEdited,
     driverAllowance,
+    driverEdited,
     baseRatePerKm,
     serviceCharge,
   });
@@ -1255,9 +1334,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 tollOverride: current.tollOverride,
                 tollEdited: current.tollEdited,
               }),
-          driverAllowance: keep('driverAllowance')
-            ? prev.before.driverAllowance
-            : current.driverAllowance,
+          ...(keep('driverAllowance', 'driverEdited')
+            ? { driverAllowance: prev.before.driverAllowance, driverEdited: prev.before.driverEdited }
+            : { driverAllowance: current.driverAllowance, driverEdited: current.driverEdited }),
           baseRatePerKm: keep('baseRatePerKm') ? prev.before.baseRatePerKm : current.baseRatePerKm,
           serviceCharge: keep('serviceCharge') ? prev.before.serviceCharge : current.serviceCharge,
         };
@@ -1281,7 +1360,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         fuelRate > 0 && Math.abs(fuelRate - costs.fuelCompanyPrice) > 1e-9
           ? { pricePerL: fuelRate, fuelType: costs.fuelType }
           : null,
-      driverAllowance: formatPlain(combo.values.driver_allowance),
+      // Unchanged driver figure: leave the suggestion in charge.
+      ...(Math.abs(combo.values.driver_allowance - costs.driver) < 0.005
+        ? { driverAllowance: current.driverAllowance, driverEdited: current.driverEdited }
+        : { driverAllowance: formatPlain(combo.values.driver_allowance), driverEdited: true }),
       baseRatePerKm: formatPlain(rate),
       serviceCharge: 0,
     };
@@ -1308,6 +1390,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setTollOverride(next.tollOverride);
     setTollEdited(next.tollEdited);
     setDriverAllowance(next.driverAllowance);
+    setDriverEdited(next.driverEdited);
     setBaseRatePerKm(next.baseRatePerKm);
     setServiceCharge(next.serviceCharge);
     preAiRef.current = { before, applied: next };
@@ -1338,8 +1421,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         setTollOverride(before.tollOverride);
         setTollEdited(before.tollEdited);
       } else keptSome = true;
-      if (driverAllowance === applied.driverAllowance) setDriverAllowance(before.driverAllowance);
-      else keptSome = true;
+      if (driverAllowance === applied.driverAllowance && driverEdited === applied.driverEdited) {
+        setDriverAllowance(before.driverAllowance);
+        setDriverEdited(before.driverEdited);
+      } else keptSome = true;
       if (baseRatePerKm === applied.baseRatePerKm) setBaseRatePerKm(before.baseRatePerKm);
       else keptSome = true;
       if (serviceCharge === applied.serviceCharge) setServiceCharge(before.serviceCharge);
@@ -1351,11 +1436,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   const undoMarket = () => {
     const keptSome = restoreMarket();
-    toast.info(
-      keptSome
-        ? 'Undid the market figures. Fields you changed since were kept.'
-        : 'Back to your own figures',
-    );
+    toast.info(keptSome ? 'Market undone. Your later edits kept.' : 'Back to your figures');
   };
 
   // A tap on one item's Mine / Market switch in the price check: the quote moves
@@ -1381,38 +1462,22 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // is, which flagged this as a hook invoked from a plain function.
   const resetPriceToActual = () => setServiceCharge(0);
 
-  // ── Cost overrides: a way back to the calculated/default value (Phase 5) ──
-  // Same field the base-rate prefill effect reads — kept in sync with it so
-  // "Use default" always offers the same figure that effect would have.
+  // ── Cost overrides: a way back to the worked-out figure ──────────────────
   const companyDefaultRate = num(pick(company ?? {}, ['default_base_rate_per_km']));
-  // The selected vehicle type's own rate wins over the company-wide default —
-  // same precedence as handleVehicleTypeSelect above — so reverting a quote
-  // that has a vehicle type with its own rate doesn't throw that away.
-  const selectedVtRate = Number((vtypes ?? []).find((v) => v.name === vehicleType)?.base_rate) || 0;
+  // The truck's own rate wins over the company default, as on selection.
+  const selectedVtRate = Number((vtypes ?? []).find((v) => v.name === pricedTruckName)?.base_rate) || 0;
   const effectiveDefaultRate = selectedVtRate > 0 ? selectedVtRate : companyDefaultRate;
-  // Where the figure in the Rate/km field actually came from — the caption
-  // CostOverrides shows under it (mirrors web's baseRateSource). Checked in
-  // the same precedence order a selection would apply it: the type's own
-  // rate first (even if it happens to equal the company default), then the
-  // company default, else the field's been typed over both.
-  //
-  // Compared numerically against baseRateNum, NOT the raw baseRatePerKm
-  // string — matching web's `Number(selectedVT?.base_rate) === Number(v)`.
-  // A string compare mislabelled a hydrated "33.00" or an en-ZA comma decimal
-  // ("0,95", which parseNum accepts and this screen's own settings
-  // placeholder invites) as "Custom rate" even though it's exactly the type's
-  // or company's own rate. The empty guard is `!(baseRateNum > 0)`, not
-  // `!baseRatePerKm`, so a typed "0" shows no caption at all, same as web.
+  // Where the Rate/km figure came from, for the haulage breakdown.
   const rateSource: string | null = !(baseRateNum > 0)
     ? null
     : selectedVtRate > 0 && baseRateNum === selectedVtRate
-      ? `From ${vehicleType}`
+      ? `From ${pricedTruckName}`
       : companyDefaultRate > 0 && baseRateNum === companyDefaultRate
-        ? 'From company settings'
-        : 'Custom rate';
+        ? 'Company default'
+        : 'Your rate';
   const overridden =
     tollEdited ||
-    driverNum !== 0 ||
+    driverEdited ||
     (effectiveDefaultRate > 0 && baseRateNum !== effectiveDefaultRate) ||
     serviceCharge !== 0;
 
@@ -1420,12 +1485,157 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setTollEdited(false);
     setTollOverride('');
   };
+  const backToSuggestedDriver = () => {
+    setDriverEdited(false);
+    setDriverAllowance('');
+  };
   const resetAllOverrides = () => {
     resetTollToCalculated();
-    setDriverAllowance('0');
+    backToSuggestedDriver();
     if (effectiveDefaultRate > 0) setBaseRatePerKm(String(effectiveDefaultRate));
     resetPriceToActual();
   };
+
+  // ── Reopening a saved quote (§11) ────────────────────────────────────────
+  // The saved price is kept: the difference between it and today's price lines
+  // goes into the adjustment, so nothing changes silently. If the costs moved
+  // since it was priced, one notice offers Keep price / Re-price (keeps margin).
+  useEffect(() => {
+    if (!editing || !hydrated || reopen.state !== 'init' || !routeIsCurrent) return;
+    const saved = savedPricingRef.current;
+    if (!saved || !(saved.total > 0)) {
+      setReopen({ state: 'done' });
+      return;
+    }
+    const adjust = Math.round((saved.total - costs.directCost) * 100) / 100;
+    if (Math.abs(adjust) >= 0.01) setServiceCharge(adjust);
+    const earlierPeriod = pricedInEarlierPeriod(saved.pricedAt);
+    // How the costs moved: the saved floor when the quote has one, else the
+    // diesel on its saved litres.
+    const delta =
+      costs.floor !== null && saved.floor !== null
+        ? costs.floor - saved.floor
+        : costs.floor !== null && saved.fuelLitres && saved.fuelPrice && costs.fuelPrice
+          ? saved.fuelLitres * (costs.fuelPrice - saved.fuelPrice)
+          : null;
+    if (delta === null || Math.abs(delta) < 1 || costs.floor === null) {
+      setReopen({ state: 'kept', earlierPeriod });
+      return;
+    }
+    const oldFloor = costs.floor - delta;
+    setReopen({
+      state: 'notice',
+      delta,
+      since: saShortDate(saved.pricedAt),
+      oldMargin: Math.round(((saved.total - oldFloor) / saved.total) * 100),
+      newMargin: Math.round(((saved.total - costs.floor) / saved.total) * 100),
+    });
+    // Runs once, on the first current route after hydrating.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, hydrated, reopen.state, routeIsCurrent]);
+
+  const reopenWarning = useMemo<QuoteWarning | null>(
+    () =>
+      reopen.state === 'notice'
+        ? {
+            code: 'costs_changed',
+            severity: 'warn',
+            title: `Costs ${reopen.delta > 0 ? 'up' : 'down'} ${signedRand(reopen.delta).slice(1)}${
+              reopen.since ? ` since ${reopen.since}` : ''
+            }`,
+            detail: `Margin ${reopen.oldMargin}% → ${reopen.newMargin}% at the saved price.`,
+            impact_zar: Math.round(reopen.delta * 100) / 100,
+            actions: [
+              { id: 'reprice', label: 'Re-price' },
+              { id: 'keep_price', label: 'Keep price' },
+            ],
+          }
+        : null,
+    [reopen],
+  );
+
+  const repriceKeepingMargin = () => {
+    if (reopen.state !== 'notice' || costs.floor === null) return;
+    const m = reopen.oldMargin / 100;
+    if (m >= 1) return;
+    const price = Math.round((costs.floor / (1 - m)) * 100) / 100;
+    setServiceCharge(Math.round((price - costs.directCost) * 100) / 100);
+    setReopen({ state: 'done' });
+  };
+
+  // ── Warning actions (§10) ────────────────────────────────────────────────
+  const onWarningAction = (id: string, w: QuoteWarning) => {
+    switch (id) {
+      case 'use_official':
+        setUseOfficialDiesel(true);
+        setAiFuel(null);
+        break;
+      case 'update_own':
+      case 'update_allowance':
+        navigation.navigate('Settings', { section: 'company' });
+        break;
+      case 'retry_diesel':
+        void qc.invalidateQueries({ queryKey: ['fuel-prices'] });
+        void qc.invalidateQueries({ queryKey: ['company-profile'] });
+        break;
+      case 'choose_vehicle':
+      case 'enter_weight':
+        jumpTo('load');
+        break;
+      case 'add_vehicle':
+        navigation.navigate('AddVehicleType');
+        break;
+      case 'edit_vehicle': {
+        const vt = (vtypes ?? []).find((v) => v.name === pricedTruckName);
+        navigation.navigate('AddVehicleType', vt ? { id: vt.id } : undefined);
+        break;
+      }
+      case 'enter_tolls':
+        setTollEdited(true);
+        setTollOverride('');
+        jumpTo('price');
+        break;
+      case 'confirm_no_tolls':
+        setTollsConfirmedNone(true);
+        break;
+      case 'recalculate_route':
+        setRouteNonce((n) => n + 1);
+        break;
+      case 'confirm_distance':
+        setDistanceConfirmed(true);
+        break;
+      case 'enter_route':
+        jumpTo('route');
+        break;
+      case 'enter_driver_cost':
+        setDriverEdited(true);
+        jumpTo('price');
+        break;
+      case 'use_minimum': {
+        const min = costs.costing.minimum_charge;
+        if (min !== null) setServiceCharge((sc) => Math.round((sc + (min - costs.total)) * 100) / 100);
+        break;
+      }
+      case 'reprice':
+        repriceKeepingMargin();
+        break;
+      case 'keep_price':
+        if (reopen.state === 'notice')
+          setReopen({ state: 'kept', earlierPeriod: pricedInEarlierPeriod(savedPricingRef.current?.pricedAt) });
+        break;
+      default:
+        if (w.severity === 'block') jumpTo('price');
+    }
+  };
+
+  // What the Price section shows: the rules' warnings once there's something
+  // to price, plus the reopen notice.
+  const visibleWarnings = useMemo<QuoteWarning[]>(() => {
+    if (!ready || routeBlockedMessage || !vtypes) return [];
+    const list = routeBusy && !routeData ? [] : costs.warnings;
+    return reopenWarning ? [reopenWarning, ...list] : list;
+  }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning]);
+  const firstBlock = visibleWarnings.find((w) => w.severity === 'block') ?? null;
 
   // ── Jump bar (Phase 2) ───────────────────────────────────────────────────
   // Sticky chip bar above the scroll — a section's y offset is captured once
@@ -1575,7 +1785,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           selected_route_index: selectedRouteIndex,
           fuel_price_per_litre_used: costs.fuelPrice,
           fuel_type_used: costs.fuelType,
-          fuel_price_source: costs.fuelFromMarketCheck ? 'market_check' : 'company_setting',
+          fuel_price_source: costs.fuelFromMarketCheck ? 'market_check' : costs.fuelSource,
+          // What the builder needs to reopen this quote as it was priced (§11).
+          cost_floor: costs.floor,
+          fuel_litres: costs.fuelLitresTotal,
+          driver_source: driverEdited ? 'user' : 'suggested',
+          return_load_booked: returnLoadBooked,
+          tolls_confirmed_none: tollsConfirmedNone,
+          distance_confirmed: distanceConfirmed,
+          use_official: useOfficialDiesel,
+          costing_version: costs.costing.version,
           toll_charges_source: tollEdited
             ? 'manual'
             : costs.tollFromMarketCheck
@@ -1607,6 +1826,26 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   const existingInternational = pick(existing ?? {}, ['is_international']) === true;
 
+  // What the saved quote's own fields don't say, for the backend's costing and
+  // send check (quote_costing COSTING_INPUT_KEYS; nulls are left out).
+  const costingInputs = (() => {
+    const out: Record<string, number | boolean> = {
+      distance_estimated: costs.distanceEstimated,
+      distance_confirmed: distanceConfirmed,
+      tolls_unknown: !costs.tollKnown,
+      tolls_confirmed_none: tollsConfirmedNone,
+      use_official_fuel: useOfficialDiesel,
+    };
+    if (returnLoadBooked) out.include_empty_return = false;
+    const override = costs.costingInputs.diesel?.override_price;
+    if (override != null && override > 0) out.fuel_price_override = override;
+    if (costs.truckId != null && Number.isFinite(Number(costs.truckId))) out.vehicle_type_id = Number(costs.truckId);
+    if (costs.duration > 0) out.duration_minutes = costs.duration;
+    const oneWay = costs.costingInputs.tolls?.one_way;
+    if (costs.tollKnown && oneWay != null && oneWay >= 0) out.toll_cost_one_way = oneWay;
+    return out;
+  })();
+
   const buildPayload = (status: 'DRAFT' | 'SENT') =>
     buildQuotePayload(
       {
@@ -1618,7 +1857,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         cargo,
         weight,
         weightKg,
-        vehicleType,
+        vehicleType: pricedTruckName,
         costs,
         serviceCharge,
         notes,
@@ -1630,7 +1869,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         routeGeometry: mapGeometry,
         baseRateNum,
         aiApplied,
-        routeSnapshot,
+        // §9: the pricing snapshot, on every create and update, only for a
+        // route worked out for these inputs (never the reopened stub).
+        routeSnapshot: routeSnapshot ? { ...routeSnapshot, priced_at: new Date().toISOString() } : null,
+        pricing: routeIsCurrent && costs.fuelKnown ? costs : null,
+        costingInputs: routeIsCurrent ? costingInputs : null,
         international: international.known ? international.value : null,
       },
       status,
@@ -1680,6 +1923,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       if (!pickupDate) missing.push('pickup date');
       if (!deliveryDate) missing.push('delivery date');
       if (missing.length) return `Add ${missing.join(', ')} before sending`;
+      // Never send on a price that isn't worked out for these inputs, or with
+      // a blocking warning open (§11).
+      if (!routeIsCurrent) return 'Still working out the route';
+      if (firstBlock) return firstBlock.title;
     }
     return null;
   };
@@ -1758,6 +2005,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   saveRef.current = save;
   const precheckRef = useRef(precheck);
   precheckRef.current = precheck;
+  const keptOldPriceRef = useRef(false);
+  keptOldPriceRef.current = reopen.state === 'kept' && reopen.earlierPeriod && serviceCharge !== 0;
 
   // Shared by both of QuoteSentOverlay's dismissal paths — refreshes this
   // quote's own detail cache too (the old quotes-only invalidation missed
@@ -1850,6 +2099,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       toast.error(blocker);
       return;
     }
+    // A reopened quote kept at a price set before this diesel period: say so
+    // once before it goes out (§11).
+    if (keptOldPriceRef.current) {
+      void dismissKeyboard();
+      Alert.alert('Priced on older diesel', 'The price was set before the latest diesel change.', [
+        { text: 'Review', style: 'cancel', onPress: () => jumpTo('price') },
+        { text: 'Send anyway', onPress: () => setSendPreviewOpen(true) },
+      ]);
+      return;
+    }
     // Every message that leaves TruckWys is previewed first; the send happens on
     // the second, explicit tap.
     setSendPreviewOpen(true);
@@ -1865,11 +2124,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // Market figures already in the quote (all or some): the way back comes first.
     if (aiApplied) return { kind: 'applied', onPress: undoMarket };
     if (o?.needsApply) {
-      const delta = o.price - costs.total;
-      const sign = delta > 0 ? '+' : '−';
       return {
         kind: 'apply',
-        label: `Use market ${moneyWhole(o.price)} (${sign}${moneyWhole(Math.abs(delta))})`,
+        label: `Market ${moneyWhole(o.price)}`,
         onPress: () => applyMarket(o.review, o.key),
       };
     }
@@ -1919,8 +2176,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // since it has room to wrap. Kept as two primitives + a callback so
   // QuoteFooterActions stays memo-safe. Hidden until a Save/Send attempt, like
   // the field issues: a blank form on first landing isn't something to flag yet.
-  const priceHint =
-    submitAttempted && priceGaps.length ? 'Complete the form to see the price' : '';
+  const priceHint = submitAttempted && priceGaps.length ? 'Finish the form to price' : '';
   const priceHintSection = priceGaps[0]?.section ?? null;
   const onPriceHintPress = useCallback(() => {
     if (priceHintSection) jumpTo(priceHintSection);
@@ -1931,12 +2187,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // ("Add a route and load details to see pricing.") lumped together, one of
   // which — load details — isn't even a pricing prerequisite.
   const priceEmptyMessage = useMemo(() => {
-    if (priceGaps.length) return `Add ${formatGapList(priceGaps)} to see pricing.`;
-    if (routeBlockedMessage) return "This route isn't allowed, so there's nothing to price.";
-    if (weightBlockedMessage) return "This load is overloaded, so there's nothing to price.";
-    if (routeBusy) return 'Working out the price…';
-    return 'No route found between these points yet.';
-  }, [priceGaps, routeBlockedMessage, weightBlockedMessage, routeBusy]);
+    if (priceGaps.length) return `Add ${formatGapList(priceGaps)} to price.`;
+    if (routeBlockedMessage) return 'Route not allowed.';
+    if (routeBusy) return 'Pricing…';
+    return 'No route yet.';
+  }, [priceGaps, routeBlockedMessage, routeBusy]);
 
   // Footer status strip, by precedence: a suspended subscription (not
   // tappable — nothing here fixes it) → a route refused by company policy
@@ -1948,20 +2203,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       return { tone: 'danger', message: subscription.notice ?? 'Subscription inactive' };
     }
     if (routeBlockedMessage) {
-      return {
-        tone: 'danger',
-        message: 'Route not allowed. Tap to review',
-        onPress: () => jumpTo('route'),
-      };
+      return { tone: 'danger', message: 'Route not allowed', onPress: () => jumpTo('route') };
     }
-    if (weightBlockedMessage) {
-      return {
-        tone: 'danger',
-        // Short — this strip crops on longer messages (see QuoteFooterActions).
-        // The full explanation is in the Price section's danger card + toast.
-        message: 'Overloaded. Tap to review',
-        onPress: () => jumpTo('load'),
-      };
+    // A blocking warning disables Send; its title is the reason, on show.
+    if (firstBlock) {
+      return { tone: 'danger', message: firstBlock.title, onPress: () => jumpTo('price') };
     }
     if (!submitAttempted) return null;
     const blocking = issues.filter(
@@ -1973,14 +2219,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!blocking.length) return null;
     return {
       tone: 'warning',
-      message: `${blocking.length} thing${blocking.length === 1 ? '' : 's'} left before you can ${submitAttempted === 'send' ? 'send' : 'save'}`,
+      message: `${blocking.length} to fix`,
       onPress: () => jumpTo(blocking[0]!.section),
     };
   }, [
     subscription.blocked,
     subscription.notice,
     routeBlockedMessage,
-    weightBlockedMessage,
+    firstBlock,
     submitAttempted,
     issues,
     jumpTo,
@@ -2011,7 +2257,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               busy === 'draft' ||
               subscription.blocked ||
               !!routeBlockedMessage ||
-              !!weightBlockedMessage
+              !!firstBlock
             }
             onSaveDraft={onSaveDraft}
             onSend={onSend}
@@ -2033,6 +2279,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       subscription.blocked,
       routeBlockedMessage,
       weightBlockedMessage,
+      firstBlock,
       onSaveDraft,
       onSend,
     ],
@@ -2232,10 +2479,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               rest of the form is filled in. The real enforcement happens once
               /route/calculate/ runs — see routeBlockedMessage below. */}
               {!allowCrossBorder && (isForeignCc(pickup?.cc) || isForeignCc(delivery?.cc)) && (
-                <Banner
-                  tone="warning"
-                  message="This location is outside South Africa, but your company isn't set up for cross-border routes (Settings → Company details). This quote will be refused once calculated. Pick a domestic location or ask an admin to enable cross-border routes."
-                />
+                <Banner tone="warning" message="Outside SA. Cross-border is off in Settings." />
               )}
 
               <View>
@@ -2243,18 +2487,33 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <SegmentedControl
                   options={[
                     { label: 'One way', value: 'ONE_WAY' },
-                    { label: 'Round trip', value: 'ROUND_TRIP' },
+                    { label: 'Loaded both ways', value: 'ROUND_TRIP' },
                   ]}
                   value={tripType}
                   onChange={(v) => setTripType(v as 'ONE_WAY' | 'ROUND_TRIP')}
                 />
+                {/* §5: a long one-way trip prices the empty run home unless a
+                    return load is booked. Reserved height: no layout jump. */}
+                {tripType === 'ONE_WAY' && costs.emptyReturnEligible && (
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setReturnLoadBooked((v) => !v)}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: returnLoadBooked }}
+                    accessibilityLabel="Return load booked"
+                    className="mt-3 min-h-[48px] flex-row items-center justify-between"
+                  >
+                    <Txt className="text-callout text-fg">Return load booked</Txt>
+                    <Toggle value={returnLoadBooked} onValueChange={setReturnLoadBooked} />
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* Route refused by company policy — replaces the route preview,
               same as web. */}
               {ready && routeBlockedMessage && (
                 <View className="mt-5">
-                  <Banner tone="danger" message={`Route not allowed. ${routeBlockedMessage}`} />
+                  <Banner tone="danger" message={routeBlockedMessage} />
                 </View>
               )}
 
@@ -2267,7 +2526,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     dest={delivery!.label}
                     stops={stops.filter((s) => s.loc).map((s) => s.loc!.label)}
                     distance={
-                      costs.distance ? `${Math.round(costs.chargeDistance)} km` : 'Calculating…'
+                      costs.distance
+                        ? `${costs.distanceEstimated && !distanceConfirmed ? '≈ ' : ''}${Math.round(costs.chargeDistance)} km`
+                        : 'Calculating…'
                     }
                     duration={costs.duration ? formatDuration(costs.duration / 60) : undefined}
                     loading={routeBusy}
@@ -2287,8 +2548,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             </QuoteSection>
 
             <QuoteSection id="load" label="Load" onLayout={registerSectionY}>
-              {/* R/km lives in the overrides section under Price, next to the other
-              cost levers — it isn't repeated here. */}
               <TextField
                 label="Weight (t)"
                 required
@@ -2300,22 +2559,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onBlur={() => setWeightTouched(true)}
                 bottomSheet
               />
-              {/* Not required — a fleet quoting a load a month out often
-              doesn't know yet which truck will be free. Without one the
-              quote prices on company defaults and a truck inferred from the
-              load itself (see quote/costs.ts inferFuelBasis). */}
+              {/* Every quote is priced on a real truck (§3): the suggested one
+                  for the load until the person picks another. */}
               <SelectField
-                label="Vehicle type"
+                label={!vehicleType && suggestedTruck ? 'Truck · suggested' : 'Truck'}
                 icon="truck"
-                placeholder="Not decided yet"
+                placeholder={(vtypes ?? []).length ? 'Choose truck' : 'No trucks yet'}
                 options={vtypeOptions}
-                value={vehicleType}
-                onSelect={handleVehicleTypeSelect}
-              />
-              <TruckSuggestionChips
-                suggestions={suggestions}
-                tonnes={weightTons ?? 0}
-                cargo={cargo}
+                value={pricedTruckName}
                 onSelect={handleVehicleTypeSelect}
               />
               <TextField
@@ -2327,7 +2578,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               />
             </QuoteSection>
 
-            <QuoteSection id="schedule" label="Schedule and terms" onLayout={registerSectionY}>
+            <QuoteSection id="schedule" label="Schedule" onLayout={registerSectionY}>
               <DateField
                 label="Pickup date"
                 required
@@ -2352,7 +2603,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               />
               <TextField
                 label="Notes"
-                placeholder="Anything the client should see"
+                placeholder="For the client"
                 value={notes}
                 onChangeText={setNotes}
                 multiline
@@ -2368,57 +2619,64 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               never hits this. */}
               {ready && demo.quotaExceeded && !savedId.current ? (
                 <Banner tone="danger" message={DEMO_QUOTA_MESSAGE} />
-              ) : /* A load past the selected vehicle's capacity replaces the whole
-              cost breakdown — same as web, there's no legitimate price to show. */
-              ready && !routeBlockedMessage && weightBlockedMessage ? (
-                <Banner
-                  tone="danger"
-                  message={`Overloaded for this vehicle. ${weightBlockedMessage}`}
-                />
-              ) : ready && !routeBlockedMessage && costs.total > 0 ? (
+              ) : ready && !routeBlockedMessage && (costs.total > 0 || visibleWarnings.length > 0) ? (
                 <>
-                  <PriceCheckCard
-                    pc={pc}
-                    benchmarkAvg={num(pick(benchmark ?? {}, ['market_avg_rate']))}
-                    benchmarkRecommendation={str(pick(benchmark ?? {}, ['recommendation'])) || null}
-                    guard={guardInfo}
-                    onChoose={chooseMarket}
-                    routeError={ready && !routeBusy && !routeData}
-                    onOpenFuelSettings={() =>
-                      navigation.navigate('Settings', { section: 'company' })
-                    }
-                  />
-                  <CostBreakdownCard
-                    costs={costs}
-                    vehicleType={vehicleType}
-                    baseRateNum={baseRateNum}
-                    serviceCharge={serviceCharge}
-                    tripType={tripType}
-                    countries={asArray<string>(pick(routeData ?? {}, ['countries']))}
-                    onFuelPress={() => setFuelModal(true)}
-                    onTollPress={() => setTollModal(true)}
-                    onCrossBorderPress={() => setBorderModal(true)}
-                    onRemoveUplift={resetPriceToActual}
-                  />
-                  <CostOverrides
-                    tollValue={tollEdited ? tollOverride : formatPlain(costs.tollCost)}
-                    tollEdited={tollEdited}
-                    tollOverrideNum={tollOverrideNum}
-                    tollCalculated={costs.tollCalculated}
-                    onTollChangeText={(v) => {
-                      setTollEdited(true);
-                      setTollOverride(v);
-                    }}
-                    onUseCalculatedToll={resetTollToCalculated}
-                    driverAllowance={driverAllowance}
-                    onDriverChangeText={setDriverAllowance}
-                    baseRatePerKm={baseRatePerKm}
-                    onRateChangeText={setBaseRatePerKm}
-                    rateSource={rateSource}
-                    onRatePress={() => setRateModal(true)}
-                    overridden={overridden}
-                    onResetAll={resetAllOverrides}
-                  />
+                  <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />
+                  {/* An overloaded truck has no legitimate price to show. */}
+                  {!weightBlockedMessage && costs.total > 0 && (
+                    <>
+                      <CostBreakdownCard
+                        costs={costs}
+                        serviceCharge={serviceCharge}
+                        onRatePress={() => setRateModal(true)}
+                        onFuelPress={() => setFuelModal(true)}
+                        onTollPress={() => setTollModal(true)}
+                        onCrossBorderPress={() => setBorderModal(true)}
+                        onCostPress={() => setCostModal(true)}
+                        onRemoveUplift={resetPriceToActual}
+                      />
+                      <CostOverrides
+                        tollValue={tollEdited ? tollOverride : costs.tollKnown ? formatPlain(costs.tollCost) : ''}
+                        tollEdited={tollEdited}
+                        tollOverrideNum={tollOverrideNum}
+                        tollCalculated={costs.tollCalculated}
+                        tollKnown={!costs.tollsUnavailable}
+                        onTollChangeText={(v) => {
+                          setTollEdited(true);
+                          setTollOverride(v);
+                        }}
+                        onUseCalculatedToll={resetTollToCalculated}
+                        driverValue={
+                          driverEdited
+                            ? driverAllowance
+                            : costs.driverSuggested !== null
+                              ? formatPlain(costs.driverSuggested, 2)
+                              : ''
+                        }
+                        driverEdited={driverEdited}
+                        driverSuggested={costs.driverSuggested}
+                        onDriverChangeText={(v) => {
+                          setDriverEdited(true);
+                          setDriverAllowance(v);
+                        }}
+                        onUseSuggestedDriver={backToSuggestedDriver}
+                        baseRatePerKm={baseRatePerKm}
+                        onRateChangeText={(v) => {
+                          rateTouchedRef.current = true;
+                          setBaseRatePerKm(v);
+                        }}
+                        overridden={overridden}
+                        onResetAll={resetAllOverrides}
+                      />
+                      <PriceCheckCard
+                        pc={pc}
+                        benchmarkAvg={num(pick(benchmark ?? {}, ['market_avg_rate']))}
+                        guard={guardInfo}
+                        onChoose={chooseMarket}
+                        routeError={ready && !routeBusy && !routeData}
+                      />
+                    </>
+                  )}
                 </>
               ) : (
                 <Txt className="text-caption text-faint">{priceEmptyMessage}</Txt>
@@ -2440,17 +2698,18 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={fuelModal}
             onClose={() => setFuelModal(false)}
             costs={costs}
-            vehicleType={vehicleType}
             weightTons={weightTons}
-            suggestedTypeName={suggestions[0]?.name ?? null}
           />
           <RateBreakdownModal
             visible={rateModal}
             onClose={() => setRateModal(false)}
-            vehicleType={vehicleType}
-            vehicleTypeRate={selectedVtRate}
-            companyDefaultRate={companyDefaultRate}
+            vehicleType={pricedTruckName}
+            ratePerKm={baseRateNum}
+            km={costs.chargeDistance}
+            amount={costs.baseCost}
+            source={rateSource}
           />
+          <CostFloorModal visible={costModal} onClose={() => setCostModal(false)} costs={costs} />
           {/* Stays open through the AI step, so the user sees "Building your
           quote" rather than being dropped back on a form that's mid-change. */}
           {voiceOpen && (

@@ -1,19 +1,13 @@
 import { memo } from 'react';
-import { View, TouchableOpacity, Modal } from 'react-native';
-import { Button, Label, Txt, Mono } from '@/components/ui';
 import { num, pick, str } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
+import { BreakdownModal, type BreakdownRow } from './BreakdownModal';
 import type { CostBreakdown } from './costs';
 
 /**
- * Cross-border charge breakdown, mirroring TollBreakdownModal's structure.
- *
- * Prefers costs.crossBorderBreakdown — the named charges the backend sends
- * ("SA C-BRTA Class 2 permit (R9,041/yr over 24 crossings)", each border
- * crossing, each country's weighbridge and tolls) — over the three bucket
- * totals, which is what lets an operator check a quote against a real
- * invoice line by line. Falls back to the buckets for a route response
- * cached before the backend started sending the itemised list.
+ * Cross-border charges, one way: the backend's named items (each crossing, the
+ * amortised permit, weighbridges, non-SA tolls), else its three bucket totals
+ * for a route response cached before the itemised list shipped.
  */
 function BorderBreakdownModalImpl({
   visible,
@@ -25,56 +19,24 @@ function BorderBreakdownModalImpl({
   costs: CostBreakdown;
 }) {
   const items = costs.crossBorderBreakdown.filter((i) => num(pick(i, ['amount'])) > 0);
-  const rows = items.length
-    ? items.map((i) => ({ label: str(pick(i, ['description']), 'Charge'), v: num(pick(i, ['amount'])) }))
+  const rows: BreakdownRow[] = items.length
+    ? items.map((i) => ({ label: str(pick(i, ['description']), 'Charge'), value: formatCurrency(num(pick(i, ['amount']))) }))
     : [
         { label: 'Border fees', v: costs.borderFees },
-        { label: 'Weighbridge fees', v: costs.weighbridgeFees },
+        { label: 'Weighbridges', v: costs.weighbridgeFees },
         { label: 'Non-SA tolls', v: costs.nonSaTolls },
-      ].filter((row) => row.v > 0);
-  const oneWayTotal = costs.borderFees + costs.weighbridgeFees + costs.nonSaTolls;
-
+      ]
+        .filter((r) => r.v > 0)
+        .map((r) => ({ label: r.label, value: formatCurrency(r.v) }));
+  if (costs.legs === 2 && rows.length) rows.push({ label: 'Legs', value: '× 2' });
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity activeOpacity={1} className="flex-1 justify-center bg-backdrop px-6" onPress={onClose}>
-        <TouchableOpacity
-          activeOpacity={1}
-          className="rounded-panel border border-line bg-elevated p-4"
-          onPress={() => {}}
-        >
-          <Label className="mb-3 text-muted">Cross-border charges</Label>
-          {rows.length === 0 ? (
-            <Txt className="text-callout text-muted">No cross-border charges on this route.</Txt>
-          ) : (
-            <View>
-              {rows.map((row, i) => (
-                <View
-                  key={i}
-                  className="flex-row items-center justify-between border-b border-line-row py-2"
-                >
-                  <Txt className="flex-1 pr-3 text-sub text-fg" numberOfLines={2}>
-                    {row.label}
-                  </Txt>
-                  <Mono className="text-sub text-muted">{formatCurrency(row.v)}</Mono>
-                </View>
-              ))}
-              <View className="mt-2 flex-row items-center justify-between">
-                <Txt className="text-callout font-semibold text-fg">One way total</Txt>
-                <Mono className="text-callout font-semibold text-fg">
-                  {formatCurrency(Math.round(oneWayTotal))}
-                </Mono>
-              </View>
-              {costs.legs === 2 && (
-                <Mono className="mt-1 text-caption text-faint">
-                  × 2 for round trip = {formatCurrency(Math.round(oneWayTotal * 2))}
-                </Mono>
-              )}
-            </View>
-          )}
-          <Button label="Close" variant="secondary" onPress={onClose} fullWidth className="mt-4" />
-        </TouchableOpacity>
-      </TouchableOpacity>
-    </Modal>
+    <BreakdownModal
+      visible={visible}
+      onClose={onClose}
+      title="Border, one way"
+      rows={rows.length ? rows : [{ label: 'Charges', value: 'None' }]}
+      total={{ label: 'Border', value: formatCurrency(costs.crossBorderCost) }}
+    />
   );
 }
 

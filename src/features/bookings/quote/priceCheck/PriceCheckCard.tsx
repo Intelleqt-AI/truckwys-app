@@ -131,8 +131,7 @@ export function PriceCheckCard({
       </View>
     );
   } else if (!unavailable) {
-    const label =
-      outOfDate || entry ? 'Re-check' : failure?.code === 'failed' ? 'Try again' : 'Check price';
+    const label = outOfDate || entry ? 'Re-check' : failure?.code === 'failed' ? 'Retry' : 'Check';
     tools = (
       <View className="flex-row items-center gap-2">
         {outOfDate ? (
@@ -164,10 +163,7 @@ export function PriceCheckCard({
     );
   } else if (entry && combo) {
     body = figuresChanged ? (
-      <Txt className="text-sub text-muted">
-        <Txt className="text-sub font-semibold text-fg">Your figures changed after the check. </Txt>
-        Re-check for a price that matches them.
-      </Txt>
+      <Txt className="text-sub text-muted">Figures changed. Re-check.</Txt>
     ) : (
       <View className={loading ? 'opacity-60' : ''}>
         <Stats pc={pc} />
@@ -176,46 +172,30 @@ export function PriceCheckCard({
     );
   } else if (outOfDate) {
     body = (
-      <Txt className="text-sub text-muted">
-        <Txt className="text-sub font-semibold text-fg">The trip changed since the last check. </Txt>
-        Re-check for this route and trip.
-      </Txt>
+      <Txt className="text-sub text-muted">Trip changed. Re-check.</Txt>
     );
   } else if (unavailable) {
-    const t = failText ?? {
-      title: "Price check isn't available yet",
-      text: 'Your quote works as normal.',
-    };
-    body = (
-      <Txt className="text-sub text-muted">
-        <Txt className="text-sub font-semibold text-fg">{t.title}. </Txt>
-        {t.text}
-      </Txt>
-    );
+    const t = failText ?? { title: 'Not available yet', text: '' };
+    body = <Txt className="text-sub text-muted">{t.title}</Txt>;
   } else if (failText && !entry) {
     body = (
       <Txt className="text-sub text-muted">
-        <Txt className="text-sub font-semibold text-fg">{failText.title}. </Txt>
-        {failText.text}
+        {failText.title}
+        {failText.text ? `. ${failText.text}` : ''}
       </Txt>
     );
   } else if (routeError) {
-    body = (
-      <Txt className="text-sub text-muted">
-        The route couldn&apos;t be calculated. Change an address or the truck to retry.
-      </Txt>
-    );
+    body = <Txt className="text-sub text-muted">Route failed. Change an address to retry.</Txt>;
   }
   // A re-check that was turned away keeps the result and says why.
-  const notice = entry && failText && !unavailable ? `${failText.title}. ${failText.text}` : null;
+  const notice = entry && failText && !unavailable ? failText.title : null;
 
   return (
     <Card>
       <View className="p-4">
         <View className="flex-row items-start justify-between gap-3">
           <View className="flex-1">
-            <Txt className="text-callout font-semibold text-fg">Market price check</Txt>
-            <Txt className="mt-0.5 text-caption text-faint">Fuel, tolls, driver and rate vs market</Txt>
+            <Txt className="text-callout font-semibold text-fg">Market check</Txt>
           </View>
           {tools}
         </View>
@@ -224,8 +204,7 @@ export function PriceCheckCard({
           <View className="mt-3">
             {benchmarkAvg > 0 && (
               <Txt className="mb-2 text-caption text-muted">
-                Lane benchmark <Mono className="text-caption text-fg">{moneyWhole(benchmarkAvg)}</Mono> average
-                {benchmarkRecommendation ? ` · ${clean(benchmarkRecommendation)}` : ''}
+                Lane average <Mono className="text-caption text-fg">{moneyWhole(benchmarkAvg)}</Mono>
               </Txt>
             )}
             {body}
@@ -249,7 +228,7 @@ export function PriceCheckCard({
             className="mt-3 min-h-[36px] flex-row items-center gap-1"
           >
             <Icon name={detailsOpen ? 'chevronUp' : 'chevronDown'} size={15} color={colors.faint} />
-            <Txt className="text-sub text-muted">{detailsOpen ? 'Hide details' : 'Show details'}</Txt>
+            <Txt className="text-sub text-muted">{detailsOpen ? 'Hide' : 'Details'}</Txt>
           </TouchableOpacity>
         )}
       </View>
@@ -266,16 +245,13 @@ export function PriceCheckCard({
             size={16}
             color={guard.riskLevel === 'AT_RISK' ? colors.dangerDot : colors.warningDot}
           />
-          <Txt className="flex-1 text-sub text-muted">
-            <Txt
-              className={`text-sub font-semibold ${
-                guard.riskLevel === 'AT_RISK' ? 'text-danger' : 'text-warning'
-              }`}
-            >
-              {guard.riskLevel === 'AT_RISK' ? 'At risk' : 'Caution'}
-            </Txt>
-            {` · ${clean(guard.message)}`}
-            {guard.hint ? `. ${clean(guard.hint)}` : ''}
+          <Txt
+            className={`flex-1 text-sub font-semibold ${
+              guard.riskLevel === 'AT_RISK' ? 'text-danger' : 'text-warning'
+            }`}
+            accessibilityHint={clean(guard.message)}
+          >
+            {guard.riskLevel === 'AT_RISK' ? 'Margin at risk' : 'Margin below guardrail'}
           </Txt>
         </View>
       )}
@@ -472,20 +448,13 @@ function Details({
   fuelSettingStale: boolean;
   onOpenFuelSettings?: () => void;
 }) {
-  const { breakdown, review } = pc;
+  const { breakdown } = pc;
   const fuelDetail = breakdown.fuel?.detail || {};
   return (
     <View className="mt-3 gap-3 border-t border-line-row pt-3">
-      {fuelSettingStale && (
-        <Txt className="text-sub text-warning">
-          Your fuel price ({perLitre(fuelDetail.your_price_per_litre)}) is below the official{' '}
-          {perLitre(fuelDetail.market_price_per_litre)}, so every quote is under-priced on fuel.
-          {onOpenFuelSettings ? (
-            <Txt className="text-sub text-link" onPress={onOpenFuelSettings}>
-              {' '}
-              Update it in settings
-            </Txt>
-          ) : null}
+      {fuelSettingStale && onOpenFuelSettings && (
+        <Txt className="text-sub text-link" onPress={onOpenFuelSettings}>
+          Your diesel {perLitre(fuelDetail.your_price_per_litre)} · update
         </Txt>
       )}
       {TOPICS.filter((t) => breakdown[t]).map((t) => {
@@ -548,13 +517,6 @@ function Details({
           </View>
         );
       })}
-      {review?.return_leg ? (
-        <Txt className="text-sub text-muted">
-          One way: an empty run home costs about {moneyWhole(review.return_leg.total_zar)} (fuel{' '}
-          {moneyWhole(review.return_leg.fuel_zar)}, tolls {moneyWhole(review.return_leg.tolls_zar)}, driver{' '}
-          {moneyWhole(review.return_leg.driver_zar)}). It isn&apos;t in the price, so the base rate has to cover it.
-        </Txt>
-      ) : null}
     </View>
   );
 }

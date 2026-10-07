@@ -3,6 +3,7 @@
 // behaviour change. Every comment below documents a real past bug; keep them.
 
 import { localDatePlusDays } from '@/lib/dates';
+import { capacityTonnes } from './rules';
 
 export interface Loc {
   label: string;
@@ -34,32 +35,11 @@ export type LocSuggest = Loc & { foreign: boolean; country: string; isRecent?: b
 // place.
 export type SectionId = 'client' | 'route' | 'load' | 'schedule' | 'price';
 
-export const FUEL_FALLBACK: Record<string, number> = {
-  Flatbed: 32,
-  Tautliner: 33,
-  Refrigerated: 38,
-  Tanker: 35,
-  'Box Truck': 28,
-  'Danger Load': 34,
-};
-
-// VehicleType.capacity is *documented* as tonnes but real rows are a mix —
-// only the seeded defaults were unit-fixed (see the backend's migration
-// history), so hand-added or imported rows can still be kilograms. Same
-// >999 => kg heuristic the backend uses (core/services/vehicle_types.py
-// capacity_tonnes), so a 20000 kg row doesn't get read as a 20,000-tonne
-// truck by the overload guard, the fuel formula's reference tonnage, or the
-// vehicle-type dropdown's "(20t)" label. Returns null when the value can't be
-// believed as either unit — callers must then treat capacity as unknown
-// rather than guess (mirrors web's QuoteBuilder.tsx capacityTons).
-const KG_SCALE_THRESHOLD = 999;
-const MIN_PLAUSIBLE_T = 0.3;
-const MAX_PLAUSIBLE_T = 80;
+// VehicleType.capacity is documented as tonnes but real rows are a mix: values
+// above 100 are kilograms (QUOTE-RULES.md §3). Null when not a positive number.
+// The one normaliser for the overload check, the fuel formula and the labels.
 export function capacityTons(raw: unknown): number | null {
-  const v = Number(raw);
-  if (!Number.isFinite(v) || v <= 0) return null;
-  const t = v > KG_SCALE_THRESHOLD ? v / 1000 : v;
-  return t >= MIN_PLAUSIBLE_T && t <= MAX_PLAUSIBLE_T ? t : null;
+  return capacityTonnes(raw);
 }
 
 // Which company default price applies, keyed by the selected vehicle type's own

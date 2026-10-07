@@ -47,6 +47,10 @@ export interface PriceCheckInputs {
   vehicleType: string;
   weightKg: number;
   customerId?: string | null;
+  /** The quote's cost floor (QUOTE-RULES §7); null when a cost is unknown. */
+  costFloor?: number | null;
+  /** The floor includes an empty run home. */
+  emptyReturnIncluded?: boolean;
   fuelCost: number;
   fuelLitres: number;
   fuelConsumption: number;
@@ -108,6 +112,7 @@ export function usePriceCheck(p: PriceCheckInputs) {
     p.crossBorderCost,
     p.fuelType,
     p.fuelZone,
+    !!p.emptyReturnIncluded,
   ]);
   // Inputs only the win chance depends on (the price doesn't).
   const winSig = JSON.stringify([p.customerId || null, p.pickupDate || null, p.weightKg]);
@@ -205,6 +210,12 @@ export function usePriceCheck(p: PriceCheckInputs) {
           // Only when the lane benchmark has loaded (0 would read as "no market").
           ...(p.marketAvgRate > 0 ? { market_rate: p.marketAvgRate } : {}),
           pickup_date: p.pickupDate || null,
+          // §8: the check prices against the floor and a fuel-normalised market
+          // of sent, one-way quotes. Extra keys are ignored by older backends.
+          cost_floor: p.costFloor ?? null,
+          include_empty_return: !!p.emptyReturnIncluded,
+          one_way_only: true,
+          sent_only: true,
           route: {
             road_type: pick(p.route, ['road_type']) ?? null,
             terrain: pick(p.route, ['terrain']) ?? null,

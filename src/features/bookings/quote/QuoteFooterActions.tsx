@@ -136,7 +136,7 @@ function QuoteFooterActionsImpl({
               </Mono>
               {/* The one price: what the client is sent, excluding VAT. */}
               <Mono className="shrink-0 text-caption text-muted" maxFontSizeMultiplier={1.2}>
-                · excl. VAT
+                excl. VAT
               </Mono>
               {calculating && <ActivityIndicator size="small" color={colors.faint} />}
             </>
@@ -191,7 +191,7 @@ function QuoteFooterActionsImpl({
       <View className="flex-row gap-2.5">
         <View className="flex-1">
           <Button
-            label="Save as draft"
+            label="Save draft"
             variant="secondary"
             loading={busy === 'draft'}
             disabled={saveDisabled}
@@ -201,7 +201,7 @@ function QuoteFooterActionsImpl({
         </View>
         <View className="flex-1">
           <Button
-            label="Send quote"
+            label="Send"
             icon="send"
             loading={busy === 'send'}
             disabled={sendDisabled}
@@ -224,16 +224,16 @@ function OfferAction({ offer }: { offer: FooterOffer }) {
         numberOfLines={1}
         maxFontSizeMultiplier={1.2}
       >
-        Market check: nothing to change
+        At market
       </Mono>
     );
   }
   const text =
     offer.kind === 'prompt'
-      ? 'Check market price'
+      ? 'Check market'
       : offer.kind === 'apply'
         ? offer.label
-        : 'Market figures in use · Undo';
+        : 'Undo market';
   return (
     <TouchableOpacity
       onPress={offer.onPress}

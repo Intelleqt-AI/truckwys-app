@@ -57,7 +57,7 @@ export const QuoteJumpBar = memo(
                 accessibilityRole="button"
                 accessibilityState={{ selected: isActive }}
                 accessibilityLabel={`${s.label}${s.hasIssue ? ', needs attention' : s.complete ? ', complete' : ', incomplete'}`}
-                className={`min-h-[32px] flex-row items-center gap-1.5 rounded-pill border px-3 ${
+                className={`min-h-[44px] flex-row items-center gap-1.5 rounded-pill border px-3 ${
                   isActive ? 'border-line-strong bg-raised' : 'border-line bg-surface'
                 }`}
               >

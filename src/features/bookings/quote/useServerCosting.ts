@@ -20,6 +20,8 @@ export interface ServerCosting {
   warnings: QuoteWarning[];
   /** The server's suggested truck for this load (resolution.suggested_vehicle_type_id). */
   suggestedVehicleTypeId: number | string | null;
+  /** The payload's _suggest_key this answer was for. */
+  forKey: string | null;
 }
 
 /**
@@ -38,7 +40,8 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
     const id = ++reqRef.current;
     const t = setTimeout(async () => {
       try {
-        const res = await postData<Record<string, unknown>>({ url: ENDPOINT, data: payload });
+        const { _suggest_key: forKey, ...data } = payload as Record<string, unknown>;
+        const res = await postData<Record<string, unknown>>({ url: ENDPOINT, data });
         if (id !== reqRef.current || !res || res.success !== true || typeof res.inputs !== 'object') return;
         setResult({
           key,
@@ -46,6 +49,7 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
             inputs: res.inputs as CostingInputs,
             floor: typeof res.floor === 'number' ? res.floor : null,
             warnings: Array.isArray(res.warnings) ? (res.warnings as QuoteWarning[]) : [],
+            forKey: typeof forKey === 'string' ? forKey : null,
             suggestedVehicleTypeId:
               ((res.resolution as Record<string, unknown> | undefined)?.suggested_vehicle_type_id as
                 | number
@@ -55,7 +59,8 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
           },
         });
       } catch (e) {
-        if ((e as { status?: number })?.status === 404) unavailable = true;
+        // No endpoint on this backend (or method not allowed / not built).
+        if ([404, 405, 501].includes(Number((e as { status?: number })?.status))) unavailable = true;
       }
     }, 600);
     return () => clearTimeout(t);

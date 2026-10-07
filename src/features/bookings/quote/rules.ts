@@ -404,17 +404,18 @@ export function officialFromLive(live: Loose, zone: FuelZone): { price: number |
   return { price, from: price !== null ? from : null };
 }
 
-/** Every official figure in a live response (inland/coastal, 50 and 500ppm). */
-function officialFigures(live: Loose): number[] {
+/**
+ * The official 50ppm figure(s) an old client could have been shown for this
+ * zone (backend _is_live_echo): the zone price in force. 500ppm figures never
+ * count, so a fleet's own R 29,11 isn't mistaken for the 500ppm R 29,1111.
+ */
+function officialEchoFigures(live: Loose, zone: FuelZone): number[] {
   if (!live || live.success === false || isFallbackSource(live.source)) return [];
   return [
-    live.zone_price,
-    live.inland_price,
-    live.coastal_price,
-    live.diesel_inland,
-    live.diesel_coastal,
-    live.diesel_500ppm_inland,
-    live.diesel_500ppm_coastal,
+    live.zone === zone ? live.zone_price : null,
+    zone === 'COASTAL' ? live.coastal_price : live.inland_price,
+    zone === 'COASTAL' ? live.diesel_coastal : live.diesel_inland,
+    live.previous_zone_price,
   ]
     .map(pos)
     .filter((n): n is number => n !== null);
@@ -439,7 +440,9 @@ export function dieselInputFromApi(
   const server = serverResolution(company, live);
   const zone: FuelZone =
     (company?.fuel_zone ?? server?.zone ?? live?.zone) === 'COASTAL' ? 'COASTAL' : 'INLAND';
-  const off = officialFromLive(server ? { company_price: server } : live, zone);
+  // The live response's own zone fields stay in, so a zone the server didn't
+  // resolve (Settings, after a zone change) still gets its official price.
+  const off = officialFromLive({ ...(live ?? {}), ...(server ? { company_price: server } : {}) }, zone);
   let mode: 'LIVE' | 'OWN' = 'LIVE';
   let own: number | null = null;
   let ownSetAt: string | null = null;
@@ -449,10 +452,19 @@ export function dieselInputFromApi(
       mode = own !== null ? 'OWN' : 'LIVE';
       ownSetAt = typeof company.fuel_price_own_set_at === 'string' ? company.fuel_price_own_set_at : null;
     }
+  } else if (server && typeof server.mode === 'string') {
+    // No company profile (non-admin roles get a 403) on a newer backend: the
+    // server's own resolution says LIVE or OWN, and the own price.
+    const so = (server.own ?? null) as Loose;
+    if (String(server.mode).toUpperCase() === 'OWN' && pos(so?.price) !== null) {
+      own = pos(so?.price);
+      mode = 'OWN';
+      ownSetAt = typeof so?.set_at === 'string' ? so.set_at : null;
+    }
   } else if (company) {
     const legacy = pos(company.fuel_price_per_litre);
     const sentinel = legacy !== null && Math.abs(legacy - LEGACY_DIESEL_SENTINEL) < 0.005;
-    const official = legacy !== null && officialFigures(live).some((p) => Math.abs(p - legacy) <= 0.005);
+    const official = legacy !== null && officialEchoFigures(live, zone).some((p) => Math.abs(p - legacy) <= 0.005);
     if (legacy !== null && !sentinel && !official) {
       own = legacy;
       mode = 'OWN';
@@ -669,18 +681,62 @@ export function ratedBurn(t: TruckLike | null | undefined): number | null {
   return pos(t?.fuel_consumption_l_per_100km);
 }
 
-/** Smallest capacity ≥ load; tie → lowest rated burn. Null when nothing fits. */
-export function suggestTruck<T extends TruckLike>(types: T[], loadT: number): T | null {
+// Specialised bodies (backend SPECIALISED_BODIES): never suggested unless the
+// cargo description calls for that body. [name words, cargo words].
+export const SPECIALISED_BODIES: Record<string, [string[], string[]]> = {
+  reefer: [
+    ['reefer', 'refrig', 'fridge', 'cold'],
+    ['frozen', 'chilled', 'refrigerat', 'cold', 'fresh produce', 'meat', 'dairy', 'ice cream', 'vaccine'],
+  ],
+  tanker: [['tanker'], ['fuel', 'liquid', 'diesel', 'petrol', 'chemical', 'water', 'oil', 'milk']],
+  tipper: [['tipper'], ['sand', 'gravel', 'stone', 'coal', 'ore', 'aggregate', 'soil', 'rubble']],
+  car_carrier: [
+    ['car carrier', 'car-carrier', 'car transporter', 'auto carrier'],
+    ['car ', 'cars', 'vehicles', 'bakkies'],
+  ],
+  lowbed: [
+    ['lowbed', 'low bed', 'low-bed', 'abnormal'],
+    ['machinery', 'excavator', 'abnormal', 'plant', 'earthmoving', 'transformer'],
+  ],
+};
+
+export function bodyType(name: unknown): string | null {
+  const text = String(name ?? '').toLowerCase();
+  for (const [body, [words]] of Object.entries(SPECIALISED_BODIES)) if (words.some((w) => text.includes(w))) return body;
+  return null;
+}
+
+export function cargoFitsBody(body: string | null, cargo: unknown): boolean {
+  if (body === null) return true;
+  const text = ` ${String(cargo ?? '').toLowerCase()} `;
+  return SPECIALISED_BODIES[body]![1].some((w) => text.includes(w));
+}
+
+/**
+ * The suggested truck (backend suggest_vehicle): among the fleet's own types
+ * (an available vehicle of that type), with a capacity ≥ the load and a rated
+ * burn, specialised bodies only when the cargo calls for them; key
+ * (capacity, most quoted first, burn, id). Null with no load or no fit.
+ */
+export function suggestTruck<T extends TruckLike & { available_vehicle_count?: number }>(
+  types: T[],
+  loadT: number,
+  opts: { cargo?: string; usage?: Record<string, number> } = {},
+): T | null {
   if (!(loadT > 0)) return null;
-  // Backend suggest_vehicle: every listed type with a capacity and a rated
-  // burn; key (capacity, burn, id).
+  const usage = opts.usage ?? {};
   const fits = types
+    .filter((t) => (t.available_vehicle_count ?? 1) > 0)
     .map((t) => ({ t, cap: capacityTonnes(t.capacity), burn: ratedBurn(t) }))
     .filter(
-      (x): x is { t: T; cap: number; burn: number } => x.cap !== null && x.burn !== null && x.cap >= loadT,
+      (x): x is { t: T; cap: number; burn: number } =>
+        x.cap !== null && x.burn !== null && x.cap >= loadT && cargoFitsBody(bodyType(x.t.name), opts.cargo),
     );
   if (!fits.length) return null;
-  fits.sort((a, b) => a.cap - b.cap || a.burn - b.burn || Number(a.t.id ?? 0) - Number(b.t.id ?? 0));
+  const used = (t: T) => usage[String(t.name ?? '').trim().toLowerCase()] ?? 0;
+  fits.sort(
+    (a, b) => a.cap - b.cap || used(b.t) - used(a.t) || a.burn - b.burn || Number(a.t.id ?? 0) - Number(b.t.id ?? 0),
+  );
   return fits[0]!.t;
 }
 
@@ -1452,10 +1508,17 @@ export function phoneWarning(w: QuoteWarning, c: Costing, target: number | null)
     };
   }
   if (w.code === 'below_floor' && c.target_price !== null && target !== null) {
+    // target_price already includes the minimum charge when that is higher.
+    const atMinimum = c.minimum_charge !== null && c.target_price === c.minimum_charge;
     return {
       ...w,
       actions: [
-        { id: 'use_target', label: `Price at ${Math.round(target)}% margin · ${rand(c.target_price, true)}` },
+        {
+          id: 'use_target',
+          label: atMinimum
+            ? `Price at minimum · ${rand(c.target_price, true)}`
+            : `Price at ${Math.round(target)}% margin · ${rand(c.target_price, true)}`,
+        },
         ...w.actions,
       ],
     };

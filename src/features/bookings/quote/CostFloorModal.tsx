@@ -10,7 +10,7 @@ const SHORT: Record<string, string> = {
   operating: 'Operating costs',
   tolls: 'Tolls',
   driver: 'Driver allowance',
-  border: 'Border',
+  border: 'Border fees',
   fuel_return: 'Fuel',
   operating_return: 'Operating costs',
   tolls_return: 'Tolls',

@@ -818,17 +818,22 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           )}
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
-              {roundTrip ? 'Total, both legs' : 'Total'}
-              {customerPrice?.vat_registered ? ' excl. VAT' : ''}
+              {roundTrip ? 'Price, both legs, excl. VAT' : 'Price excl. VAT'}
 
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
           {costFloor !== null && (
             <>
-              <DetailRow label="Cost floor" value={formatCurrency(costFloor, { maximumFractionDigits: 0 })} />
+              {/* Today's costs (backend costing) against the price as quoted,
+                  or the floor stored when it was quoted: said which. */}
               <DetailRow
-                label="Margin"
+                label={serverFloor !== null ? 'Cost floor today' : 'Cost floor when quoted'}
+                hint={serverFloor !== null ? 'Fuel above is as quoted' : undefined}
+                value={formatCurrency(costFloor, { maximumFractionDigits: 0 })}
+              />
+              <DetailRow
+                label={serverFloor !== null ? 'Margin today' : 'Margin'}
                 value={`${pct(marginPct ?? 0)} · ${formatCurrency(total - costFloor, { maximumFractionDigits: 0 })}`}
                 valueColor={(marginPct ?? 0) < 0 ? colors.danger : undefined}
               />

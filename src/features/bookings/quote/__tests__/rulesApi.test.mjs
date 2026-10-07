@@ -29,8 +29,11 @@ test('period starts 00:01 SAST on the first Wednesday', () => {
   assert.equal(currentPeriodStart(new Date('2027-01-02T00:00:00Z')).toISOString(), '2026-12-01T22:01:00.000Z');
 });
 
-test('old backend: 23,50, empty and the official figure all mean LIVE', () => {
-  for (const v of ['23.50', null, '32.7989', 31.9269]) {
+test('old backend: 23,50, empty and the zone\'s official figure all mean LIVE', () => {
+  // Backend _is_live_echo: only the company zone's 50ppm figure is an echo
+  // (an inland fleet's 31,9269 is the coastal price: its own).
+  assert.equal(dieselInputFromApi({ fuel_zone: 'INLAND', fuel_price_per_litre: 31.9269 }, oldLive, { now: NOW }).mode, 'OWN');
+  for (const v of ['23.50', null, '32.7989']) {
     const d = dieselInputFromApi({ fuel_zone: 'INLAND', fuel_price_per_litre: v }, oldLive, { now: NOW });
     assert.equal(d.mode, 'LIVE', String(v));
     assert.equal(resolveDieselInput(d).price, 32.7989);
@@ -211,4 +214,52 @@ test('electric is own price only', () => {
   assert.equal(r.source, 'own');
   assert.equal(r.price, 3.2);
   assert.equal(r.official_price, null);
+});
+
+test('old backend: a fleet price equal to a 500ppm figure is still its own', () => {
+  const live = { ...oldLive, inland_price: 29.5551, zone_price: 29.5551, diesel_500ppm_inland: 29.1111 };
+  const d = dieselInputFromApi({ fuel_zone: 'INLAND', fuel_price_per_litre: '29.1100' }, live, { now: NOW });
+  assert.equal(d.mode, 'OWN');
+  assert.equal(d.own_price, 29.11);
+  // The 50ppm figure itself is still the live echo.
+  assert.equal(dieselInputFromApi({ fuel_zone: 'INLAND', fuel_price_per_litre: '29.5551' }, live, { now: NOW }).mode, 'LIVE');
+});
+
+test('no company profile (non-admin) on a newer backend: own price from company_price', () => {
+  const live = {
+    ...oldLive,
+    company_price: { mode: 'OWN', zone: 'INLAND', own: { price: 31.2, set_at: '2026-10-07T06:00:00Z' }, official: { price: 32.7989, effective_from: '2026-10-06T22:01:00Z', stale: false } },
+  };
+  const r = resolveDieselInput(dieselInputFromApi(undefined, live, { now: NOW }));
+  assert.equal(r.source, 'own');
+  assert.equal(r.price, 31.2);
+});
+
+test('settings zone change shows that zone\'s official price at once', () => {
+  const live = { ...oldLive, company_price: { mode: 'LIVE', zone: 'INLAND', official: { price: 32.7989, effective_from: '2026-10-06T22:01:00Z', stale: false } } };
+  assert.equal(dieselInputFromApi({ fuel_zone: 'COASTAL' }, live, { now: NOW }).official_price, 31.9269);
+});
+
+test('suggestion mirrors the backend: fleet only, specialised bodies need the cargo, most quoted breaks ties', async () => {
+  const { suggestTruck } = await import('../rules.ts');
+  const types = [
+    { id: 1, name: 'Reefer', capacity: 30, fuel_consumption_l_per_100km: 30, available_vehicle_count: 2 },
+    { id: 2, name: 'Flatbed', capacity: 30, fuel_consumption_l_per_100km: 36, available_vehicle_count: 1 },
+    { id: 3, name: 'Tautliner', capacity: 30, fuel_consumption_l_per_100km: 34, available_vehicle_count: 1 },
+    { id: 4, name: 'Small', capacity: 25, fuel_consumption_l_per_100km: 20, available_vehicle_count: 0 },
+  ];
+  assert.equal(suggestTruck(types, 20, { cargo: 'steel' })?.name, 'Tautliner');
+  assert.equal(suggestTruck(types, 20, { cargo: 'frozen chicken' })?.name, 'Reefer');
+  assert.equal(suggestTruck(types, 20, { cargo: 'steel', usage: { flatbed: 7, tautliner: 2 } })?.name, 'Flatbed');
+  assert.equal(suggestTruck(types, 0), null);
+});
+
+test('below-cost action says minimum when the minimum charge wins', async () => {
+  const { computeCosting, phoneWarning } = await import('../rules.ts');
+  const fs = await import('node:fs');
+  const golden = JSON.parse(fs.readFileSync(new URL('./quote_golden.json', import.meta.url), 'utf8'));
+  const base = golden.cases.find((c) => c.name === 'price_below_floor').inputs;
+  const c = computeCosting({ ...base, minimum_charge: 30000, price: 6000 });
+  const w = phoneWarning(c.warnings.find((x) => x.code === 'below_floor'), c, c.target_margin_pct);
+  assert.equal(w.actions[0].label, 'Price at minimum · R 30 000');
 });

@@ -283,15 +283,8 @@ export function usePriceCheck(p: PriceCheckInputs) {
   }, []);
 
   // ── derived state ─────────────────────────────────────────────────────────
-  const entry = cache[laneSig] || null;
-  const review = entry?.review || null;
-  const breakdown = (review?.cost_breakdown || {}) as Record<ItemKey, ReviewItem>;
-  const combos = review?.combinations || {};
-  // Every market/yours combination's price is already in the result, so the
-  // all-market one is a lookup too.
-  const marketKey = review?.default_choice_key ?? '';
-  const marketCombo: Combination | undefined = combos[marketKey];
-
+  const rawEntry = cache[laneSig] || null;
+  const rawBreakdown = (rawEntry?.review?.cost_breakdown || {}) as Record<ItemKey, ReviewItem>;
   // Which side (yours / market) each line of the live quote is on right now.
   // null = it matches neither, i.e. someone changed it after the check.
   const currentLine: Record<ItemKey, number> = {
@@ -300,8 +293,8 @@ export function usePriceCheck(p: PriceCheckInputs) {
     driver_allowance: p.driverAllowance,
     base_rate: p.baseRatePerKm || 0,
   };
-  const sideOf = (t: ItemKey): Choice | null => {
-    const item = breakdown[t];
+  const sideIn = (bd: Record<ItemKey, ReviewItem>, t: ItemKey): Choice | null => {
+    const item = bd[t];
     if (!item) return null;
     const mine = t === 'base_rate' ? Number(item.detail?.your_rate_per_km) : item.current_value_zar;
     const ai = t === 'base_rate' ? Number(item.detail?.ai_rate_per_km) : item.ai_value_zar;
@@ -310,6 +303,20 @@ export function usePriceCheck(p: PriceCheckInputs) {
     if (Math.abs(currentLine[t] - ai) <= tol) return 'ai';
     return null;
   };
+  // A result kept from an earlier session (the 12 h cache) whose figures no
+  // longer match is not this quote's: no "Out of date" carried into a new
+  // quote, just no result. Only a check run here can go out of date.
+  const rawChanged = !!rawEntry && TOPICS.some((t) => sideIn(rawBreakdown, t) === null);
+  const entry = rawEntry && rawChanged && lastSig === null ? null : rawEntry;
+  const review = entry?.review || null;
+  const breakdown = (review?.cost_breakdown || {}) as Record<ItemKey, ReviewItem>;
+  const sideOf = (t: ItemKey) => sideIn(breakdown, t);
+  const combos = review?.combinations || {};
+  // Every market/yours combination's price is already in the result, so the
+  // all-market one is a lookup too.
+  const marketKey = review?.default_choice_key ?? '';
+  const marketCombo: Combination | undefined = combos[marketKey];
+
   const sides = entry ? TOPICS.map(sideOf) : [];
   const figuresChanged = !!entry && sides.some((s) => s === null);
   // The selection is the quote itself: no hidden preview that can disagree with

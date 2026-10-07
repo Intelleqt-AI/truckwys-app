@@ -29,7 +29,11 @@ function RateBreakdownModalImpl({
       onClose={onClose}
       title="Base rate"
       rows={[
-        { label: 'Rate', value: `${formatCurrency(ratePerKm)}/km${source ? ` · ${source}` : ''}` },
+        // ≈ when the rate has more than cents, so the line can't multiply out exactly.
+        {
+          label: 'Rate',
+          value: `${Math.abs(ratePerKm * 100 - Math.round(ratePerKm * 100)) > 1e-6 ? '≈ ' : ''}${formatCurrency(ratePerKm)}/km${source ? ` · ${source}` : ''}`,
+        },
         // 1 dp so rate × km multiplies out.
         { label: 'Distance', value: `${one(km)} km` },
       ]}

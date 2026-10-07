@@ -36,10 +36,10 @@ function BorderBreakdownModalImpl({
     <BreakdownModal
       visible={visible}
       onClose={onClose}
-      title="Border, one way"
+      title="Border fees, one way"
       rows={rows.length ? rows : [{ label: 'Charges', value: costs.borderMissing ? 'Not worked out' : 'None', tone: costs.borderMissing ? 'danger' : undefined }]}
       total={{
-        label: 'Border',
+        label: 'Border fees',
         value: costs.borderMissing ? '—' : formatCurrency(costs.crossBorderCost),
         tone: costs.borderMissing ? 'danger' : undefined,
       }}

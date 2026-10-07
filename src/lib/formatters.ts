@@ -167,7 +167,10 @@ export const formatDate = (
     month: 'short',
     year: 'numeric',
     ...options,
-  }).format(dateObj);
+  })
+    .format(dateObj)
+    // Newer ICU writes "Sept"; SA style (and every other month) is 3 letters.
+    .replace(/\bSept\b/, 'Sep');
 };
 
 export const formatDateTime = (date: string | Date): string =>

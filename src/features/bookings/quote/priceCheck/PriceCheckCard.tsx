@@ -53,7 +53,7 @@ function SmallButton({
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}
       accessibilityLabel={accessibilityLabel ?? label}
-      className={`min-h-[36px] items-center justify-center rounded-control border border-line-active bg-surface px-3 ${
+      className={`min-h-[44px] items-center justify-center rounded-control border border-line-active bg-surface px-3 ${
         disabled ? 'opacity-40' : ''
       }`}
     >

@@ -1917,7 +1917,7 @@ function CompanySection() {
         <TextField
           label="My diesel price (R/L)"
           prefix="R"
-          placeholder="e.g. 31,50"
+          placeholder="e.g. 33,00"
           keyboardType="decimal-pad"
           value={fuelPrice}
           onChangeText={(v) => {
@@ -1970,7 +1970,7 @@ function CompanySection() {
             <TextField
               label="My petrol price (R/L)"
               prefix="R"
-              placeholder="e.g. 29,50"
+              placeholder="e.g. 33,00"
               keyboardType="decimal-pad"
               value={fuelPetrol}
               onChangeText={(v) => {

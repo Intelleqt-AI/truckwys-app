@@ -236,7 +236,6 @@ function LocationFieldImpl({
             label="Set on map"
             icon="pin"
             variant="secondary"
-            size="sm"
             onPress={onPickOnMap}
           />
         )}
@@ -244,7 +243,6 @@ function LocationFieldImpl({
           label={coordMode ? 'Search instead' : 'Coordinates'}
           icon={coordMode ? 'search' : 'gauge'}
           variant="secondary"
-          size="sm"
           onPress={() => {
             setCoordError(null);
             setCoordMode((m) => !m);

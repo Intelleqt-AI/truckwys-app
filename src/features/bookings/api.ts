@@ -407,6 +407,19 @@ export const convertQuoteToLoad = (
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
+// Blob.text() isn't in React Native's Blob: read it with FileReader.
+const blobText = (b: Blob): Promise<string> =>
+  new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => resolve('');
+      reader.readAsText(b);
+    } catch {
+      resolve('');
+    }
+  });
+
 // Quote PDF is a GET that streams a PDF blob (web uses downloadBlob).
 //
 // A refused PDF (a draft with a blocking warning, §11) answers 400 JSON, which
@@ -418,8 +431,8 @@ export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
     return res.data as Blob;
   } catch (e) {
     const data = (e as { data?: unknown }).data;
-    if (data && typeof (data as Blob).text === 'function') {
-      const body = parseErrorBody(await (data as Blob).text().catch(() => ''));
+    if (data && typeof Blob !== 'undefined' && data instanceof Blob) {
+      const body = parseErrorBody(await blobText(data));
       const msg = sendBlockMessage(body);
       if (msg) {
         const err = new Error(msg) as Error & { status?: number; data?: unknown };

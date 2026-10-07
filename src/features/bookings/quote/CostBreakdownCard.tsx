@@ -81,7 +81,7 @@ function CostBreakdownCardImpl({
           )}
           {(costs.crossBorderCost > 0 || costs.borderMissing) && (
             <Row
-              label="Border"
+              label="Border fees"
               value={costs.borderMissing ? '—' : randWhole(costs.crossBorderCost)}
               warn={costs.borderMissing}
               onPress={onCrossBorderPress}
@@ -95,7 +95,10 @@ function CostBreakdownCardImpl({
         <Label className="mb-2 text-muted">Price</Label>
         <Card className="overflow-hidden">
           <Row label="Base rate" value={randWhole(costs.baseCost)} onPress={onRatePress} />
-          <Row label="Fuel, tolls and allowance at cost" value={randWhole(passedOn)} />
+          <Row
+            label={costs.crossBorderCost > 0 ? 'Fuel, tolls, allowance and border fees at cost' : 'Fuel, tolls and allowance at cost'}
+            value={randWhole(passedOn)}
+          />
           {serviceCharge !== 0 && (
             <Row label={adjustmentLabel} value={randWhole(serviceCharge)} onPress={onAdjustmentPress} />
           )}
@@ -159,7 +162,7 @@ function Row({
   const { colors } = useTheme();
   const body = (
     <>
-      <Txt className="shrink text-callout text-muted" numberOfLines={1}>
+      <Txt className="shrink text-callout text-muted" numberOfLines={2}>
         {label}
       </Txt>
       <View className="shrink-0 flex-row items-center gap-1">

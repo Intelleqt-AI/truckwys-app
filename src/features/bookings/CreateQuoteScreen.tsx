@@ -278,6 +278,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [routeNonce, setRouteNonce] = useState(0);
   // The rate box follows the suggested truck until the person types in it.
   const rateTouchedRef = useRef(false);
+  // Typed into the rate box this session (it then shows what was typed).
+  const rateTypedRef = useRef(false);
   // Reopening a saved quote (§11): the price it was saved at, and how the
   // costs moved since. 'init' until the first current route lands.
   const savedPricingRef = useRef<{
@@ -768,13 +770,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       const dist = num(pick(q, ['distance']));
       const baseRate = num(pick(q, ['base_rate']));
       const legs = trip === 'ROUND_TRIP' ? 2 : 1;
-      // The stored rate per km when there is one: re-deriving it from
-      // base_rate ÷ km rounds to the cent and drifted the base rate.
+      // Full precision: base_rate ÷ the saved km gives back the saved base
+      // rate to the cent (the stored rate per km is 2 dp, which drifted it,
+      // and with it the "Kept from saved price" adjustment).
       const savedRate = num(pick(q, ['base_rate_per_km']));
-      if (savedRate > 0) setBaseRatePerKm(formatPlain(savedRate));
-      else if (dist && baseRate) {
-        setBaseRatePerKm(formatPlain(Math.round((baseRate / (dist * legs)) * 100) / 100));
-      }
+      if (dist && baseRate) setBaseRatePerKm(String(baseRate / (dist * legs)).replace('.', ','));
+      else if (savedRate > 0) setBaseRatePerKm(formatPlain(savedRate));
       // The route as it was priced: while collection, delivery, stops, truck
       // and weight are unchanged, the quote keeps its saved distance and
       // driving time (a fresh TomTom run differs by a few km with traffic),
@@ -828,13 +829,32 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // suggested one for the load is used: smallest capacity that carries it,
   // tie → lowest rated burn. The person can change it.
   // The server's suggestion wins when it has one (newer backends).
-  const [serverSuggestedId, setServerSuggestedId] = useState<string | null>(null);
+  // Kept with the load and cargo it was given for, so a stale answer never
+  // overrides the local pick for a new load. The local pick mirrors the
+  // backend rule exactly (same eligibility, most-quoted from the quotes list
+  // already downloaded), so the server's answer normally agrees: no jump.
+  const [serverSuggested, setServerSuggested] = useState<{ id: string; key: string } | null>(null);
+  const suggestKey = `${weightKg}|${cargo.trim().toLowerCase()}`;
+  const quoteUsage = useMemo(() => {
+    const rows =
+      qc.getQueryData<{ rows?: Record<string, unknown>[] }>(['ledger-quotes'])?.rows ?? [];
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      const n = str(pick(r, ['vehicle_type'])).trim().toLowerCase();
+      if (n) out[n] = (out[n] ?? 0) + 1;
+    }
+    return out;
+    // Read once per truck list: the counts only break capacity ties.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vtypes]);
   const suggestedTruck = useMemo(() => {
-    const local = suggestTruck(vtypes ?? [], weightTons ?? 0);
+    const local = suggestTruck(vtypes ?? [], weightTons ?? 0, { cargo, usage: quoteUsage });
     const fromServer =
-      serverSuggestedId != null ? (vtypes ?? []).find((v) => String(v.id) === serverSuggestedId) : null;
+      serverSuggested && serverSuggested.key === suggestKey
+        ? (vtypes ?? []).find((v) => String(v.id) === serverSuggested.id)
+        : null;
     return fromServer ?? local;
-  }, [vtypes, weightTons, serverSuggestedId]);
+  }, [vtypes, weightTons, cargo, quoteUsage, serverSuggested, suggestKey]);
   const pricedTruckName = vehicleType || suggestedTruck?.name || '';
   const pricedTruckId = (vtypes ?? []).find((v) => v.name === pricedTruckName)?.id ?? null;
 
@@ -1009,15 +1029,22 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             use_official_fuel: useOfficialDiesel,
             fuel_price_override: aiFuelPrice ?? null,
             is_international: crossesBorder,
+            cargo_description: cargo || null,
+            // Echoed back with the answer: which load the suggestion is for.
+            _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
-    serverCosting?.suggestedVehicleTypeId != null ? String(serverCosting.suggestedVehicleTypeId) : null;
+    serverCosting?.suggestedVehicleTypeId != null && serverCosting.forKey
+      ? `${serverCosting.suggestedVehicleTypeId}@${serverCosting.forKey}`
+      : null;
   useEffect(() => {
-    setServerSuggestedId(nextServerSuggested);
+    if (!nextServerSuggested) return;
+    const at = nextServerSuggested.indexOf('@');
+    setServerSuggested({ id: nextServerSuggested.slice(0, at), key: nextServerSuggested.slice(at + 1) });
   }, [nextServerSuggested]);
 
   // ── Cost breakdown ──────────────────────────────────────────────────────
@@ -1077,7 +1104,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     ],
   );
   // The rate the price works out to (the default price's, or the typed one).
-  const effectiveRateNum = costs.priceIsDefault ? Math.round(costs.ratePerKmShown * 100) / 100 : baseRateNum;
+  const effectiveRateNum = costs.priceIsDefault ? costs.ratePerKmShown : baseRateNum;
 
   // An overloaded truck has no legitimate price: the cost card gives way to
   // the warning.
@@ -1626,6 +1653,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const price = reopen.change.repriced_price_keep_margin;
     if (price === null) return;
     setServiceCharge(Math.round((price - costs.directCost) * 100) / 100);
+    setAdjustmentSource(null);
     setReopen({ state: 'done' });
   };
 
@@ -2482,7 +2510,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             // margin beyond the footer's own measured height (border + pt-3 +
             // 26px strip row + 8px gap + 48px button row + bottom inset) so the
             // last section's content never sits flush against it.
-            paddingBottom: insets.bottom + 130,
+            // Pinned footer: 44 strip + 4 + 48 buttons + 12 top + 10 bottom
+            // padding + border, plus breathing room.
+            paddingBottom: insets.bottom + 144,
             gap: 16,
           }}
           showsVerticalScrollIndicator={false}
@@ -2551,7 +2581,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   label="Add stop"
                   icon="plus"
                   variant="secondary"
-                  size="sm"
                   onPress={addStop}
                 />
               )}
@@ -2581,6 +2610,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                   ]}
                   value={tripType}
                   onChange={(v) => setTripType(v as 'ONE_WAY' | 'ROUND_TRIP')}
+                  tall
                 />
                 {/* §5: a long one-way trip prices the empty run home unless a
                     return load is booked. Reserved height: no layout jump. */}
@@ -2594,6 +2624,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       ]}
                       value={returnLoadBooked ? 'LOADED' : 'EMPTY'}
                       onChange={(v) => setReturnLoadBooked(v === 'LOADED')}
+                      tall
                     />
                     {/* The other answer's price at the target margin. */}
                     {costs.altReturnTargetPrice !== null && (
@@ -2820,10 +2851,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             source={costs.priceIsDefault ? `${pct(costs.costing.target_margin_pct ?? 10)} margin` : rateSource}
             edit={{
               label: 'Rate per km',
-              value: costs.priceIsDefault ? formatPlain(effectiveRateNum) : baseRatePerKm,
+              // Shown to the cent until typed in; the price keeps full precision.
+              value: rateTypedRef.current ? baseRatePerKm : formatPlain(Math.round(effectiveRateNum * 100) / 100),
               placeholder: 'e.g. 25',
               onChangeText: (v) => {
                 rateTouchedRef.current = true;
+                rateTypedRef.current = true;
                 setUseDefaultPrice(false);
                 setBaseRatePerKm(v);
               },

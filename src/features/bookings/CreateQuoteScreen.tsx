@@ -1538,10 +1538,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const rateSource: string | null = !(baseRateNum > 0)
     ? null
     : selectedVtRate > 0 && baseRateNum === selectedVtRate
-      ? `From ${pricedTruckName}`
+      ? 'truck'
       : companyDefaultRate > 0 && baseRateNum === companyDefaultRate
-        ? 'Company default'
-        : 'Your rate';
+        ? 'company default'
+        : 'yours';
   const resetTollToCalculated = () => {
     setTollEdited(false);
     setTollOverride('');
@@ -2793,7 +2793,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               },
               back:
                 effectiveDefaultRate > 0 && baseRateNum !== effectiveDefaultRate
-                  ? { label: `${rateSource === 'yours' ? 'Default' : 'Default'} ${formatCurrency(effectiveDefaultRate)}/km`, onPress: () => setBaseRatePerKm(String(effectiveDefaultRate)) }
+                  ? { label: `${selectedVtRate > 0 ? 'Truck' : 'Default'} ${formatCurrency(effectiveDefaultRate)}/km`, onPress: () => setBaseRatePerKm(String(effectiveDefaultRate)) }
                   : null,
             }}
           />

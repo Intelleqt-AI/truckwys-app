@@ -1185,7 +1185,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           driver_cost: costs.driver,
           fuel_usage_litres: costs.fuelUsage,
           fuel_price_used: costs.fuelPrice,
-          market_rate: num(pick(benchmark ?? {}, ['market_avg_rate'])),
+          // The lane market median (rounded); null when there is no market,
+          // never 0.
+          market_rate: num(pick(benchmark ?? {}, ['market_avg_rate'])) || null,
           client_tier: 'standard',
           // Lets the server derive the real client tier and historical
           // acceptance rate instead of reusing whatever the last customer's

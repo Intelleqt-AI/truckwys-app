@@ -209,7 +209,7 @@ export function chipFor(t: ItemKey, item: ReviewItem): { tone: ChipTone; label: 
       label: 'Official price',
     };
   }
-  if (kind === 'benchmark') return { tone: 'neutral', label: 'Lane benchmark' };
+  if (kind === 'benchmark') return { tone: 'neutral', label: 'Market median' };
   if (kind === 'source') {
     const src = sourceOf(item);
     const host = src ? httpsHost(src.url) : null;
@@ -289,7 +289,8 @@ export const checkedAgo = (at: number, now: number) => {
 /** What the card says when there's no win chance to show. */
 export const WIN_REASON_COPY: Record<string, string> = {
   not_enough_history: 'Needs more closed quotes',
-  no_market_rate: 'No lane benchmark yet',
+  no_market_rate: 'No market data yet',
+  no_market: 'No market data yet',
   outside_training_range: 'No similar quotes yet',
   prediction_failed: "Couldn't score this quote",
   floor_incomplete: 'Costs not complete yet',
@@ -345,8 +346,14 @@ export function detailLines(t: ItemKey, item: ReviewItem): string[] {
     }
   } else {
     lines.push(`Yours: ${perKm(d.your_rate_per_km)} × ${num1(d.distance_km)} km`);
-    if (d.market_low_per_km != null && d.market_high_per_km != null) {
-      lines.push(`Benchmark band: ${perKm(d.market_low_per_km)} to ${perKm(d.market_high_per_km)}`);
+    // Only a real band (both ends, low below high); never a broken range.
+    if (
+      d.market_low_per_km != null &&
+      d.market_high_per_km != null &&
+      d.market_low_per_km > 0 &&
+      d.market_high_per_km > d.market_low_per_km
+    ) {
+      lines.push(`Market: ${perKm(d.market_low_per_km)} – ${perKm(d.market_high_per_km)}`);
     }
   }
   return lines;

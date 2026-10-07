@@ -6,9 +6,20 @@
 //    neither the 23.50 model default nor any official figure) → the own price.
 //  - Otherwise the official price in force for the company's zone.
 //  - No official price → missing. Never a substituted number.
+//
+// Petrol (petrol and hybrid trucks) follows the same rule with its own mode
+// (fuel_price_petrol_mode / fuel_price_petrol) and the official ULP 95 or 93
+// price; on an older backend it is the company's own price only. Electric is
+// the company's own price per kWh only.
 
 export {
   resolveDiesel,
+  resolvePetrol,
+  hasPetrolRule,
+  petrolGrade,
+  officialPetrolFromLive,
+  fuelFamily,
+  fuelInputFromApi,
   dieselWarnings,
   officialFromLive,
   currentPeriodStart,

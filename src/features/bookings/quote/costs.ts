@@ -1,9 +1,10 @@
 import { num, str, pick, asArray } from '@/lib/api/list';
 import type { VehicleType } from '../api';
-import { FUEL_PRICE_FIELD_BY_TYPE } from './types';
 import {
   computeCosting,
-  dieselInputFromApi,
+  fuelFamily,
+  fuelInputFromApi,
+  resolveDieselInput,
   operatingCostPerKm,
   phoneWarning,
   type Costing,
@@ -193,34 +194,20 @@ export function computeCosts({
 
   const truck = (vtypes ?? []).find((v) => v.name === vehicleType) ?? null;
 
-  // Fuel price (§1). Diesel by the rules; another fuel type is priced on the
-  // company's own price for it when set (never a literal fallback).
+  // Fuel price (§1), by the truck's fuel: diesel and petrol (petrol and
+  // hybrid trucks) are Official / My own price by one rule; electric is the
+  // company's own price per kWh. Missing blocks (never a literal fallback).
+  // On an older backend petrol is the company's own price only.
   const fuelType = str(truck?.fuel_type, 'Diesel');
-  const fuelField = FUEL_PRICE_FIELD_BY_TYPE[fuelType] ?? 'fuel_price_per_litre';
-  const isDiesel = fuelField === 'fuel_price_per_litre';
-  const otherFuelPrice = isDiesel ? null : nullIfNotPositive(pick(company ?? {}, [fuelField]));
+  const family = fuelFamily(fuelType);
   const fuelFromMarketCheck = aiFuelPrice != null && aiFuelPrice > 0;
-  // Only diesel has an official price: another fuel is priced on the
-  // company's own price for it (backend build_inputs), else it's missing.
-  const dieselInput: CostingInputs['diesel'] = isDiesel
-    ? dieselInputFromApi(company, liveFuel, {
-        now,
-        useOfficial: !!useOfficialDiesel,
-        overridePrice: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
-      })
-    : {
-        zone: str(pick(company ?? {}, ['fuel_zone'])) === 'COASTAL' ? 'COASTAL' : 'INLAND',
-        mode: 'OWN',
-        own_price: otherFuelPrice,
-        own_set_at: null,
-        official_price: null,
-        official_effective_from: null,
-        official_stale: false,
-        use_official: false,
-        override_price: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
-        fuel_type: fuelType,
-      };
-  const companyDiesel = dieselInputFromApi(company, liveFuel, { now });
+  const dieselInput: CostingInputs['diesel'] = fuelInputFromApi(company, liveFuel, fuelType, {
+    now,
+    useOfficial: !!useOfficialDiesel,
+    overridePrice: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
+  });
+  // The company's price for this fuel without this quote's choices.
+  const companyFuel = resolveDieselInput(fuelInputFromApi(company, liveFuel, fuelType, { now }));
 
   // Tolls (§6): the route's figure per direction; a failed lookup is unknown,
   // never R 0. A typed total wins, then a market figure from the price check.
@@ -298,7 +285,7 @@ export function computeCosts({
     target_margin_pct: Math.min(Math.max(nullIfNotPositive(pick(c, ['margin_target_pct'])) ?? 10, 1), 40),
     price: null,
   };
-  const inputsBase = withServerInputs(localInputs, serverInputs ?? null, truck?.id ?? null);
+  const inputsBase = withServerInputs(localInputs, serverInputs ?? null, truck?.id ?? null, family);
 
   // The price lines come from the same rule outputs, so the fuel, tolls and
   // driver figures on the price are exactly the cost lines' figures.
@@ -368,10 +355,10 @@ export function computeCosts({
     fuelCost,
     fuelKnown: line('fuel')?.amount != null,
     fuelType,
-    fuelZone: isDiesel ? costing.diesel.zone : null,
+    fuelZone: family === 'electric' ? null : costing.diesel.zone,
     diesel: costing.diesel,
     fuelFromMarketCheck,
-    fuelCompanyPrice: (isDiesel ? (companyDiesel.mode === 'OWN' ? companyDiesel.own_price : companyDiesel.official_price) : otherFuelPrice) ?? 0,
+    fuelCompanyPrice: companyFuel.price ?? 0,
     tollCost,
     tollKnown: line('tolls')?.amount != null,
     tollCalculated: routeTollOneWay !== null ? Math.round(routeTollOneWay * legs * 100) / 100 : 0,
@@ -417,12 +404,16 @@ function withServerInputs(
   local: CostingInputs,
   server: CostingInputs | null,
   truckId: number | string | null,
+  family: ReturnType<typeof fuelFamily>,
 ): CostingInputs {
   if (!server) return local;
   const sameTruck = server.vehicle != null && truckId != null && String(server.vehicle.id) === String(truckId);
+  // The server's fuel resolution only for the same fuel: a reply for a
+  // diesel truck must not price a petrol one while the next is in flight.
+  const sameFuel = !!server.diesel && fuelFamily(server.diesel.fuel_type ?? 'Diesel') === family;
   return {
     ...local,
-    diesel: server.diesel
+    diesel: server.diesel && sameFuel
       ? {
           ...server.diesel,
           use_official: local.diesel?.use_official ?? false,

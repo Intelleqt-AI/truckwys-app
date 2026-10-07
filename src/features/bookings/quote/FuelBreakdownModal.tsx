@@ -16,14 +16,15 @@ export function fuelSourceText(c: CostBreakdown): string {
       return c.fuelFromMarketCheck ? 'market check' : 'this quote';
     case 'official': {
       const from = saShortDate(c.diesel.official_effective_from);
-      return `official ${zone}${from ? `, ${from}` : ''}`;
+      const grade = c.diesel.grade ? ` ${c.diesel.grade}` : '';
+      return `official ${zone}${grade}${from ? `, ${from}` : ''}`;
     }
     default:
       return 'missing';
   }
 }
 
-/** Fuel working: the truck's burn for this load, litres and the one diesel figure. */
+/** Fuel working: the truck's burn for this load, litres and the one fuel price. */
 function FuelBreakdownModalImpl({
   visible,
   onClose,
@@ -36,6 +37,7 @@ function FuelBreakdownModalImpl({
   weightTons: number | null;
 }) {
   const litres = costs.fuelLitres;
+  const unit = /electric/i.test(costs.fuelType) ? 'kWh' : 'L';
   // Whole litres can't multiply out to the cent, so they're shown as ≈.
   const exact = Math.abs(litres - Math.round(litres)) < 1e-9;
   const rows: BreakdownRow[] = [
@@ -49,7 +51,7 @@ function FuelBreakdownModalImpl({
     { label: 'Litres', value: costs.consumption ? `${exact ? '' : '≈ '}${formatNumber(Math.round(litres))} L` : '—' },
     {
       label: `${costs.fuelType} (${fuelSourceText(costs)})`,
-      value: costs.fuelPrice ? `${formatCurrency(costs.fuelPrice)}/L` : '—',
+      value: costs.fuelPrice ? `${formatCurrency(costs.fuelPrice)}/${unit}` : '—',
       tone: costs.fuelPrice ? undefined : 'danger',
     },
   ];

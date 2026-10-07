@@ -42,20 +42,6 @@ export function capacityTons(raw: unknown): number | null {
   return capacityTonnes(raw);
 }
 
-// Which company default price applies, keyed by the selected vehicle type's own
-// fuel_type. Company stores one default per fuel type, and fuel_price_per_litre
-// doubles as the Diesel one because it predates the other three.
-//
-// The mapping lives here rather than server-side because nothing in the backend
-// reads these fields — it still costs everything as diesel — so both clients
-// resolve it themselves and must agree.
-export const FUEL_PRICE_FIELD_BY_TYPE: Record<string, string> = {
-  Diesel: 'fuel_price_per_litre',
-  Petrol: 'fuel_price_petrol',
-  Electric: 'fuel_price_electric',
-  Hybrid: 'fuel_price_hybrid',
-};
-
 // Heuristic 3-letter lane code (mirrors web QuoteBuilder.tsx's extractCode).
 //
 // These codes are not cosmetic: analyzeQuote and benchmarkQuote key off them, and

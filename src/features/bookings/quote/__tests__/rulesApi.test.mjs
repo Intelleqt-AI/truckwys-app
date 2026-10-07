@@ -7,6 +7,7 @@ import {
   capacityTonnes,
   currentPeriodStart,
   dieselInputFromApi,
+  fuelInputFromApi,
   resolveDieselInput,
   suggestTruck,
 } from '../rules.ts';
@@ -119,7 +120,8 @@ test('a non-diesel truck with no company price is missing, named by its fuel', a
     tolls: { one_way: 0 },
   });
   const w = c.warnings.find((x) => x.code === 'diesel_missing');
-  assert.equal(w.title, 'No electric price set');
+  assert.equal(w.title, 'No electricity price set');
+  assert.equal(w.fuel_type, 'electric');
   assert.equal(w.severity, 'block');
 });
 
@@ -146,4 +148,67 @@ test('phone copy: stale diesel fits 390 pt, below floor offers the target price'
   assert.equal(w2.actions[0].id, 'use_target');
   assert.match(w2.actions[0].label, /^Price at 10% margin · R \d/);
   assert.equal(w2.impact_zar, c2.warnings.find((w) => w.code === 'below_floor').impact_zar);
+});
+
+// ── Petrol (petrol and hybrid trucks): same rule as diesel ──────────────────
+
+const petrolLive = {
+  success: true,
+  petrol: {
+    inland_95: { price: 30.25, effective_from: '2026-10-06T22:01:00Z', source: 'FIASA', stale: false },
+    inland_93: { price: 29.88, effective_from: '2026-10-06T22:01:00Z', source: 'FIASA', stale: false },
+    coastal_95: { price: 29.38, effective_from: '2026-10-06T22:01:00Z', source: 'FIASA', stale: false },
+    coastal_93: null,
+  },
+  company_petrol_price: {
+    fuel_type: 'Petrol', grade: '95', mode: 'LIVE', source: 'official', price: 30.25, zone: 'INLAND',
+    official: { price: 30.25, effective_from: '2026-10-06T22:01:00Z', source: 'FIASA', stale: false },
+    own: { price: null, set_at: null }, warnings: [],
+  },
+};
+
+test('new backend: a petrol truck on a LIVE company is priced on official ULP 95', () => {
+  const company = { fuel_zone: 'INLAND', fuel_price_petrol_mode: 'LIVE', fuel_price_petrol: 27, fuel_price_petrol_grade: '95' };
+  const r = resolveDieselInput(fuelInputFromApi(company, petrolLive, 'Petrol'));
+  assert.equal(r.source, 'official');
+  assert.equal(r.price, 30.25);
+  assert.equal(r.fuel_type, 'Petrol');
+  assert.equal(r.grade, '95');
+});
+
+test('new backend: hybrid uses the petrol price; 93 inland, 95 at the coast', () => {
+  const inland93 = { fuel_zone: 'INLAND', fuel_price_petrol_mode: 'LIVE', fuel_price_petrol_grade: '93' };
+  assert.equal(resolveDieselInput(fuelInputFromApi(inland93, petrolLive, 'Hybrid')).price, 29.88);
+  const coastal93 = { ...inland93, fuel_zone: 'COASTAL' };
+  const r = resolveDieselInput(fuelInputFromApi(coastal93, petrolLive, 'Hybrid'));
+  assert.equal(r.price, 29.38);
+  assert.equal(r.grade, '95');
+});
+
+test('new backend: petrol OWN prices on the own price and warns when off official', async () => {
+  const { dieselWarnings } = await import('../rules.ts');
+  const company = { fuel_zone: 'INLAND', fuel_price_petrol_mode: 'OWN', fuel_price_petrol: 27, fuel_price_petrol_set_at: '2026-10-07T06:30:00Z' };
+  const r = resolveDieselInput(fuelInputFromApi(company, petrolLive, 'Petrol'));
+  assert.equal(r.source, 'own');
+  assert.equal(r.price, 27);
+  const w = dieselWarnings(r, 100);
+  assert.equal(w[0].title, 'Your petrol price differs from official');
+  assert.equal(w[0].detail, 'Yours R 27,00/L, official R 30,25/L (inland 95).');
+  assert.equal(w[0].fuel_type, 'petrol');
+});
+
+test('old backend: petrol is the own price only, hybrid its own field; missing blocks', () => {
+  const old = { fuel_zone: 'INLAND', fuel_price_petrol: 28.5, fuel_price_hybrid: null };
+  const live = { success: true, inland_price: 32.7989 };
+  const p = resolveDieselInput(fuelInputFromApi(old, live, 'Petrol'));
+  assert.equal(p.source, 'own');
+  assert.equal(p.price, 28.5);
+  assert.equal(resolveDieselInput(fuelInputFromApi(old, live, 'Hybrid')).source, 'missing');
+});
+
+test('electric is own price only', () => {
+  const r = resolveDieselInput(fuelInputFromApi({ fuel_price_electric: 3.2 }, petrolLive, 'Electric'));
+  assert.equal(r.source, 'own');
+  assert.equal(r.price, 3.2);
+  assert.equal(r.official_price, null);
 });

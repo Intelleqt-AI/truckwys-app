@@ -206,8 +206,13 @@ export interface DieselInput {
   official_stale: boolean;
   use_official: boolean;
   override_price: number | null;
-  /** Diesel unless the truck runs on another fuel (priced on the company's own price for it). */
+  /**
+   * 'Diesel' (default) | 'Petrol' (petrol and hybrid trucks: same rule as
+   * diesel, official ULP price) | 'Electric' (own price only).
+   */
   fuel_type?: string;
+  /** Petrol only: the official grade priced on, '95' | '93' (93 inland only). */
+  grade?: string | null;
 }
 
 export interface DieselResolution {
@@ -219,6 +224,8 @@ export interface DieselResolution {
   official_price: number | null;
   official_effective_from: string | null;
   official_stale: boolean;
+  /** Only when the input carried one (petrol). */
+  grade?: string;
   price: number | null;
   source: DieselSource;
 }
@@ -237,7 +244,7 @@ export function resolveDieselInput(d: Partial<DieselInput> | null | undefined): 
   if (mode !== 'OWN' || own === null) mode = own === null ? 'LIVE' : mode;
   const official = pos(x.official_price);
   const override = pos(x.override_price);
-  const base = {
+  const base: Omit<DieselResolution, 'price' | 'source'> = {
     zone,
     mode,
     own_price: own,
@@ -247,17 +254,22 @@ export function resolveDieselInput(d: Partial<DieselInput> | null | undefined): 
     official_effective_from: isoUtc(x.official_effective_from),
     official_stale: official !== null ? !!x.official_stale : false,
   };
+  if (x.grade) base.grade = String(x.grade);
   if (override !== null) return { ...base, price: override, source: 'override' };
   if (mode === 'OWN' && !x.use_official) return { ...base, price: own, source: 'own' };
   if (official !== null) return { ...base, price: official, source: 'official' };
   return { ...base, price: null, source: 'missing' };
 }
 
-/** Port of quote_costing.diesel_warnings. */
 /** Sum of the fuel line amounts (each to the cent) at `price`. */
 const fuelLinesTotal = (parts: number[], price: number) =>
   cents(parts.reduce((s, l) => s + cents(l * price), 0));
 
+/**
+ * Port of quote_costing.diesel_warnings: diesel, or petrol by the same rule.
+ * Codes stay diesel_* for compatibility; copy names the fuel, and non-diesel
+ * warnings carry `fuel_type` (lowercase).
+ */
 export function dieselWarnings(
   diesel: DieselResolution,
   litresTotal: number | null = null,
@@ -265,25 +277,35 @@ export function dieselWarnings(
 ): QuoteWarning[] {
   const out: QuoteWarning[] = [];
   const zoneTxt = diesel.zone === 'COASTAL' ? 'coastal' : 'inland';
+  const fuel = String(diesel.fuel_type || 'Diesel').toLowerCase();
+  const officialFuel = fuel === 'diesel' || fuel === 'petrol'; // fuels with an official FIASA price
+  const grade = diesel.grade;
+  const where = fuel === 'petrol' && grade ? `${zoneTxt} ${grade}` : zoneTxt;
+  const extra: Record<string, unknown> = fuel === 'diesel' ? {} : { fuel_type: fuel };
   if (diesel.source === 'missing') {
-    const fuel = String(diesel.fuel_type || 'Diesel').toLowerCase();
-    if (fuel === 'diesel') {
+    if (officialFuel) {
       out.push(
         warning(
           'diesel_missing',
           'block',
-          'No diesel price available',
+          `No ${fuel} price available`,
           'No official price on record; set your own in settings.',
           null,
           ['retry_diesel', 'update_own'],
+          extra,
         ),
       );
-    } else {
-      const unit = fuel === 'electric' ? 'kWh' : 'litre';
+    } else if (fuel === 'electric') {
       out.push(
-        warning('diesel_missing', 'block', `No ${fuel} price set`, `Set your ${fuel} price per ${unit} in settings.`, null, [
+        warning('diesel_missing', 'block', 'No electricity price set', 'Set your electricity cost per kWh in settings.', null, [
           'update_own',
-        ], { fuel_type: fuel }),
+        ], extra),
+      );
+    } else {
+      out.push(
+        warning('diesel_missing', 'block', `No ${fuel} price set`, `Set your ${fuel} price per litre in settings.`, null, [
+          'update_own',
+        ], extra),
       );
     }
     return out;
@@ -303,11 +325,11 @@ export function dieselWarnings(
         warning(
           'diesel_own_off',
           'warn',
-          'Your diesel price differs from official',
-          `Yours ${fmtRand(own, 2)}/L, official ${fmtRand(official, 2)}/L (${zoneTxt}).`,
+          `Your ${fuel} price differs from official`,
+          `Yours ${fmtRand(own, 2)}/L, official ${fmtRand(official, 2)}/L (${where}).`,
           impact,
           ['use_official', 'update_own'],
-          { own_price: own, official_price: official },
+          { own_price: own, official_price: official, ...extra },
         ),
       );
     }
@@ -318,10 +340,11 @@ export function dieselWarnings(
         warning(
           'diesel_own_old',
           'warn',
-          'Your diesel price predates the latest change',
+          `Your ${fuel} price predates the latest change`,
           `Set ${saDate(diesel.own_set_at)}; official price changed ${saDate(diesel.official_effective_from)}.`,
           null,
           ['update_own', 'use_official'],
+          extra,
         ),
       );
     }
@@ -332,10 +355,11 @@ export function dieselWarnings(
       warning(
         'diesel_stale',
         'warn',
-        'Official diesel price may be out of date',
+        `Official ${fuel} price may be out of date`,
         eff ? `Latest on record is from ${saDate(eff)}.` : "This month's price is not loaded yet.",
         null,
         ['retry_diesel', 'update_own'],
+        extra,
       ),
     );
   }
@@ -463,6 +487,164 @@ export function dieselInputFromApi(
 /** Diesel resolution straight from the API objects (insights, settings). */
 export function resolveDiesel(company: Loose, live: Loose, now?: Date): DieselResolution {
   return resolveDieselInput(dieselInputFromApi(company, live, { now }));
+}
+
+// ── Petrol and other fuels from the API (old and new backend) ───────────────
+
+/**
+ * How a truck's fuel is priced: diesel and petrol (petrol and hybrid trucks)
+ * by the Official / My own price rule, electric on the company's own price
+ * only. Anything unrecognised is priced as diesel.
+ */
+export type FuelFamily = 'diesel' | 'petrol' | 'electric';
+
+export function fuelFamily(fuelType: unknown): FuelFamily {
+  const f = String(fuelType ?? '').trim().toLowerCase();
+  if (f === 'petrol' || f === 'hybrid') return 'petrol';
+  if (f === 'electric') return 'electric';
+  return 'diesel';
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
+
+/** Does this backend price petrol like diesel (fuel_price_petrol_mode et al.)? */
+export function hasPetrolRule(company: Loose, live?: Loose): boolean {
+  return (
+    (!!company && ('fuel_price_petrol_mode' in company || isObj(company.petrol_price_in_use))) ||
+    (!!live && isObj(live.company_petrol_price))
+  );
+}
+
+/** The official petrol grade a company prices on: 93 only inland, else 95 (backend petrol_grade). */
+export function petrolGrade(company: Loose, zone: FuelZone): '95' | '93' {
+  return String(company?.fuel_price_petrol_grade ?? '95') === '93' && zone !== 'COASTAL' ? '93' : '95';
+}
+
+/** Official petrol {price, from, stale} for a zone and grade from GET fuel-prices/current/ `petrol`. */
+export function officialPetrolFromLive(
+  live: Loose,
+  zone: FuelZone,
+  grade: '95' | '93',
+): { price: number | null; from: string | null; stale: boolean } {
+  const table = isObj(live?.petrol) ? (live!.petrol as Record<string, unknown>) : null;
+  const rec = table ? table[`${zone.toLowerCase()}_${grade}`] : null;
+  if (!isObj(rec)) return { price: null, from: null, stale: false };
+  const price = pos(rec.price);
+  return {
+    price,
+    from: price !== null && typeof rec.effective_from === 'string' ? rec.effective_from : null,
+    stale: price !== null && rec.stale === true,
+  };
+}
+
+/**
+ * compute()'s fuel input for a petrol or hybrid truck.
+ *
+ * New backend: same rule as diesel. fuel_price_petrol_mode LIVE (the official
+ * ULP price for the zone and grade, from company_petrol_price /
+ * petrol_price_in_use or the live `petrol` table) or OWN (fuel_price_petrol,
+ * set at fuel_price_petrol_set_at).
+ * Old backend (none of those fields): the company's own price only, as the old
+ * server priced it (fuel_price_petrol; hybrid on fuel_price_hybrid), missing
+ * blocks.
+ */
+export function petrolInputFromApi(
+  company: Loose,
+  live: Loose,
+  opts: { useOfficial?: boolean; overridePrice?: number | null; fuelType?: string } = {},
+): DieselInput {
+  const hybrid = String(opts.fuelType ?? '').trim().toLowerCase() === 'hybrid';
+  const server = (isObj(live?.company_petrol_price)
+    ? live!.company_petrol_price
+    : isObj(company?.petrol_price_in_use)
+      ? company!.petrol_price_in_use
+      : null) as Record<string, unknown> | null;
+  const zone: FuelZone =
+    (company?.fuel_zone ?? server?.zone ?? live?.zone) === 'COASTAL' ? 'COASTAL' : 'INLAND';
+  if (!hasPetrolRule(company, live)) {
+    return {
+      zone,
+      mode: 'OWN',
+      own_price: pos(company?.[hybrid ? 'fuel_price_hybrid' : 'fuel_price_petrol']),
+      own_set_at: null,
+      official_price: null,
+      official_effective_from: null,
+      official_stale: false,
+      use_official: false,
+      override_price: opts.overridePrice ?? null,
+      fuel_type: hybrid ? 'Hybrid' : 'Petrol',
+    };
+  }
+  const grade =
+    company && 'fuel_price_petrol_grade' in company
+      ? petrolGrade(company, zone)
+      : String(server?.grade) === '93' && zone !== 'COASTAL'
+        ? '93'
+        : '95';
+  // The server's official figure when it resolved the same zone and grade,
+  // else the live table's.
+  let official = officialPetrolFromLive(live, zone, grade);
+  const so = isObj(server?.official) ? (server!.official as Record<string, unknown>) : null;
+  if (so && (server?.zone ?? zone) === zone && String(server?.grade ?? grade) === grade) {
+    const price = pos(so.price);
+    official = {
+      price,
+      from: price !== null && typeof so.effective_from === 'string' ? so.effective_from : null,
+      stale: price !== null && so.stale === true,
+    };
+  }
+  const serverOwn = isObj(server?.own) ? (server!.own as Record<string, unknown>) : null;
+  const modeRaw = company && 'fuel_price_petrol_mode' in company ? company.fuel_price_petrol_mode : server?.mode;
+  const own = pos(company && 'fuel_price_petrol' in company ? company.fuel_price_petrol : serverOwn?.price);
+  const setAt = company?.fuel_price_petrol_set_at ?? serverOwn?.set_at;
+  const mode: 'LIVE' | 'OWN' = String(modeRaw ?? 'LIVE').toUpperCase() === 'OWN' && own !== null ? 'OWN' : 'LIVE';
+  return {
+    zone,
+    mode,
+    own_price: own,
+    own_set_at: typeof setAt === 'string' ? setAt : null,
+    official_price: official.price,
+    official_effective_from: official.from,
+    official_stale: official.stale,
+    use_official: !!opts.useOfficial,
+    override_price: opts.overridePrice ?? null,
+    fuel_type: 'Petrol',
+    grade,
+  };
+}
+
+/** compute()'s fuel input for an electric truck: own price per kWh only, missing blocks. */
+export function electricInputFromApi(company: Loose, opts: { overridePrice?: number | null } = {}): DieselInput {
+  return {
+    zone: company?.fuel_zone === 'COASTAL' ? 'COASTAL' : 'INLAND',
+    mode: 'OWN',
+    own_price: pos(company?.fuel_price_electric),
+    own_set_at: null,
+    official_price: null,
+    official_effective_from: null,
+    official_stale: false,
+    use_official: false,
+    override_price: opts.overridePrice ?? null,
+    fuel_type: 'Electric',
+  };
+}
+
+/** compute()'s fuel input for a truck of `fuelType` (Diesel, Petrol, Hybrid, Electric). */
+export function fuelInputFromApi(
+  company: Loose,
+  live: Loose,
+  fuelType: unknown,
+  opts: { useOfficial?: boolean; overridePrice?: number | null; now?: Date } = {},
+): DieselInput {
+  const family = fuelFamily(fuelType);
+  if (family === 'petrol') return petrolInputFromApi(company, live, { ...opts, fuelType: String(fuelType) });
+  if (family === 'electric') return electricInputFromApi(company, opts);
+  return dieselInputFromApi(company, live, opts);
+}
+
+/** Petrol resolution straight from the API objects (settings). */
+export function resolvePetrol(company: Loose, live: Loose): DieselResolution {
+  return resolveDieselInput(petrolInputFromApi(company, live));
 }
 
 // ── Truck (§3) ───────────────────────────────────────────────────────────────
@@ -1234,9 +1416,10 @@ export function phoneWarning(w: QuoteWarning, c: Costing, target: number | null)
   if (w.code === 'diesel_stale') {
     const from = saShortDate(c.diesel.official_effective_from);
     const ownSet = c.diesel.own_price !== null;
+    const fuelName = fuelFamily(c.diesel.fuel_type) === 'petrol' ? 'Petrol' : 'Diesel';
     return {
       ...w,
-      title: from ? `Diesel price is from ${from}` : 'Diesel price may be old',
+      title: from ? `${fuelName} price is from ${from}` : `${fuelName} price may be old`,
       actions: [ownSet ? { id: 'use_own', label: 'Use my price' } : { id: 'retry_diesel', label: 'Check again' }],
     };
   }

@@ -97,7 +97,13 @@ import {
   capacityTons,
 } from './quote/types';
 import { computeCosts } from './quote/costs';
-import { suggestTruck, saShortDate, signedRand, pricedInEarlierPeriod, type QuoteWarning } from './quote/rules';
+import {
+  suggestTruck,
+  pricedInEarlierPeriod,
+  changesSincePriced,
+  type ChangesSincePriced,
+  type QuoteWarning,
+} from './quote/rules';
 import { QuoteWarnings } from './quote/QuoteWarnings';
 import { CostFloorModal } from './quote/CostFloorModal';
 import { useServerCosting } from './quote/useServerCosting';
@@ -275,7 +281,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   } | null>(null);
   const [reopen, setReopen] = useState<
     | { state: 'init' }
-    | { state: 'notice'; delta: number; since: string | null; oldMargin: number; newMargin: number }
+    | { state: 'notice'; change: ChangesSincePriced }
     | { state: 'kept'; earlierPeriod: boolean }
     | { state: 'done' }
   >({ state: 'init' });
@@ -1527,55 +1533,38 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const adjust = Math.round((saved.total - costs.directCost) * 100) / 100;
     if (Math.abs(adjust) >= 0.01) setServiceCharge(adjust);
     const earlierPeriod = pricedInEarlierPeriod(saved.pricedAt);
-    // How the costs moved: the saved floor when the quote has one, else the
-    // diesel on its saved litres.
-    const delta =
-      costs.floor !== null && saved.floor !== null
-        ? costs.floor - saved.floor
+    // What the costs were then: the saved floor, else (older quotes) today's
+    // floor less the diesel change on the saved litres.
+    const floorThen =
+      saved.floor !== null
+        ? saved.floor
         : costs.floor !== null && saved.fuelLitres && saved.fuelPrice && costs.fuelPrice
-          ? saved.fuelLitres * (costs.fuelPrice - saved.fuelPrice)
+          ? costs.floor - saved.fuelLitres * (costs.fuelPrice - saved.fuelPrice)
           : null;
-    if (delta === null || Math.abs(delta) < 1 || costs.floor === null) {
-      setReopen({ state: 'kept', earlierPeriod });
-      return;
-    }
-    const oldFloor = costs.floor - delta;
-    setReopen({
-      state: 'notice',
-      delta,
-      since: saShortDate(saved.pricedAt),
-      oldMargin: Math.round(((saved.total - oldFloor) / saved.total) * 100),
-      newMargin: Math.round(((saved.total - costs.floor) / saved.total) * 100),
-    });
+    const change = changesSincePriced(saved.total, floorThen, costs.floor, saved.pricedAt);
+    setReopen(change.changed ? { state: 'notice', change } : { state: 'kept', earlierPeriod });
     // Runs once, on the first current route after hydrating.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, hydrated, reopen.state, routeIsCurrent]);
 
-  const reopenWarning = useMemo<QuoteWarning | null>(
-    () =>
-      reopen.state === 'notice'
-        ? {
-            code: 'costs_changed',
-            severity: 'warn',
-            title: `Costs ${reopen.delta > 0 ? 'up' : 'down'} ${signedRand(reopen.delta).slice(1)}${
-              reopen.since ? ` since ${reopen.since}` : ''
-            }`,
-            detail: `Margin ${reopen.oldMargin}% → ${reopen.newMargin}% at the saved price.`,
-            impact_zar: Math.round(reopen.delta * 100) / 100,
-            actions: [
-              { id: 'reprice', label: 'Re-price' },
-              { id: 'keep_price', label: 'Keep price' },
-            ],
-          }
-        : null,
-    [reopen],
-  );
+  // Port of the backend's changes_since_priced (golden reopen cases).
+  const reopenWarning = useMemo<QuoteWarning | null>(() => {
+    if (reopen.state !== 'notice' || !reopen.change.notice) return null;
+    const [title, detail] = reopen.change.notice.split(/(?<=\.) /);
+    return {
+      code: 'costs_changed',
+      severity: 'warn',
+      title: (title ?? '').replace(/\.$/, ''),
+      detail: detail ?? '',
+      impact_zar: reopen.change.delta_zar,
+      actions: [...reopen.change.actions].reverse(),
+    };
+  }, [reopen]);
 
   const repriceKeepingMargin = () => {
-    if (reopen.state !== 'notice' || costs.floor === null) return;
-    const m = reopen.oldMargin / 100;
-    if (m >= 1) return;
-    const price = Math.round((costs.floor / (1 - m)) * 100) / 100;
+    if (reopen.state !== 'notice') return;
+    const price = reopen.change.repriced_price_keep_margin;
+    if (price === null) return;
     setServiceCharge(Math.round((price - costs.directCost) * 100) / 100);
     setReopen({ state: 'done' });
   };

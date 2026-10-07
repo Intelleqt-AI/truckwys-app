@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { computeCosting } from '../rules.ts';
+import { computeCosting, changesSincePriced } from '../rules.ts';
 
 const golden = JSON.parse(readFileSync(new URL('./quote_golden.json', import.meta.url), 'utf8'));
 
@@ -78,5 +78,21 @@ for (const c of golden.cases) {
     }
     assert.deepEqual(got.diesel, exp.diesel, 'diesel');
     for (const k of ['loaded', 'empty_return', 'total']) close(got.litres[k], exp.litres[k], `litres.${k}`);
+  });
+}
+
+// Reopen notice (§11): changes_since_priced over the golden reopen cases.
+
+for (const c of golden.reopen_cases ?? []) {
+  test(`reopen: ${c.name}`, () => {
+    const i = c.inputs;
+    const got = changesSincePriced(i.price, i.floor_then, i.floor_now, i.priced_at);
+    const exp = c.expected;
+    for (const k of ['priced_at', 'price', 'floor_then', 'floor_now', 'delta_zar', 'repriced_price_keep_margin', 'changed', 'notice']) {
+      assert.equal(got[k], exp[k], k);
+    }
+    close(got.margin_then, exp.margin_then, 'margin_then');
+    close(got.margin_now, exp.margin_now, 'margin_now');
+    assert.deepEqual(got.actions, exp.actions, 'actions');
   });
 }

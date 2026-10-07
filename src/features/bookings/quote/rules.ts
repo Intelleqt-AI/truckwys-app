@@ -1114,3 +1114,59 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     can_send: blocking.length === 0,
   };
 }
+
+// ── Reopen notice (§11): port of quote_costing.changes_since_priced ─────────
+
+export interface ChangesSincePriced {
+  priced_at: string | null;
+  price: number | null;
+  floor_then: number | null;
+  floor_now: number | null;
+  delta_zar: number | null;
+  margin_then: number | null;
+  margin_now: number | null;
+  repriced_price_keep_margin: number | null;
+  changed: boolean;
+  notice: string | null;
+  actions: WarningAction[];
+}
+
+export function changesSincePriced(
+  priceIn: unknown,
+  floorThenIn: unknown,
+  floorNowIn: unknown,
+  pricedAt: unknown = null,
+): ChangesSincePriced {
+  const price = pos(priceIn);
+  const floorThen = toNum(floorThenIn);
+  const floorNow = toNum(floorNowIn);
+  const delta = floorThen !== null && floorNow !== null ? cents(floorNow - floorThen) : null;
+  const mThen = price && floorThen !== null ? ((price - floorThen) / price) * 100 : null;
+  const mNow = price && floorNow !== null ? ((price - floorNow) / price) * 100 : null;
+  const keep = mThen !== null && floorNow !== null && mThen < 100 ? cents(floorNow / (1 - mThen / 100)) : null;
+  const changed = delta !== null && Math.abs(delta) >= 1;
+  let notice: string | null = null;
+  if (changed) {
+    const when = saDate(pricedAt);
+    notice =
+      `Costs ${delta! > 0 ? 'up' : 'down'} ${fmtRand(Math.abs(delta!))}` +
+      (when ? ` since ${when.replace(/ \d{4}$/, '')}` : '') +
+      '.' +
+      (mThen !== null && mNow !== null
+        ? ` Margin ${Math.floor(mThen + 0.5)}% → ${Math.floor(mNow + 0.5)}%.`
+        : '');
+  }
+  return {
+    priced_at: isoUtc(pricedAt),
+    price,
+    floor_then: floorThen,
+    floor_now: floorNow,
+    delta_zar: delta,
+    margin_then: mThen,
+    margin_now: mNow,
+    repriced_price_keep_margin: keep,
+    changed,
+    notice,
+    actions: changed ? ['keep_price', 'reprice'].map((id) => ({ id, label: ACTION_LABELS[id]! })) : [],
+  };
+}

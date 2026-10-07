@@ -15,6 +15,7 @@ import {
   useWindowDimensions,
   InteractionManager,
   Alert,
+  ActivityIndicator,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native';
@@ -33,7 +34,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  RoutePreview,
   SegmentedControl,
   SelectField,
   TextField,
@@ -44,6 +44,7 @@ import {
   Txt,
   Label,
   Toggle,
+  Mono,
 } from '@/components/ui';
 import {
   useVehicleTypes,
@@ -71,7 +72,7 @@ import { WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { useFinanceSettings } from '@/lib/finance/api';
 import { previewQuoteVat } from '@/lib/vat';
-import { formatDuration, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
+import { formatDuration, formatNumber, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
@@ -2521,18 +2522,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               produced them, not ~1000px below (Phase 2's one field move). */}
               {ready && !routeBlockedMessage && (
                 <View className="mt-5 gap-5">
-                  <RoutePreview
-                    origin={pickup!.label}
-                    dest={delivery!.label}
-                    stops={stops.filter((s) => s.loc).map((s) => s.loc!.label)}
-                    distance={
-                      costs.distance
-                        ? `${costs.distanceEstimated && !distanceConfirmed ? '≈ ' : ''}${Math.round(costs.chargeDistance)} km`
-                        : 'Calculating…'
-                    }
-                    duration={costs.duration ? formatDuration(costs.duration / 60) : undefined}
-                    loading={routeBusy}
-                  />
+                  {/* The addresses are right above, so only the trip itself:
+                      one line, or the route chips when there's a choice. */}
+                  {routes.length <= 1 && (
+                    <View className="min-h-[24px] flex-row items-center gap-2">
+                      <Mono className="text-callout text-fg">
+                        {costs.distance
+                          ? `${costs.distanceEstimated && !distanceConfirmed ? '≈ ' : ''}${formatNumber(
+                              Math.round(costs.chargeDistance),
+                            )} km${costs.duration ? ` · ${formatDuration(costs.duration / 60)}` : ''}`
+                          : 'Working out the route…'}
+                      </Mono>
+                      {routeBusy && <ActivityIndicator size="small" color={colors.faint} />}
+                    </View>
+                  )}
                   <RouteOptionChips
                     routes={routes}
                     selectedRouteIndex={selectedRouteIndex}

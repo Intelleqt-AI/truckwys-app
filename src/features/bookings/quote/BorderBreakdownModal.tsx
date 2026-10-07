@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { num, pick, str } from '@/lib/api/list';
 import { formatCurrency } from '@/lib/formatters';
-import { BreakdownModal, type BreakdownRow } from './BreakdownModal';
+import { BreakdownModal, type BreakdownEdit, type BreakdownRow } from './BreakdownModal';
 import type { CostBreakdown } from './costs';
 
 /**
@@ -13,10 +13,13 @@ function BorderBreakdownModalImpl({
   visible,
   onClose,
   costs,
+  edit,
 }: {
   visible: boolean;
   onClose: () => void;
   costs: CostBreakdown;
+  /** Border costs for all legs, typed on this quote. */
+  edit?: BreakdownEdit | null;
 }) {
   const items = costs.crossBorderBreakdown.filter((i) => num(pick(i, ['amount'])) > 0);
   const rows: BreakdownRow[] = items.length
@@ -34,8 +37,13 @@ function BorderBreakdownModalImpl({
       visible={visible}
       onClose={onClose}
       title="Border, one way"
-      rows={rows.length ? rows : [{ label: 'Charges', value: 'None' }]}
-      total={{ label: 'Border', value: formatCurrency(costs.crossBorderCost) }}
+      rows={rows.length ? rows : [{ label: 'Charges', value: costs.borderMissing ? 'Not worked out' : 'None', tone: costs.borderMissing ? 'danger' : undefined }]}
+      total={{
+        label: 'Border',
+        value: costs.borderMissing ? '—' : formatCurrency(costs.crossBorderCost),
+        tone: costs.borderMissing ? 'danger' : undefined,
+      }}
+      edit={edit}
     />
   );
 }

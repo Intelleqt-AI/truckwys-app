@@ -268,6 +268,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [driverEdited, setDriverEdited] = useState(false);
   // Trip shape and confirmations (QUOTE-RULES §5, §6).
   const [returnLoadBooked, setReturnLoadBooked] = useState(false);
+  // Border costs typed on this quote (all legs); '' = the route's figure.
+  const [borderOverride, setBorderOverride] = useState('');
   const [tollsConfirmedNone, setTollsConfirmedNone] = useState(false);
   const [distanceConfirmed, setDistanceConfirmed] = useState(false);
   // "Use official price" on this quote while the company prices on its own.
@@ -973,6 +975,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const fuelTypeNow = str((vtypes ?? []).find((v) => v.name === pricedTruckName)?.fuel_type, 'Diesel');
   const aiFuelPrice = aiFuel && aiFuel.fuelType === fuelTypeNow ? aiFuel.pricePerL : null;
 
+  // The trip leaves South Africa (route flag, a foreign country on the route,
+  // or a foreign point): its floor then needs border costs.
+  const crossesBorder =
+    !!pick(routeData ?? {}, ['cross_border']) ||
+    asArray<string>(pick(routeData ?? {}, ['countries'])).some((c) => isForeignCc(c)) ||
+    [pickup?.cc, delivery?.cc, ...stops.map((st) => st.loc?.cc)].some((c) => isForeignCc(c));
+
   // The backend's costing for these inputs (newer backends only): supplies
   // the approved driver allowance, the fleet's operating cost and the diesel
   // resolution, so the figures here are the server's to the cent.
@@ -999,9 +1008,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             include_empty_return: returnLoadBooked ? false : null,
             use_official_fuel: useOfficialDiesel,
             fuel_price_override: aiFuelPrice ?? null,
+            is_international: crossesBorder,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1034,6 +1044,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         useOfficialDiesel,
         aiTollOneWay,
         returnLoadBooked,
+        international: crossesBorder,
+        borderOverride: parseNum(borderOverride),
         tollsConfirmedNone,
         distanceConfirmed,
         serverInputs: serverCosting?.inputs ?? null,
@@ -1057,6 +1069,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       useOfficialDiesel,
       aiTollOneWay,
       returnLoadBooked,
+      crossesBorder,
+      borderOverride,
       tollsConfirmedNone,
       distanceConfirmed,
       serverCosting,
@@ -1666,6 +1680,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         break;
       case 'recalculate_route':
         setRouteNonce((n) => n + 1);
+        break;
+      case 'enter_border_costs':
+        setBorderModal(true);
         break;
       case 'confirm_distance':
         setDistanceConfirmed(true);
@@ -2781,6 +2798,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={borderModal}
             onClose={() => setBorderModal(false)}
             costs={costs}
+            edit={{
+              label: costs.legs === 2 ? 'Border costs, both legs' : 'Border costs',
+              value: borderOverride !== '' ? borderOverride : costs.crossBorderCost > 0 ? formatPlain(costs.crossBorderCost) : '',
+              onChangeText: setBorderOverride,
+              back: borderOverride !== '' ? { label: 'Use the route figure', onPress: () => setBorderOverride('') } : null,
+            }}
           />
           <FuelBreakdownModal
             visible={fuelModal}

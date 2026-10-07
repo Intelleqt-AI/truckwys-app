@@ -51,6 +51,7 @@ export const ACTION_LABELS: Record<string, string> = {
   reprice: 'Re-price',
   keep_price: 'Keep price',
   enter_weight: 'Enter weight',
+  enter_border_costs: 'Enter border costs',
 };
 
 function warning(
@@ -822,6 +823,8 @@ export interface CostingInputs {
   driver?: { allowance_per_night?: number | null; nights?: number | null; amount?: number | null } | null;
   hours_per_day?: number | null;
   border_cost?: number | null;
+  /** Cross-border trip: no border cost makes the floor incomplete (block). */
+  international?: boolean | null;
   include_empty_return?: boolean | null;
   settings?: { include_empty_return_default?: boolean | null; empty_return_min_km?: number | null } | null;
   minimum_charge?: number | null;
@@ -1100,6 +1103,16 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
       ),
     );
   }
+  if (tollOneWay === 0 && !tolls.confirmed_none) {
+    // R 0 from the route means no plazas were FOUND, not that the road has
+    // none: say so and ask to check (a warning: tolls are small).
+    warnings.push(
+      warning('tolls_none_found', 'warn', 'No tolls found on this route', 'Check it if the trip uses toll roads.', null, [
+        'enter_tolls',
+        'confirm_no_tolls',
+      ]),
+    );
+  }
   const tollAmt = tollOneWay !== null ? cents(tollOneWay * legsLoaded) : null;
   add(
     'tolls',
@@ -1181,6 +1194,21 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
   // --- border ---
   const border = toNum(inp.border_cost);
   if (border !== null && border > 0) add('border', 'loaded', cents(border), 'Border, permit and non-SA toll costs');
+  else if (inp.international) {
+    // An international trip always has border costs: without them the floor
+    // is badly low, so it is incomplete.
+    add('border', 'loaded', null, 'Not worked out yet', { status: 'needs_input' });
+    warnings.push(
+      warning(
+        'border_costs_missing',
+        'block',
+        'Border costs not worked out yet',
+        'Add the border, permit and non-SA toll costs for this trip.',
+        null,
+        ['enter_border_costs'],
+      ),
+    );
+  }
 
   // --- empty return (§5) ---
   let returnNights: number | null = null;

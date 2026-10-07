@@ -55,6 +55,10 @@ export interface ComputeCostsInput {
   /** A market toll total applied from the price check, per one-way leg. */
   aiTollOneWay?: number | null;
   returnLoadBooked: boolean;
+  /** The trip crosses a border: with no border cost the floor is incomplete. */
+  international?: boolean;
+  /** Border, permit and non-SA toll costs typed for all legs. */
+  borderOverride?: number | null;
   tollsConfirmedNone: boolean;
   distanceConfirmed: boolean;
   /**
@@ -120,6 +124,10 @@ export interface CostBreakdown {
   driverKnown: boolean;
   /** Nights away but no allowance rate anywhere: priced at R 0, shown as unknown. */
   driverMissing: boolean;
+  /** International trip with no border cost worked out (blocks). */
+  borderMissing: boolean;
+  /** Operating cost line flagged for a check (e.g. overlapping costs). */
+  operatingCheck: boolean;
   /** Target-margin price with the other empty-return answer (one-way, 300 km+). */
   altReturnTargetPrice: number | null;
   /** The price is the rules' default price (nobody set a rate or price). */
@@ -177,6 +185,8 @@ export function computeCosts({
   useOfficialDiesel,
   aiTollOneWay,
   returnLoadBooked,
+  international,
+  borderOverride,
   tollsConfirmedNone,
   distanceConfirmed,
   serverInputs,
@@ -273,7 +283,8 @@ export function computeCosts({
       amount: driverOverride,
     },
     hours_per_day: null,
-    border_cost: borderTotal,
+    border_cost: borderOverride != null && borderOverride >= 0 ? borderOverride : borderTotal,
+    international: !!international,
     include_empty_return: returnLoadBooked ? false : null,
     settings: {
       include_empty_return_default: typeof includeDefault === 'boolean' ? includeDefault : null,
@@ -339,6 +350,8 @@ export function computeCosts({
     defaultPrice,
     ratePerKmShown: loadedKm > 0 ? baseCost / loadedKm : baseRateNum,
     driverMissing: driverLine?.source === 'missing',
+    borderMissing: costing.lines.some((l) => l.key === 'border' && l.amount === null),
+    operatingCheck: costing.lines.some((l) => l.key === 'operating' && l.status === 'check'),
     distance,
     legs,
     chargeDistance: loadedKm,

@@ -44,7 +44,7 @@ for (const c of golden.cases) {
     for (const [i, l] of exp.lines.entries()) {
       if ('litres' in l) close(got.lines[i].litres, l.litres, `${l.key}.litres`);
       if ('burn_l_per_100km' in l) close(got.lines[i].burn_l_per_100km, l.burn_l_per_100km, `${l.key}.burn`);
-      for (const k of ['nights', 'suggested_nights', 'rate_per_night', 'suggested', 'source', 'one_way', 'legs']) {
+      for (const k of ['nights', 'suggested_nights', 'rate_per_night', 'suggested', 'source', 'one_way', 'legs', 'status']) {
         if (k in l) assert.equal(got.lines[i][k], l[k], `${l.key}.${k}`);
       }
     }

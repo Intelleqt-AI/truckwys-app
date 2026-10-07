@@ -60,7 +60,12 @@ function CostBreakdownCardImpl({
       <View>
         <Label className="mb-2 text-muted">Cost floor</Label>
         <Card className="overflow-hidden">
-          <Row label="Operating costs" value={operating === null ? '—' : randWhole(operating)} onPress={onCostPress} />
+          <Row
+            label="Operating costs"
+            value={operating === null ? '—' : randWhole(operating)}
+            caution={costs.operatingCheck}
+            onPress={onCostPress}
+          />
           <Row label="Fuel" value={costs.fuelKnown ? randWhole(costs.fuelCost) : '—'} warn={!costs.fuelKnown} onPress={onFuelPress} />
           <Row label="Tolls" value={costs.tollKnown ? randWhole(costs.tollCost) : '—'} warn={!costs.tollKnown} onPress={onTollPress} />
           {showDriver && (
@@ -74,8 +79,13 @@ function CostBreakdownCardImpl({
           {costs.emptyReturnIncluded && (
             <Row label="Empty return" value={emptyReturn === null ? '—' : randWhole(emptyReturn)} warn={emptyReturn === null} onPress={onCostPress} />
           )}
-          {costs.crossBorderCost > 0 && (
-            <Row label="Border" value={randWhole(costs.crossBorderCost)} onPress={onCrossBorderPress} />
+          {(costs.crossBorderCost > 0 || costs.borderMissing) && (
+            <Row
+              label="Border"
+              value={costs.borderMissing ? '—' : randWhole(costs.crossBorderCost)}
+              warn={costs.borderMissing}
+              onPress={onCrossBorderPress}
+            />
           )}
           <TotalRow label="Cost floor" value={costs.floor === null ? '—' : randWhole(costs.floor)} warn={costs.floor === null} onPress={onCostPress} />
         </Card>
@@ -137,11 +147,14 @@ function Row({
   value,
   onPress,
   warn,
+  caution,
 }: {
   label: string;
   value: string;
   onPress?: () => void;
   warn?: boolean;
+  /** Amber: the backend asks for a check (status "check"). */
+  caution?: boolean;
 }) {
   const { colors } = useTheme();
   const body = (
@@ -150,7 +163,10 @@ function Row({
         {label}
       </Txt>
       <View className="shrink-0 flex-row items-center gap-1">
-        <Mono className={`text-sub font-semibold ${warn ? 'text-danger' : 'text-fg'}`} numberOfLines={1}>
+        <Mono
+          className={`text-sub font-semibold ${warn ? 'text-danger' : caution ? 'text-warning' : 'text-fg'}`}
+          numberOfLines={1}
+        >
           {value}
         </Mono>
         {onPress ? <Icon name="chevronRight" size={14} color={colors.faint} /> : <View style={{ width: 14 }} />}

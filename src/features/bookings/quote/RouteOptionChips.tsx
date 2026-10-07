@@ -41,7 +41,8 @@ function RouteOptionChipsImpl({
     distanceKm: num(pick(r, ['distance_km'])),
     durationMin: num(pick(r, ['duration_minutes'])) || num(pick(r, ['duration_min'])),
     tollZar: num(pick(r, ['toll_cost_zar'])),
-    tollsUnavailable: pick(r, ['tolls_unavailable']) === true,
+    tollsUnavailable:
+      r.tolls_unknown === true || r.tolls_unavailable === true || ('toll_cost_zar' in r && r.toll_cost_zar == null),
   }));
   const fastestIdx = stats.reduce(
     (best, s, i) =>

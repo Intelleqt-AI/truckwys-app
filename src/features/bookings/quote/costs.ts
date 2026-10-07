@@ -172,7 +172,7 @@ export function computeCosts({
     num(pick(currentRoute, ['duration_minutes'])) ||
     num(pick(currentRoute, ['duration_min'])) ||
     num(pick(rd, ['duration_minutes']));
-  const distanceEstimated = str(pick(rd, ['source'])) === 'estimated';
+  const distanceEstimated = rd.distance_estimated === true || str(pick(rd, ['source'])) === 'estimated';
 
   const truck = (vtypes ?? []).find((v) => v.name === vehicleType) ?? null;
 
@@ -192,11 +192,13 @@ export function computeCosts({
 
   // Tolls (§6): the route's figure per direction; a failed lookup is unknown,
   // never R 0. A typed total wins, then a market figure from the price check.
-  const rawToll = pick(currentRoute, ['toll_cost_zar']) ?? pick(rd, ['toll_cost_zar']);
+  // The selected route's own flags first: an alternative can fail its lookup
+  // while the best route's didn't (and vice versa).
+  const routeHasToll = 'toll_cost_zar' in currentRoute;
+  const rawToll = routeHasToll ? currentRoute.toll_cost_zar : pick(rd, ['toll_cost_zar']);
+  const flag = (k: string) => (k in currentRoute ? currentRoute[k] : rd[k]) === true;
   const lookupFailed =
-    hasRoute &&
-    ((pick(currentRoute, ['tolls_unavailable']) ?? pick(rd, ['tolls_unavailable'])) === true ||
-      rawToll == null);
+    hasRoute && (flag('tolls_unknown') || flag('tolls_unavailable') || rawToll == null);
   const tollsEstimated =
     (pick(currentRoute, ['tolls_estimated']) ?? pick(rd, ['tolls_estimated'])) === true;
   const routeTollOneWay = hasRoute && !lookupFailed ? num(rawToll) : null;

@@ -18,7 +18,6 @@ import {
   joinWords,
   ITEM_WORDS,
   kindOf,
-  moneyWhole,
 } from './types';
 import { formatNumber, formatPercent } from '@/lib/formatters';
 
@@ -373,9 +372,7 @@ export function usePriceCheck(p: PriceCheckInputs) {
           ? 'Market figures in use'
           : marketChosen.length > 0
             ? `With market ${joinWords(marketChosen.map((t) => ITEM_WORDS[t]))}`
-            : Math.abs(marketDelta) >= 0.5
-              ? `Your figures. Market price is ${moneyWhole(marketCombo!.price_zar)}`
-              : 'Your figures';
+            : 'Your figures'; // the market price itself is said once, in the footer
 
   const offer: PriceCheckOffer | null =
     p.active && hasResult && review && marketCombo

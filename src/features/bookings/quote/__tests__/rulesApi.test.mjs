@@ -130,3 +130,20 @@ test('suggestion skips a truck with no rated burn', () => {
   ];
   assert.equal(suggestTruck(types, 15)?.name, 'Rated');
 });
+
+test('phone copy: stale diesel fits 390 pt, below floor offers the target price', async () => {
+  const { computeCosting, phoneWarning } = await import('../rules.ts');
+  const golden = JSON.parse((await import('node:fs')).readFileSync(new URL('./quote_golden.json', import.meta.url), 'utf8'));
+  const stale = golden.cases.find((c) => c.name === 'stale_official_price');
+  const c1 = computeCosting(stale.inputs);
+  const w1 = phoneWarning(c1.warnings.find((w) => w.code === 'diesel_stale'), c1, 10);
+  assert.equal(w1.title, 'Diesel price is from 2 Sep');
+  assert.deepEqual(w1.actions.map((a) => a.label), ['Check again']);
+  assert.equal(w1.severity, 'warn');
+  const below = golden.cases.find((c) => c.name === 'price_below_floor');
+  const c2 = computeCosting(below.inputs);
+  const w2 = phoneWarning(c2.warnings.find((w) => w.code === 'below_floor'), c2, c2.target_margin_pct);
+  assert.equal(w2.actions[0].id, 'use_target');
+  assert.match(w2.actions[0].label, /^Price at 10% margin · R \d/);
+  assert.equal(w2.impact_zar, c2.warnings.find((w) => w.code === 'below_floor').impact_zar);
+});

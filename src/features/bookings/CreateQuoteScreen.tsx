@@ -43,17 +43,16 @@ import {
   Icon,
   Txt,
   Label,
-  Toggle,
   Mono,
 } from '@/components/ui';
 import {
   useVehicleTypes,
   useCompanyProfileData,
   useFuelPrice,
+  useQuoteFuelAlert,
   suggestLocations,
   calculateRoute,
   analyzeQuote,
-  guardQuote,
   benchmarkQuote,
   aiChatQuote,
   aiVoiceQuote,
@@ -72,7 +71,7 @@ import { WorkingOverlay } from '@/components/feedback';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { useFinanceSettings } from '@/lib/finance/api';
 import { previewQuoteVat } from '@/lib/vat';
-import { formatDuration, formatNumber, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
+import { formatCurrency, formatDuration, formatNumber, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
@@ -119,12 +118,13 @@ import {
   type QuoteJumpBarSection,
 } from './quote/QuoteJumpBar';
 import { RouteOptionChips } from './quote/RouteOptionChips';
-import { PriceCheckCard, type GuardInfo } from './quote/priceCheck/PriceCheckCard';
+import { PriceCheckCard } from './quote/priceCheck/PriceCheckCard';
 import { usePriceCheck } from './quote/priceCheck/usePriceCheck';
 import { moneyWhole, type Choice, type Review, type ItemKey } from './quote/priceCheck/types';
 import { QuoteSendPreview, type QuotePreviewData } from './QuoteSendPreview';
 import { CostBreakdownCard } from './quote/CostBreakdownCard';
-import { CostOverrides } from './quote/CostOverrides';
+import { DriverBreakdownModal } from './quote/DriverBreakdownModal';
+import { AdjustmentModal } from './quote/AdjustmentModal';
 import { TollBreakdownModal } from './quote/TollBreakdownModal';
 import { FuelBreakdownModal } from './quote/FuelBreakdownModal';
 import { RateBreakdownModal } from './quote/RateBreakdownModal';
@@ -217,6 +217,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // Live diesel price for the company's zone (quotes are priced off it unless
   // the fleet set its own price). See lib/dieselPrice.ts.
   const { data: liveFuel } = useFuelPrice();
+  // A reopened quote saved before the cost-floor snapshot: the backend's
+  // diesel alert (litres × price change) is what moved since.
+  const { data: fuelAlert, isFetched: fuelAlertDone } = useQuoteFuelAlert(editId ?? '', editing);
   // A suspended or cancelled subscription blocks new quotes server-side
   // (PlanLimitsMiddleware), so gate it here too rather than letting the user
   // build a whole quote and take a 403 on save.
@@ -232,7 +235,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [stops, setStops] = useState<StopEntry[]>([]);
   const stopSeq = useRef(0);
   const [weight, setWeight] = useState(str(prefill?.weight));
-  const [pickupDate, setPickupDate] = useState('');
+  // A new quote collects tomorrow; delivery follows the driving days (below)
+  // until the person picks one.
+  const [pickupDate, setPickupDate] = useState(editing ? '' : plusDays(1));
+  const deliveryTouchedRef = useRef(editing);
   const [deliveryDate, setDeliveryDate] = useState('');
   useEffect(() => {
     if (pickupDate && deliveryDate && deliveryDate < pickupDate) setDeliveryDate('');
@@ -362,7 +368,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [routeBlockedMessage, setRouteBlockedMessage] = useState('');
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [analysis, setAnalysis] = useState<Record<string, unknown> | null>(null);
-  const [guard, setGuard] = useState<Record<string, unknown> | null>(null);
   const [routeBusy, setRouteBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [tollModal, setTollModal] = useState(false);
@@ -370,6 +375,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [rateModal, setRateModal] = useState(false);
   const [borderModal, setBorderModal] = useState(false);
   const [costModal, setCostModal] = useState(false);
+  const savedRouteRef = useRef<{ key: string; distance: number; duration: number } | null>(null);
+  const [driverModal, setDriverModal] = useState(false);
+  const [adjustModal, setAdjustModal] = useState(false);
+  // Where the price adjustment came from: kept from the saved price on reopen,
+  // the target-margin fix, the minimum charge, or the market check.
+  const [adjustmentSource, setAdjustmentSource] = useState<'saved' | 'target' | 'minimum' | null>(null);
   const [busy, setBusy] = useState<'draft' | 'send' | null>(null);
   // Validation surfacing (Phase 3): never on first paint, Weight shows its
   // error once the user leaves it, everything else waits for a Send attempt
@@ -750,18 +761,42 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       setTripType(trip);
       const dist = num(pick(q, ['distance']));
       const baseRate = num(pick(q, ['base_rate']));
-      if (dist && baseRate) {
-        const legs = trip === 'ROUND_TRIP' ? 2 : 1;
+      const legs = trip === 'ROUND_TRIP' ? 2 : 1;
+      // The stored rate per km when there is one: re-deriving it from
+      // base_rate ÷ km rounds to the cent and drifted the base rate.
+      const savedRate = num(pick(q, ['base_rate_per_km']));
+      if (savedRate > 0) setBaseRatePerKm(formatPlain(savedRate));
+      else if (dist && baseRate) {
         setBaseRatePerKm(formatPlain(Math.round((baseRate / (dist * legs)) * 100) / 100));
       }
+      // The route as it was priced: while collection, delivery, stops, truck
+      // and weight are unchanged, the quote keeps its saved distance and
+      // driving time (a fresh TomTom run differs by a few km with traffic),
+      // so the builder and the quote detail show the same figures.
+      savedRouteRef.current = {
+        key: routeKeyOf(
+          { label: '', lat: num(pick(q, ['pickup_lat'])), lon: num(pick(q, ['pickup_lng'])) },
+          { label: '', lat: num(pick(q, ['delivery_lat'])), lon: num(pick(q, ['delivery_lng'])) },
+          savedStops.map((st, i) => ({
+            id: `saved-${i}`,
+            loc: { label: '', lat: num(pick(st, ['lat'])), lon: num(pick(st, ['lon'])) },
+          })),
+          str(pick(q, ['vehicle_type'])),
+          round2(num(pick(q, ['weight']))),
+        ),
+        distance: dist,
+        duration: num(pick(q, ['estimated_duration_minutes'])),
+      };
       setValidUntil(str(pick(q, ['valid_until'])) || plusDays(7));
       setPickupDate(str(pick(q, ['pickup_date'])));
       setDeliveryDate(str(pick(q, ['delivery_date'])));
       savedId.current = editId ?? null;
+      // toll_charges is all legs; the route figure is one direction.
+      const tollOneWay = num(pick(q, ['toll_charges'])) / legs;
       setRouteData({
         distance_km: dist,
-        toll_cost_zar: num(pick(q, ['toll_charges'])),
-        routes: [{ distance_km: dist, toll_cost_zar: num(pick(q, ['toll_charges'])) }],
+        toll_cost_zar: tollOneWay,
+        routes: [{ distance_km: dist, toll_cost_zar: tollOneWay }],
       });
       setHydrated(true);
     }, 0);
@@ -795,6 +830,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     return fromServer ?? local;
   }, [vtypes, weightTons, serverSuggestedId]);
   const pricedTruckName = vehicleType || suggestedTruck?.name || '';
+  const pricedTruckId = (vtypes ?? []).find((v) => v.name === pricedTruckName)?.id ?? null;
 
   // The rate follows the suggested truck until the person types a rate.
   useEffect(() => {
@@ -812,7 +848,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       .filter((v) => (seen.has(v.name) ? false : (seen.add(v.name), true)))
       .map((v) => {
         const cap = capacityTons(v.capacity);
-        return { label: cap ? `${v.name} (${formatPlain(cap)} t)` : v.name, value: v.name };
+        // No "(30 t)" when the name already says the tonnes ("8 ton rigid").
+        const named = /\d\s*(t|ton|tons|tonne|tonnes)\b/i.test(v.name);
+        return { label: cap && !named ? `${v.name} (${formatPlain(cap)} t)` : v.name, value: v.name };
       });
     // A saved type that's no longer in the list still has to show.
     if (pricedTruckName && !seen.has(pricedTruckName)) base.push({ label: pricedTruckName, value: pricedTruckName });
@@ -848,6 +886,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           // The truck sets the toll class. 'Flatbed' only stands in while the
           // fleet has no truck at all, and then the quote can't be priced.
           vehicle_type: pricedTruckName || 'Flatbed',
+          // The id pins the exact type (toll class, fuel) when names repeat.
+          ...(pricedTruckId != null ? { vehicle_type_id: pricedTruckId } : {}),
           // No fallback needed: this effect only runs once `ready`, and
           // weight is one of the priceGaps, so weightKg is guaranteed
           // positive here.
@@ -877,7 +917,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, stops, pricedTruckName, weightKg, routeNonce]);
+  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce]);
 
   // A confirmation ("no tolls", "distance is right") belongs to the route it
   // was given for: a new route asks again.
@@ -895,10 +935,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     () => asArray(pick(routeData ?? {}, ['routes'])) as Record<string, unknown>[],
     [routeData],
   );
-  const currentRoute = useMemo(
-    () => (routes[selectedRouteIndex] ?? routes[0] ?? {}) as Record<string, unknown>,
-    [routes, selectedRouteIndex],
-  );
+  const currentRoute = useMemo(() => {
+    const r = (routes[selectedRouteIndex] ?? routes[0] ?? {}) as Record<string, unknown>;
+    const saved = savedRouteRef.current;
+    // A reopened quote on its own route keeps the distance and time it was
+    // priced on (see hydration); any change to the trip prices it afresh.
+    if (
+      saved &&
+      saved.distance > 0 &&
+      selectedRouteIndex === num(pick(routeData ?? {}, ['best_index'])) &&
+      routeCalcKey === saved.key
+    ) {
+      return { ...r, distance_km: saved.distance, ...(saved.duration > 0 ? { duration_minutes: saved.duration } : {}) };
+    }
+    return r;
+  }, [routes, selectedRouteIndex, routeCalcKey, routeData]);
   // The response's own pick — RouteOptionChips' RECOMMENDED tag (Phase 5).
   const bestIndex = num(pick(routeData ?? {}, ['best_index']));
 
@@ -1007,6 +1058,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   );
   // An overloaded truck has no legitimate price: the cost card gives way to
   // the warning.
+  // Delivery = collection + the nights the trip takes (9 driving hours a day).
+  const transitNights = costs.duration > 0 ? Math.max(Math.ceil(costs.duration / 60 / 9) - 1, 0) : null;
+  useEffect(() => {
+    if (deliveryTouchedRef.current || !pickupDate || transitNights === null) return;
+    const d = new Date(`${pickupDate}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return;
+    d.setDate(d.getDate() + transitNights);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setDeliveryDate(iso);
+  }, [pickupDate, transitNights]);
+
   const overloadWarning = costs.warnings.find((w) => w.code === 'overload');
   const weightBlockedMessage = overloadWarning ? overloadWarning.title : '';
 
@@ -1020,7 +1082,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // simply refreshes on the next pass.
   useEffect(() => {
     setAnalysis(null);
-    setGuard(null);
     // Straight into the loading state, so the gap before the debounce fires
     // can't render the bare cost total under a "Recommended price" label.
     // Conditioned exactly as the analyze effect below, so a pass that bails
@@ -1037,7 +1098,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const id = ++aiReq.current;
     const t = setTimeout(async () => {
       setAiBusy(true);
-      const [a, g] = await Promise.all([
+      // Below-cost is said once, by the rules' below_floor warning: the old
+      // revenue-guard call is gone.
+      const [a] = await Promise.all([
         analyzeQuote({
           quote_total: costs.total,
           // The cost floor (§7), so the analysis judges margin on real costs.
@@ -1060,19 +1123,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           customer_id: customerId ? parseInt(customerId, 10) : null,
           skip_narrative: true,
         }).catch(() => null),
-        guardQuote({
-          // The cost floor (§7): every cost line incl. running costs and an
-          // empty return, never the price lines.
-          total_cost: costs.floor ?? costs.fuelCost + costs.tollCost + costs.crossBorderCost + costs.driver,
-          quote_price: costs.total,
-          distance_km: costs.chargeDistance,
-          fuel_cost: costs.fuelCost,
-          toll_cost: costs.tollCost,
-        }).catch(() => null),
       ]);
       if (id === aiReq.current) {
         setAnalysis(a);
-        setGuard(g);
         setAiBusy(false);
       }
       // The endpoint requires a vehicle type (QuoteBenchmarkView 400s without
@@ -1133,22 +1186,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [analysis],
   );
   const winProb = num(pick(opt, ['win_probability_at_optimal']));
-  const riskLevel = str(pick(guard ?? {}, ['risk_level']), 'SAFE');
-  const guardExplain = asArray<string>(pick(guard ?? {}, ['explanations']))[0] as unknown as string;
-  const guardWarn = asArray<string>(pick(guard ?? {}, ['warnings']))[0] as unknown as string;
-  const guardFix = asArray<string>(pick(guard ?? {}, ['suggestions']))[0] as unknown as string;
-  const guardMsg =
-    guardExplain ||
-    guardWarn ||
-    guardFix ||
-    'Margin is below your guardrail. Review before sending.';
-  // The suggestion is the actionable half ("increase price by ~R… to reach …%"),
-  // and it was being dropped whenever an explanation existed.
-  const guardHint = guardFix && guardFix !== guardMsg ? guardFix : null;
-  const guardInfo: GuardInfo | null = guard
-    ? { riskLevel, message: guardMsg, hint: guardHint }
-    : null;
-
   const submitNL = async (text: string) => {
     const message = text.trim();
     if (!message || nlBusy) return;
@@ -1216,7 +1253,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         else setVehicleType(spoken);
       }
       if (pick(ex, ['pickup_date'])) setPickupDate(str(pick(ex, ['pickup_date'])));
-      if (pick(ex, ['delivery_date'])) setDeliveryDate(str(pick(ex, ['delivery_date'])));
+      if (pick(ex, ['delivery_date'])) {
+        deliveryTouchedRef.current = true;
+        setDeliveryDate(str(pick(ex, ['delivery_date'])));
+      }
       if (pick(ex, ['valid_until'])) setValidUntil(str(pick(ex, ['valid_until'])));
       const tt = str(pick(ex, ['trip_type'])).toUpperCase();
       if (tt === 'ONE_WAY' || tt === 'ROUND_TRIP') setTripType(tt);
@@ -1484,7 +1524,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // below calls it directly, and eslint's react-hooks/rules-of-hooks treats
   // any called `useXxx` identifier as a hook regardless of what it actually
   // is, which flagged this as a hook invoked from a plain function.
-  const resetPriceToActual = () => setServiceCharge(0);
+  const resetPriceToActual = () => {
+    setServiceCharge(0);
+    setAdjustmentSource(null);
+  };
 
   // ── Cost overrides: a way back to the worked-out figure ──────────────────
   const companyDefaultRate = num(pick(company ?? {}, ['default_base_rate_per_km']));
@@ -1499,12 +1542,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       : companyDefaultRate > 0 && baseRateNum === companyDefaultRate
         ? 'Company default'
         : 'Your rate';
-  const overridden =
-    tollEdited ||
-    driverEdited ||
-    (effectiveDefaultRate > 0 && baseRateNum !== effectiveDefaultRate) ||
-    serviceCharge !== 0;
-
   const resetTollToCalculated = () => {
     setTollEdited(false);
     setTollOverride('');
@@ -1513,26 +1550,23 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setDriverEdited(false);
     setDriverAllowance('');
   };
-  const resetAllOverrides = () => {
-    resetTollToCalculated();
-    backToSuggestedDriver();
-    if (effectiveDefaultRate > 0) setBaseRatePerKm(String(effectiveDefaultRate));
-    resetPriceToActual();
-  };
 
   // ── Reopening a saved quote (§11) ────────────────────────────────────────
   // The saved price is kept: the difference between it and today's price lines
   // goes into the adjustment, so nothing changes silently. If the costs moved
   // since it was priced, one notice offers Keep price / Re-price (keeps margin).
   useEffect(() => {
-    if (!editing || !hydrated || reopen.state !== 'init' || !routeIsCurrent) return;
+    if (!editing || !hydrated || reopen.state !== 'init' || !routeIsCurrent || !fuelAlertDone) return;
     const saved = savedPricingRef.current;
     if (!saved || !(saved.total > 0)) {
       setReopen({ state: 'done' });
       return;
     }
     const adjust = Math.round((saved.total - costs.directCost) * 100) / 100;
-    if (Math.abs(adjust) >= 0.01) setServiceCharge(adjust);
+    if (Math.abs(adjust) >= 0.01) {
+      setServiceCharge(adjust);
+      setAdjustmentSource('saved');
+    }
     const earlierPeriod = pricedInEarlierPeriod(saved.pricedAt);
     // What the costs were then: the saved floor, else (older quotes) today's
     // floor less the diesel change on the saved litres.
@@ -1541,12 +1575,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         ? saved.floor
         : costs.floor !== null && saved.fuelLitres && saved.fuelPrice && costs.fuelPrice
           ? costs.floor - saved.fuelLitres * (costs.fuelPrice - saved.fuelPrice)
-          : null;
+          : costs.floor !== null && fuelAlert && Number.isFinite(Number(fuelAlert.estimated_cost_impact))
+            ? costs.floor - Number(fuelAlert.estimated_cost_impact)
+            : null;
     const change = changesSincePriced(saved.total, floorThen, costs.floor, saved.pricedAt);
     setReopen(change.changed ? { state: 'notice', change } : { state: 'kept', earlierPeriod });
     // Runs once, on the first current route after hydrating.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, hydrated, reopen.state, routeIsCurrent]);
+  }, [editing, hydrated, reopen.state, routeIsCurrent, fuelAlertDone]);
 
   // Port of the backend's changes_since_priced (golden reopen cases).
   const reopenWarning = useMemo<QuoteWarning | null>(() => {
@@ -1577,6 +1613,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         setUseOfficialDiesel(true);
         setAiFuel(null);
         break;
+      case 'use_own':
+        setUseOfficialDiesel(false);
+        setAiFuel(null);
+        break;
+      case 'use_target': {
+        // The price at the company target margin, as an adjustment the person
+        // can see and undo; their rate per km is left alone.
+        const tp = costs.targetPrice;
+        if (tp !== null) {
+          setServiceCharge(Math.round((tp - costs.directCost) * 100) / 100);
+          setAdjustmentSource('target');
+        }
+        break;
+      }
       case 'update_own':
       case 'update_allowance':
         navigation.navigate('Settings', { section: 'company' });
@@ -1600,7 +1650,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       case 'enter_tolls':
         setTollEdited(true);
         setTollOverride('');
-        jumpTo('price');
+        setTollModal(true);
         break;
       case 'confirm_no_tolls':
         setTollsConfirmedNone(true);
@@ -1616,11 +1666,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         break;
       case 'enter_driver_cost':
         setDriverEdited(true);
-        jumpTo('price');
+        setDriverModal(true);
         break;
       case 'use_minimum': {
         const min = costs.costing.minimum_charge;
-        if (min !== null) setServiceCharge((sc) => Math.round((sc + (min - costs.total)) * 100) / 100);
+        if (min !== null) {
+          setServiceCharge((sc) => Math.round((sc + (min - costs.total)) * 100) / 100);
+          setAdjustmentSource('minimum');
+        }
         break;
       }
       case 'reprice':
@@ -2226,7 +2279,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!blocking.length) return null;
     return {
       tone: 'warning',
-      message: `${blocking.length} to fix`,
+      // Names the first thing to fix, and how many more.
+      message: `${blocking[0]!.message}${blocking.length > 1 ? ` (+${blocking.length - 1})` : ''}`,
       onPress: () => jumpTo(blocking[0]!.section),
     };
   }, [
@@ -2399,7 +2453,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             // margin beyond the footer's own measured height (border + pt-3 +
             // 26px strip row + 8px gap + 48px button row + bottom inset) so the
             // last section's content never sits flush against it.
-            paddingBottom: insets.bottom + 112,
+            paddingBottom: insets.bottom + 130,
             gap: 16,
           }}
           showsVerticalScrollIndicator={false}
@@ -2502,17 +2556,24 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 {/* §5: a long one-way trip prices the empty run home unless a
                     return load is booked. Reserved height: no layout jump. */}
                 {tripType === 'ONE_WAY' && costs.emptyReturnEligible && (
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => setReturnLoadBooked((v) => !v)}
-                    accessibilityRole="switch"
-                    accessibilityState={{ checked: returnLoadBooked }}
-                    accessibilityLabel="Return load booked"
-                    className="mt-3 min-h-[48px] flex-row items-center justify-between"
-                  >
-                    <Txt className="text-callout text-fg">Return load booked</Txt>
-                    <Toggle value={returnLoadBooked} onValueChange={setReturnLoadBooked} />
-                  </TouchableOpacity>
+                  <View className="mt-3">
+                    <Label className="mb-2 text-muted">Truck comes back</Label>
+                    <SegmentedControl
+                      options={[
+                        { label: 'Empty', value: 'EMPTY' },
+                        { label: 'Loaded', value: 'LOADED' },
+                      ]}
+                      value={returnLoadBooked ? 'LOADED' : 'EMPTY'}
+                      onChange={(v) => setReturnLoadBooked(v === 'LOADED')}
+                    />
+                    {/* The other answer's price at the target margin. */}
+                    {costs.altReturnTargetPrice !== null && (
+                      <Mono className="mt-1.5 text-caption text-faint">
+                        {returnLoadBooked ? 'Back empty' : 'Loaded back'}:{' '}
+                        {formatCurrency(costs.altReturnTargetPrice, { maximumFractionDigits: 0 })}
+                      </Mono>
+                    )}
+                  </View>
                 )}
               </View>
 
@@ -2549,7 +2610,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     onSelect={(i) => {
                       setSelectedRouteIndex(i);
                       setAnalysis(null);
-                      setGuard(null);
                     }}
                   />
                 </View>
@@ -2600,7 +2660,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 label="Delivery date"
                 required
                 value={deliveryDate}
-                onChange={setDeliveryDate}
+                onChange={(v) => {
+                  deliveryTouchedRef.current = true;
+                  setDeliveryDate(v);
+                }}
                 minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
                 error={showIssue('deliveryDate', false)}
               />
@@ -2630,61 +2693,29 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <Banner tone="danger" message={DEMO_QUOTA_MESSAGE} />
               ) : ready && !routeBlockedMessage && (costs.total > 0 || visibleWarnings.length > 0) ? (
                 <>
-                  <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />
-                  {/* An overloaded truck has no legitimate price to show. */}
+                  {/* The cards first, warnings under them: a warning landing
+                      after the route loads never pushes the figures down. */}
                   {!weightBlockedMessage && costs.total > 0 && (
-                    <>
-                      <CostBreakdownCard
-                        costs={costs}
-                        serviceCharge={serviceCharge}
-                        onRatePress={() => setRateModal(true)}
-                        onFuelPress={() => setFuelModal(true)}
-                        onTollPress={() => setTollModal(true)}
-                        onCrossBorderPress={() => setBorderModal(true)}
-                        onCostPress={() => setCostModal(true)}
-                        onRemoveUplift={resetPriceToActual}
-                      />
-                      <CostOverrides
-                        tollValue={tollEdited ? tollOverride : costs.tollKnown ? formatPlain(costs.tollCost) : ''}
-                        tollEdited={tollEdited}
-                        tollOverrideNum={tollOverrideNum}
-                        tollCalculated={costs.tollCalculated}
-                        tollKnown={!costs.tollsUnavailable}
-                        onTollChangeText={(v) => {
-                          setTollEdited(true);
-                          setTollOverride(v);
-                        }}
-                        onUseCalculatedToll={resetTollToCalculated}
-                        driverValue={
-                          driverEdited
-                            ? driverAllowance
-                            : costs.driverSuggested !== null
-                              ? formatPlain(costs.driverSuggested, 2)
-                              : ''
-                        }
-                        driverEdited={driverEdited}
-                        driverSuggested={costs.driverSuggested}
-                        onDriverChangeText={(v) => {
-                          setDriverEdited(true);
-                          setDriverAllowance(v);
-                        }}
-                        onUseSuggestedDriver={backToSuggestedDriver}
-                        baseRatePerKm={baseRatePerKm}
-                        onRateChangeText={(v) => {
-                          rateTouchedRef.current = true;
-                          setBaseRatePerKm(v);
-                        }}
-                        overridden={overridden}
-                        onResetAll={resetAllOverrides}
-                      />
-                      <PriceCheckCard
-                        pc={pc}
-                        benchmarkAvg={num(pick(benchmark ?? {}, ['market_avg_rate']))}
-                        guard={guardInfo}
-                        onChoose={chooseMarket}
-                        routeError={ready && !routeBusy && !routeData}
-                      />
-                    </>
+                    <CostBreakdownCard
+                      costs={costs}
+                      serviceCharge={serviceCharge}
+                      adjustmentLabel={adjustmentSource === 'saved' ? 'Kept from saved price' : 'Adjustment'}
+                      onRatePress={() => setRateModal(true)}
+                      onFuelPress={() => setFuelModal(true)}
+                      onTollPress={() => setTollModal(true)}
+                      onDriverPress={() => setDriverModal(true)}
+                      onCrossBorderPress={() => setBorderModal(true)}
+                      onCostPress={() => setCostModal(true)}
+                      onAdjustmentPress={() => setAdjustModal(true)}
+                    />
+                  )}
+                  <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />
+                  {!weightBlockedMessage && costs.total > 0 && (
+                    <PriceCheckCard
+                      pc={pc}
+                      onChoose={chooseMarket}
+                      routeError={ready && !routeBusy && !routeData}
+                    />
                   )}
                 </>
               ) : (
@@ -2697,6 +2728,42 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={tollModal}
             onClose={() => setTollModal(false)}
             costs={costs}
+            edit={{
+              label: costs.legs === 2 ? 'Tolls, both legs' : 'Tolls',
+              value: tollEdited ? tollOverride : costs.tollKnown ? formatPlain(costs.tollCost) : '',
+              onChangeText: (v) => {
+                setTollEdited(true);
+                setTollOverride(v);
+              },
+              back:
+                tollEdited && !costs.tollsUnavailable && Math.abs(tollOverrideNum - costs.tollCalculated) >= 0.005
+                  ? { label: `Route ${formatCurrency(costs.tollCalculated, { maximumFractionDigits: 0 })}`, onPress: resetTollToCalculated }
+                  : null,
+            }}
+          />
+          <DriverBreakdownModal
+            visible={driverModal}
+            onClose={() => setDriverModal(false)}
+            costs={costs}
+            edit={{
+              label: 'Driver allowance',
+              value: driverEdited
+                ? driverAllowance
+                : costs.driverSuggested !== null && !costs.driverMissing
+                  ? formatPlain(costs.driverSuggested, 2)
+                  : '',
+              onChangeText: (v) => {
+                setDriverEdited(true);
+                setDriverAllowance(v);
+              },
+              back:
+                driverEdited && costs.driverSuggested !== null
+                  ? {
+                      label: `Suggested ${formatCurrency(costs.driverSuggested, { maximumFractionDigits: 0 })}`,
+                      onPress: backToSuggestedDriver,
+                    }
+                  : null,
+            }}
           />
           <BorderBreakdownModal
             visible={borderModal}
@@ -2712,11 +2779,35 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           <RateBreakdownModal
             visible={rateModal}
             onClose={() => setRateModal(false)}
-            vehicleType={pricedTruckName}
             ratePerKm={baseRateNum}
             km={costs.chargeDistance}
             amount={costs.baseCost}
             source={rateSource}
+            edit={{
+              label: 'Rate per km',
+              value: baseRatePerKm,
+              placeholder: 'e.g. 25',
+              onChangeText: (v) => {
+                rateTouchedRef.current = true;
+                setBaseRatePerKm(v);
+              },
+              back:
+                effectiveDefaultRate > 0 && baseRateNum !== effectiveDefaultRate
+                  ? { label: `${rateSource === 'yours' ? 'Default' : 'Default'} ${formatCurrency(effectiveDefaultRate)}/km`, onPress: () => setBaseRatePerKm(String(effectiveDefaultRate)) }
+                  : null,
+            }}
+          />
+          <AdjustmentModal
+            visible={adjustModal}
+            label={adjustmentSource === 'saved' ? 'Kept from saved price' : 'Adjustment'}
+            amount={serviceCharge}
+            todaysPrice={costs.directCost}
+            onKeep={() => setAdjustModal(false)}
+            onUseToday={() => {
+              setAdjustModal(false);
+              resetPriceToActual();
+              if (reopen.state === 'notice') setReopen({ state: 'done' });
+            }}
           />
           <CostFloorModal visible={costModal} onClose={() => setCostModal(false)} costs={costs} />
           {/* Stays open through the AI step, so the user sees "Building your

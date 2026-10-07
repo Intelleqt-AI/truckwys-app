@@ -28,6 +28,8 @@ import { RouteMap } from '@/components/RouteMap';
 import {
   useQuote,
   useQuoteFuelAlert,
+  useQuoteCosting,
+  useCompanyProfileData,
   sendQuote,
   recordQuoteOutcome,
   deleteQuote,
@@ -46,7 +48,6 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
-  formatPercent,
   parseNum,
   round2,
   decimalMax,
@@ -60,6 +61,7 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { pricedInEarlierPeriod } from './quote/rules';
+import { pct } from './quote/CostBreakdownCard';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -87,7 +89,6 @@ const REJECTION_REASONS = [
   'Other',
 ] as const;
 
-const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
@@ -99,6 +100,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
   // Diesel moving since a quote was priced matters while it can still change.
   const { data: fuelAlert } = useQuoteFuelAlert(id, !!data && ['DRAFT', 'SENT'].includes(status));
+  const { data: costing } = useQuoteCosting(id, !!data);
+  const { data: company } = useCompanyProfileData();
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
@@ -154,8 +157,21 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     rawPrice && typeof rawPrice === 'object' && !Array.isArray(rawPrice)
       ? (rawPrice as CustomerPrice)
       : undefined;
-  const marginPct = num(pick(q, ['margin_percentage', 'margin_percent', 'margin']));
-  const confidence = str(pick(q, ['confidence']));
+  // Margin on the cost floor, the same figure the builder shows: today's
+  // floor from the backend's costing (newer backends), else the quote's stored
+  // floor (column, else the copy in route_snapshot). Never the stored
+  // margin_percentage, which older builds wrote on a different basis.
+  const routeSnap = (pick(q, ['route_snapshot']) ?? {}) as Record<string, unknown>;
+  const serverFloor = typeof costing?.floor === 'number' ? (costing.floor as number) : null;
+  const storedFloor =
+    pick(q, ['cost_floor']) != null
+      ? num(pick(q, ['cost_floor']))
+      : routeSnap.cost_floor != null
+        ? num(routeSnap.cost_floor)
+        : null;
+  const costFloor = serverFloor ?? storedFloor;
+  const marginPct = costFloor !== null && total > 0 ? ((total - costFloor) / total) * 100 : null;
+  const targetMargin = Math.min(Math.max(num(pick(company ?? {}, ['margin_target_pct'])) || 10, 1), 40);
   const roundTrip = str(pick(q, ['trip_type'])).toUpperCase() === 'ROUND_TRIP';
   const token = str(pick(q, ['token', 'view_token']));
   const shareUrl = token ? quoteShareUrl(id, token) : undefined;
@@ -212,7 +228,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     { label: 'Weight', value: weightKg > 0 ? `${formatNumber(weightKg)} kg` : '' },
     {
       label: 'Distance',
-      value: distanceKm > 0 ? `${formatNumber(Math.round(distanceKm))} km` : '',
+      value: distanceKm > 0 ? `${formatNumber(distanceKm, { maximumFractionDigits: 1 })} km` : '',
     },
     { label: 'Assigned vehicle', value: str(pick(q, ['vehicle_display'])) },
     { label: 'Assigned driver', value: str(pick(q, ['driver_display'])) },
@@ -227,13 +243,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const driver = num(pick(q, ['driver_allowance']));
   const additional = num(pick(q, ['additional_charges']));
   const returnBaseRate = num(pick(q, ['return_base_rate']));
+  // One vocabulary with the builder and web: Base rate, Fuel, Tolls, Driver
+  // allowance, Adjustment.
   const costRows: { label: string; value: number }[] = [
     { label: 'Base rate', value: baseRate },
-    { label: 'Fuel surcharge', value: fuel },
-    { label: 'Toll charges', value: toll },
+    { label: 'Fuel', value: fuel },
+    { label: 'Tolls', value: toll },
     { label: 'Driver allowance', value: driver },
   ];
-  if (additional > 0) costRows.push({ label: 'Additional charges', value: additional });
+  if (additional !== 0)
+    costRows.push({ label: pick(q, ['is_international']) === true ? 'Border and adjustment' : 'Adjustment', value: additional });
   if (roundTrip && returnBaseRate > 0)
     costRows.push({ label: `Return leg (${str(pick(q, ['return_cargo'])) ? 'with cargo' : 'empty'})`, value: returnBaseRate });
   // A stored total that carries charges not broken down here gets its own line
@@ -241,9 +260,6 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const linesSum = costRows.reduce((a, r) => a + r.value, 0);
   const notItemised = round2(total - linesSum);
   const hasGap = Math.abs(notItemised) > 0.5;
-  // Margin only when the costs behind it are itemised: no unexplained gap and
-  // more than a bare base rate. Otherwise a stored 0 reads as "0% margin".
-  const costsItemised = !hasGap && costRows.some((r) => r.label !== 'Base rate' && r.value > 0);
 
   const validUntil = str(pick(q, ['valid_until']));
   const createdAt = str(pick(q, ['created_at']));
@@ -678,8 +694,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         {outcome === 'accepted' && status !== 'ACCEPTED' && !booked && <StatusPill status="WON" />}
         {outcome === 'rejected' && status !== 'DECLINED' && <StatusPill status="LOST" />}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
-        {marginPct > 0 && costsItemised && (
-          <Mono className="text-caption text-faint">Margin {formatPercent(marginPct)}</Mono>
+        {marginPct !== null && (
+          <Mono className={`text-caption ${marginPct < 0 ? 'text-danger' : 'text-faint'}`}>Margin {pct(marginPct)}</Mono>
         )}
       </View>
 
@@ -716,8 +732,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           origin={origin}
           dest={dest}
           stops={stopLabels}
-          distance={distanceKm > 0 ? `${Math.round(distanceKm)} km` : undefined}
-          duration={pick(q, ['sla_hours']) ? `SLA ${num(pick(q, ['sla_hours']))}h` : undefined}
+          distance={distanceKm > 0 ? `${formatNumber(distanceKm, { maximumFractionDigits: 1 })} km` : undefined}
+          duration={pick(q, ['sla_hours']) ? `Delivery within ${num(pick(q, ['sla_hours']))} h` : undefined}
         />
         {hasRouteCoords && (
           <View className="mt-3">
@@ -731,11 +747,12 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      {marginPct > 0 && marginPct < 12 && costsItemised && (
+      {marginPct !== null && marginPct < targetMargin && (
         <View className="mb-5">
           <Banner
-            tone="warning"
-            message={`Margin ${formatPercent(marginPct)} is below your pricing guardrail. Review before sending.`}
+            tone={marginPct < 0 ? 'danger' : 'warning'}
+            message={marginPct < 0 ? 'Price is below your costs' : `Margin under your ${pct(targetMargin)} target`}
+            onPress={!booked && openStatus ? editQuote : undefined}
           />
         </View>
       )}
@@ -803,10 +820,20 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             <Txt className="text-callout font-semibold text-fg">
               {roundTrip ? 'Total, both legs' : 'Total'}
               {customerPrice?.vat_registered ? ' excl. VAT' : ''}
-              {marginPct && costsItemised ? ` · ${marginPct}% margin` : ''}
+
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
+          {costFloor !== null && (
+            <>
+              <DetailRow label="Cost floor" value={formatCurrency(costFloor, { maximumFractionDigits: 0 })} />
+              <DetailRow
+                label="Margin"
+                value={`${pct(marginPct ?? 0)} · ${formatCurrency(total - costFloor, { maximumFractionDigits: 0 })}`}
+                valueColor={(marginPct ?? 0) < 0 ? colors.danger : undefined}
+              />
+            </>
+          )}
           {customerPrice ? (
             customerPrice.vat_registered ? (
               <>
@@ -850,10 +877,6 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             />
           </View>
         )}
-        {confidence ? (
-          <DetailRow label="Confidence" value={titleCase(confidence)} mono={false} />
-        ) : null}
-        {/* <DetailRow label="Margin" value={formatPercent(marginPct || 0)} /> */}
         {validUntil ? (
           <DetailRow
             label="Valid until"

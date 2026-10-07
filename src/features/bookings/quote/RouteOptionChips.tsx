@@ -6,7 +6,7 @@ import { View, TouchableOpacity } from 'react-native';
 // gorhom/bottom-sheet gotcha for any scrollable nested in sheet content).
 import { ScrollView } from 'react-native-gesture-handler';
 import { Label, Mono } from '@/components/ui';
-import { num, pick, str } from '@/lib/api/list';
+import { asArray, num, pick, str } from '@/lib/api/list';
 import { formatCurrency, formatDuration } from '@/lib/formatters';
 
 interface RouteStat {
@@ -72,7 +72,7 @@ function RouteOptionChipsImpl({
           if (i === bestIndex) tags.push('Recommended');
           if (i === fastestIdx) tags.push('Fastest');
           if (i === cheapestIdx) tags.push('Fewest tolls');
-          const label = str(pick(r, ['label', 'summary']), `Route ${i + 1}`);
+          const label = routeName(r, i);
           const a11yLabel = [
             label,
             `${Math.round(s.distanceKm)} kilometres`,
@@ -101,15 +101,8 @@ function RouteOptionChipsImpl({
                   numberOfLines={1}
                 >
                   {label}
+                  {tags[0] ? <Mono className="text-caption font-medium text-success">{` · ${tags[0]}`}</Mono> : null}
                 </Mono>
-                {tags[0] && (
-                  <Mono
-                    className="text-caption font-medium text-success"
-                    numberOfLines={1}
-                  >
-                    {tags[0]}
-                  </Mono>
-                )}
               </View>
               <Mono className="text-caption text-faint" numberOfLines={1}>
                 {Math.round(s.distanceKm)} km · {formatDuration(s.durationMin / 60)}
@@ -123,6 +116,19 @@ function RouteOptionChipsImpl({
       </ScrollView>
     </View>
   );
+}
+
+/**
+ * A route's name by its roads ("Via N3", "Via N3 / N11"), from the toll plazas
+ * it passes; TomTom's own labels ("Best Routes", "Alternative 1") say nothing.
+ */
+export function routeName(r: Record<string, unknown>, i: number): string {
+  const roads: string[] = [];
+  for (const b of asArray<Record<string, unknown>>(r.toll_breakdown)) {
+    const road = str(pick(b, ['route'])).trim();
+    if (road && !roads.includes(road)) roads.push(road);
+  }
+  return roads.length ? `Via ${roads.slice(0, 2).join(' / ')}` : `Route ${i + 1}`;
 }
 
 export const RouteOptionChips = memo(RouteOptionChipsImpl);

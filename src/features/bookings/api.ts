@@ -119,6 +119,32 @@ export function useQuoteFuelAlert(id: string | number, enabled: boolean) {
 }
 
 /**
+ * The backend's costing for a saved quote today (POST quotes/cost-breakdown/
+ * {quote_id}, newer backends): floor, margin_pct, the stored snapshot and the
+ * send check. Null on an older backend (404) or any failure: the screen then
+ * uses the quote's stored cost floor.
+ */
+export function useQuoteCosting(id: string | number, enabled: boolean) {
+  return useQuery<Record<string, unknown> | null>({
+    queryKey: ['quote-costing', id],
+    enabled: enabled && !!id,
+    retry: false,
+    queryFn: async () => {
+      try {
+        const res = await postData<Record<string, unknown>>({
+          url: 'quotes/cost-breakdown/',
+          data: { quote_id: Number(id) },
+          config: { timeout: 10000 },
+        });
+        return res && res.success === true ? res : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
+/**
  * A load row some list already downloaded (Home's ledger, or the Orders/History
  * pages), for a screen opened by id alone: the "View booking" link on a quote
  * knows the load's id but carries no row. Undefined when no list has it yet.

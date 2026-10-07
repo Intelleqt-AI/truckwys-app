@@ -1290,6 +1290,10 @@ function CompanySection() {
   // live price (not on load, not on refresh, not on a zone change). Empty ⇒
   // the official price is used.
   const [fuelPrice, setFuelPrice] = useState('');
+  // Official price, or the fleet's own: picked explicitly. "My own price"
+  // with an empty box is an error, never a silent switch to official.
+  const [dieselMode, setDieselMode] = useState<'LIVE' | 'OWN'>('LIVE');
+  const [dieselError, setDieselError] = useState('');
   const [fuelPetrol, setFuelPetrol] = useState('');
   const [fuelElectric, setFuelElectric] = useState('');
   const [fuelHybrid, setFuelHybrid] = useState('');
@@ -1353,6 +1357,7 @@ function CompanySection() {
     seedNum(['default_toll_rate_per_km'], setTollRate);
     const diesel = dieselInputFromApi(data, livePrice);
     setFuelPrice(diesel.mode === 'OWN' && diesel.own_price != null ? String(diesel.own_price) : '');
+    setDieselMode(diesel.mode === 'OWN' && diesel.own_price != null ? 'OWN' : 'LIVE');
     seedNum(['fuel_price_petrol'], setFuelPetrol);
     seedNum(['fuel_price_electric'], setFuelElectric);
     seedNum(['fuel_price_hybrid'], setFuelHybrid);
@@ -1477,7 +1482,12 @@ function CompanySection() {
       if (n != null && n > max) return toast.error(`${label} is too large`);
     }
 
-    const ownDiesel = clearableNum(fuelPrice, 4);
+    if (dieselMode === 'OWN' && parseNum(fuelPrice) == null) {
+      setDieselError('Enter your price, or choose Official price');
+      return toast.error('Enter your diesel price');
+    }
+    setDieselError('');
+    const ownDiesel = dieselMode === 'OWN' ? clearableNum(fuelPrice, 4) : null;
     if (ownDiesel != null && Math.abs(ownDiesel - LEGACY_DIESEL_SENTINEL) < 0.005 && !(data && 'fuel_price_mode' in data)) {
       return toast.error('R 23,50 is reserved here. Enter 23,49 or 23,51');
     }
@@ -1551,8 +1561,7 @@ function CompanySection() {
         toast.error("Couldn't refresh prices");
         return;
       }
-      const petrol = num(pick(d, ['petrol_95']));
-      if (petrol > 0) setFuelPetrol((prev) => (prev.trim() ? prev : String(petrol)));
+      // Petrol stays what the fleet typed: never prefilled from the official feed.
     } catch {
       toast.error("Couldn't refresh prices");
     } finally {
@@ -1693,11 +1702,7 @@ function CompanySection() {
       />
 
       <Label className="mt-1 text-muted">Banking details</Label>
-      <Txt className="-mt-2 text-caption text-faint">
-        Shown in a &quot;How to pay&quot; section on the invoices you send (PDF, invoice email and
-        online invoice) once a bank name and account number are filled in. Until then, invoices ask
-        customers to contact you for banking details.
-      </Txt>
+      <Txt className="-mt-2 text-caption text-faint">Shown as &quot;How to pay&quot; on your invoices.</Txt>
       <TextField
         label="Bank name"
         placeholder="e.g. FNB"
@@ -1764,11 +1769,7 @@ function CompanySection() {
         value={autoEmail}
         onSelect={setAutoEmail}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        An invoice is raised automatically when a load is delivered. With No, it waits as a draft
-        for you to check and send. With Yes, it is emailed to the customer straight away and marked
-        sent. A customer with no email address always gets a draft.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Yes emails the invoice on delivery; No keeps a draft.</Txt>
 
       <Label className="mt-1 text-muted">Quote defaults</Label>
       <SelectField
@@ -1780,11 +1781,7 @@ function CompanySection() {
         value={allowCrossBorder}
         onSelect={setAllowCrossBorder}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Whether your fleet is set up to run loads that cross into neighbouring countries. Set to
-        &quot;No&quot; and any quote whose route actually crosses a border is refused rather than
-        priced.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">No refuses quotes whose route crosses a border.</Txt>
       <TextField
         label="Border crossings per year"
         placeholder="e.g. 24"
@@ -1792,11 +1789,7 @@ function CompanySection() {
         value={crossingsPerYear}
         onChangeText={setCrossingsPerYear}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Count each leg separately &mdash; a return trip is two. A C-BRTA permit is bought for a
-        year, so a quote charges its share of one crossing: the more you cross, the less each load
-        carries.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Each leg counts; spreads the C-BRTA permit cost.</Txt>
       <TextField
         label="Quote validity (days)"
         placeholder="e.g. 7"
@@ -1812,22 +1805,10 @@ function CompanySection() {
         value={baseRate}
         onChangeText={setBaseRate}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Used when the vehicle type on a quote has no rate of its own (Settings → Vehicle Types).
-        A type&apos;s own rate always wins.
-      </Txt>
-      <TextField
-        label="Toll rate / km"
-        prefix="R"
-        placeholder="e.g. 0.50"
-        keyboardType="decimal-pad"
-        value={tollRate}
-        onChangeText={setTollRate}
-      />
-      <Txt className="-mt-1 text-caption text-faint">
-        Fallback only — used when the routing service can&apos;t itemise the toll plazas on a
-        route.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Used when a truck has no rate of its own.</Txt>
+      {/* No toll rate per km: quotes never guess tolls from distance any
+          more (QUOTE-RULES §6), so the old fallback field is gone. */}
+
       <TextField
         label="Default SLA (hours)"
         placeholder="e.g. 48"
@@ -1836,9 +1817,7 @@ function CompanySection() {
         value={slaHours}
         onChangeText={setSlaHours}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Delivery time promised on a new quote. Can be overridden per quote.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Promised delivery time on new quotes.</Txt>
 
       {/* ── Fuel prices ───────────────────────────────────────────────────── */}
       <View className="mt-1 flex-row items-center justify-between">
@@ -1866,14 +1845,34 @@ function CompanySection() {
       >
         {officialNote}
       </Txt>
-      <TextField
-        label="Your diesel price (R/L)"
-        prefix="R"
-        placeholder="Blank = official"
-        keyboardType="decimal-pad"
-        value={fuelPrice}
-        onChangeText={setFuelPrice}
-      />
+      <View>
+        <Label className="mb-2 text-muted">Price quotes on</Label>
+        <SegmentedControl
+          options={[
+            { label: 'Official price', value: 'LIVE' },
+            { label: 'My own price', value: 'OWN' },
+          ]}
+          value={dieselMode}
+          onChange={(v) => {
+            setDieselMode(v === 'OWN' ? 'OWN' : 'LIVE');
+            setDieselError('');
+          }}
+        />
+      </View>
+      {dieselMode === 'OWN' && (
+        <TextField
+          label="My diesel price (R/L)"
+          prefix="R"
+          placeholder="e.g. 31,50"
+          keyboardType="decimal-pad"
+          value={fuelPrice}
+          onChangeText={(v) => {
+            setFuelPrice(v);
+            if (dieselError) setDieselError('');
+          }}
+          error={dieselError || undefined}
+        />
+      )}
       <View className="flex-row gap-3">
         <View className="flex-1">
           <TextField

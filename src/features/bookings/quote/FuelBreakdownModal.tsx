@@ -44,7 +44,8 @@ function FuelBreakdownModalImpl({
       label: `Burn at ${weightTons != null && weightTons > 0 ? `${formatNumber(weightTons)} t` : 'full load'}`,
       value: costs.consumption ? `${one(costs.consumption)} L/100km` : '—',
     },
-    { label: 'Distance', value: `${formatNumber(Math.round(costs.chargeDistance))} km` },
+    // 1 dp so the line multiplies out.
+    { label: 'Distance', value: `${one(costs.chargeDistance)} km` },
     { label: 'Litres', value: costs.consumption ? `${exact ? '' : '≈ '}${formatNumber(Math.round(litres))} L` : '—' },
     {
       label: `${costs.fuelType} (${fuelSourceText(costs)})`,
@@ -58,7 +59,7 @@ function FuelBreakdownModalImpl({
       onClose={onClose}
       title="Fuel"
       rows={rows}
-      total={{ label: 'Fuel', value: costs.fuelKnown ? formatCurrency(costs.fuelCost) : '—' }}
+      total={{ label: 'Fuel', value: costs.fuelKnown ? formatCurrency(costs.fuelCost) : '—', tone: costs.fuelKnown ? undefined : 'danger' }}
     />
   );
 }

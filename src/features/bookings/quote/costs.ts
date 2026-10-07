@@ -5,6 +5,7 @@ import {
   computeCosting,
   dieselInputFromApi,
   operatingCostPerKm,
+  phoneWarning,
   type Costing,
   type CostingInputs,
   type CostingLine,
@@ -110,6 +111,10 @@ export interface CostBreakdown {
   baseCost: number;
   driver: number;
   driverKnown: boolean;
+  /** Nights away but no allowance rate anywhere: priced at R 0, shown as unknown. */
+  driverMissing: boolean;
+  /** Target-margin price with the other empty-return answer (one-way, 300 km+). */
+  altReturnTargetPrice: number | null;
   driverSuggested: number | null;
   nights: number | null;
   allowancePerNight: number | null;
@@ -276,7 +281,8 @@ export function computeCosts({
       empty_return_min_km: nullIfNotPositive(pick(c, ['empty_return_min_km'])),
     },
     minimum_charge: nullIfNotPositive(pick(c, ['minimum_charge'])),
-    target_margin_pct: nullIfNotPositive(pick(c, ['margin_target_pct'])),
+    // Backend target_margin(): the company target (default 10), clamped 1–40.
+    target_margin_pct: Math.min(Math.max(nullIfNotPositive(pick(c, ['margin_target_pct'])) ?? 10, 1), 40),
     price: null,
   };
   const inputsBase = withServerInputs(localInputs, serverInputs ?? null, truck?.id ?? null);
@@ -298,9 +304,12 @@ export function computeCosts({
   const costingInputs: CostingInputs = { ...inputsBase, price: total > 0 ? total : null };
   const costing = computeCosting(costingInputs);
   // Before there's a route nothing is priced yet: route gaps are not warnings.
-  const warnings = hasRoute
-    ? costing.warnings
-    : costing.warnings.filter((w) => !['distance_missing', 'tolls_unknown', 'driver_nights_unknown'].includes(w.code));
+  const target = costing.target_margin_pct;
+  const warnings = (
+    hasRoute
+      ? costing.warnings
+      : costing.warnings.filter((w) => !['distance_missing', 'tolls_unknown', 'driver_nights_unknown'].includes(w.code))
+  ).map((w) => phoneWarning(w, costing, target));
   const emptyLines = costing.lines.filter((l) => l.leg === 'empty_return');
   const emptyReturnTotal = emptyLines.length
     ? emptyLines.every((l) => l.amount !== null)
@@ -308,7 +317,16 @@ export function computeCosts({
       : null
     : null;
 
+  // The other answer to "does the truck come back empty?", priced at the
+  // target margin, for the Empty | Loaded toggle.
+  const altReturn =
+    tripType === 'ONE_WAY' && (costing.trip.empty_return_default || returnLoadBooked)
+      ? computeCosting({ ...costingInputs, include_empty_return: returnLoadBooked ? null : false })
+      : null;
+
   return {
+    altReturnTargetPrice: altReturn?.target_price ?? null,
+    driverMissing: driverLine?.source === 'missing',
     distance,
     legs,
     chargeDistance: loadedKm,

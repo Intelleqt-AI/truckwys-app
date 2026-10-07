@@ -71,18 +71,14 @@ export interface GuardInfo {
 
 export function PriceCheckCard({
   pc,
-  benchmarkAvg,
   benchmarkRecommendation,
-  guard,
   onChoose,
   routeError,
   onOpenFuelSettings,
 }: {
   pc: PriceCheck;
   /** Lane benchmark average, 0 when not loaded. */
-  benchmarkAvg: number;
   benchmarkRecommendation?: string | null;
-  guard: GuardInfo | null;
   /** Moves the quote to the market or the person's own figure for one item. */
   onChoose: (t: ItemKey, c: Choice) => void;
   routeError?: boolean;
@@ -200,16 +196,7 @@ export function PriceCheckCard({
           {tools}
         </View>
 
-        {(benchmarkAvg > 0 || body) && (
-          <View className="mt-3">
-            {benchmarkAvg > 0 && (
-              <Txt className="mb-2 text-caption text-muted">
-                Lane average <Mono className="text-caption text-fg">{moneyWhole(benchmarkAvg)}</Mono>
-              </Txt>
-            )}
-            {body}
-          </View>
-        )}
+        {body && <View className="mt-3">{body}</View>}
 
         {!!notice && <Txt className="mt-3 text-caption text-warning">{notice}</Txt>}
 
@@ -224,37 +211,13 @@ export function PriceCheckCard({
             disabled={showSkeleton}
             accessibilityRole="button"
             accessibilityState={{ expanded: detailsOpen }}
-            hitSlop={{ top: 4, bottom: 4 }}
-            className="mt-3 min-h-[36px] flex-row items-center gap-1"
+            className="mt-2 min-h-[44px] flex-row items-center gap-1"
           >
             <Icon name={detailsOpen ? 'chevronUp' : 'chevronDown'} size={15} color={colors.faint} />
             <Txt className="text-sub text-muted">{detailsOpen ? 'Hide' : 'Details'}</Txt>
           </TouchableOpacity>
         )}
       </View>
-
-      {/* Revenue guard: unchanged from before, still the app's margin warning. */}
-      {guard && guard.riskLevel !== 'SAFE' && (
-        <View
-          className={`flex-row gap-2.5 border-t border-line p-3 ${
-            guard.riskLevel === 'AT_RISK' ? 'bg-danger-bg' : 'bg-warning-bg'
-          }`}
-        >
-          <Icon
-            name="alert"
-            size={16}
-            color={guard.riskLevel === 'AT_RISK' ? colors.dangerDot : colors.warningDot}
-          />
-          <Txt
-            className={`flex-1 text-sub font-semibold ${
-              guard.riskLevel === 'AT_RISK' ? 'text-danger' : 'text-warning'
-            }`}
-            accessibilityHint={clean(guard.message)}
-          >
-            {guard.riskLevel === 'AT_RISK' ? 'Margin at risk' : 'Margin below guardrail'}
-          </Txt>
-        </View>
-      )}
     </Card>
   );
 }
@@ -274,10 +237,8 @@ function Stats({ pc }: { pc: PriceCheck }) {
         >
           {moneyWhole(total)}
         </Txt>
-        {combo.below_floor || combo.below_target ? (
-          <Txt className={`mt-0.5 text-caption font-medium ${combo.below_floor ? 'text-danger' : 'text-warning'}`}>
-            {combo.below_floor ? 'Below cost' : 'Below target margin'}
-          </Txt>
+        {combo.below_target && !combo.below_floor ? (
+          <Txt className="mt-0.5 text-caption font-medium text-warning">Below target margin</Txt>
         ) : (
           <Txt className="mt-0.5 text-caption text-muted">{quoteNote}</Txt>
         )}
@@ -330,7 +291,7 @@ function ItemRows({
         <View className="flex-row items-center justify-between border-t border-line-row px-3 py-2.5">
           <Txt className="text-callout text-muted">Cross-border</Txt>
           <Txt className="text-sub text-fg">
-            {money(crossBorder)} <Txt className="text-caption text-faint">not checked</Txt>
+            {moneyWhole(crossBorder)} <Txt className="text-caption text-faint">not checked</Txt>
           </Txt>
         </View>
       )}
@@ -411,19 +372,19 @@ function ItemRow({
       <View className="flex-row items-center justify-between gap-2">
         <Txt className="text-callout font-medium text-fg">{ITEM_LABELS[t]}</Txt>
         {item.toggleable ? (
-          <Txt className="text-sub" accessibilityLabel={`Yours ${money(item.current_value_zar)}, market ${money(item.ai_value_zar)}`}>
+          <Txt className="text-sub" accessibilityLabel={`Yours ${moneyWhole(item.current_value_zar)}, market ${moneyWhole(item.ai_value_zar)}`}>
             <Txt className={`text-sub ${mineOn ? 'font-semibold text-fg' : 'text-faint'}`}>
-              {money(item.current_value_zar)}
+              {moneyWhole(item.current_value_zar)}
             </Txt>
             <Txt className="text-sub text-faint">{'  →  '}</Txt>
             <Txt className={`text-sub ${mineOn ? 'text-faint' : 'font-semibold text-fg'}`}>
-              {money(item.ai_value_zar)}
+              {moneyWhole(item.ai_value_zar)}
             </Txt>
           </Txt>
         ) : (
           <Txt className="text-sub text-fg">
-            {money(item.current_value_zar)}{' '}
-            <Txt className="text-caption text-faint">{item.verdict === 'accurate' ? 'at market' : 'yours kept'}</Txt>
+            {moneyWhole(item.current_value_zar)}{' '}
+            <Txt className="text-caption text-faint">{item.verdict !== 'accurate' ? 'yours kept' : t === 'fuel' ? 'official price' : 'at market'}</Txt>
           </Txt>
         )}
       </View>

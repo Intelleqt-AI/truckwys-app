@@ -1170,3 +1170,32 @@ export function changesSincePriced(
     actions: changed ? ['keep_price', 'reprice'].map((id) => ({ id, label: ACTION_LABELS[id]! })) : [],
   };
 }
+
+// ── Phone copy (same codes, severities and impact as the backend) ──────────
+
+/**
+ * Phone copy for two warnings (same codes, severities and impact as the
+ * backend): the stale diesel title fits a 390 pt row, and a price under the
+ * cost floor gets the one-tap fix at the company target margin.
+ */
+export function phoneWarning(w: QuoteWarning, c: Costing, target: number | null): QuoteWarning {
+  if (w.code === 'diesel_stale') {
+    const from = saShortDate(c.diesel.official_effective_from);
+    const ownSet = c.diesel.own_price !== null;
+    return {
+      ...w,
+      title: from ? `Diesel price is from ${from}` : 'Diesel price may be old',
+      actions: [ownSet ? { id: 'use_own', label: 'Use my price' } : { id: 'retry_diesel', label: 'Check again' }],
+    };
+  }
+  if (w.code === 'below_floor' && c.target_price !== null && target !== null) {
+    return {
+      ...w,
+      actions: [
+        { id: 'use_target', label: `Price at ${Math.round(target)}% margin · ${rand(c.target_price, true)}` },
+        ...w.actions,
+      ],
+    };
+  }
+  return w;
+}

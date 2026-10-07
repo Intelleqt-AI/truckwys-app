@@ -64,7 +64,7 @@ function WarningRow({
           <Icon name="alert" size={15} color={block ? colors.dangerDot : colors.warningDot} />
           <Txt
             className={`shrink text-sub font-medium ${block ? 'text-danger' : 'text-warning'}`}
-            numberOfLines={open ? 3 : 1}
+            numberOfLines={open ? 3 : 2}
           >
             {w.title}
           </Txt>
@@ -76,7 +76,7 @@ function WarningRow({
             accessibilityRole="button"
             accessibilityLabel={primary.label}
             hitSlop={{ top: 4, bottom: 4 }}
-            className="min-h-[40px] shrink-0 items-center justify-center rounded-control border border-line-active bg-surface px-3"
+            className="min-h-[44px] shrink-0 items-center justify-center rounded-control border border-line-active bg-surface px-3"
           >
             <Mono className="text-caption font-medium text-fg" numberOfLines={1}>
               {primary.label}
@@ -93,7 +93,7 @@ function WarningRow({
               onPress={() => onAction(a.id, w)}
               activeOpacity={0.6}
               accessibilityRole="button"
-              className="min-h-[40px] flex-row items-center gap-1 self-start"
+              className="min-h-[44px] flex-row items-center gap-1 self-start"
             >
               <Mono className="text-sub text-link">{a.label}</Mono>
               <Icon name="chevronRight" size={13} color={colors.link} />

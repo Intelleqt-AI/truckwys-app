@@ -1,37 +1,40 @@
 import { memo } from 'react';
 import { formatCurrency, formatNumber } from '@/lib/formatters';
-import { BreakdownModal } from './BreakdownModal';
+import { BreakdownModal, type BreakdownEdit } from './BreakdownModal';
 
-/** Haulage = rate per km × loaded km. A truck's own rate beats the company default. */
+const one = (n: number) => formatNumber(n, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** Base rate = rate per km × loaded km. The truck's own rate beats the company default. */
 function RateBreakdownModalImpl({
   visible,
   onClose,
-  vehicleType,
   ratePerKm,
   km,
   amount,
   source,
+  edit,
 }: {
   visible: boolean;
   onClose: () => void;
-  vehicleType: string;
   ratePerKm: number;
   km: number;
   amount: number;
-  /** 'From Superlink' / 'Company default' / 'Your rate', null when empty. */
+  /** 'truck' / 'company' / 'yours', null when empty. */
   source: string | null;
+  edit?: BreakdownEdit | null;
 }) {
   return (
     <BreakdownModal
       visible={visible}
       onClose={onClose}
-      title="Haulage"
+      title="Base rate"
       rows={[
-        { label: `Rate${source ? ` (${source.toLowerCase()})` : ''}`, value: `${formatCurrency(ratePerKm)}/km` },
-        { label: 'Distance', value: `${formatNumber(Math.round(km))} km` },
+        { label: 'Rate', value: `${formatCurrency(ratePerKm)}/km${source ? ` · ${source}` : ''}` },
+        // 1 dp so rate × km multiplies out.
+        { label: 'Distance', value: `${one(km)} km` },
       ]}
-      total={{ label: 'Haulage', value: formatCurrency(amount) }}
-      note={vehicleType ? null : 'Pick a truck to use its own rate.'}
+      total={{ label: 'Base rate', value: formatCurrency(amount) }}
+      edit={edit}
     />
   );
 }

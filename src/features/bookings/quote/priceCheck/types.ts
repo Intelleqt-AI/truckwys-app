@@ -204,10 +204,9 @@ export function chipFor(t: ItemKey, item: ReviewItem): { tone: ChipTone; label: 
   const kind = kindOf(t, item);
   const d = item.detail || {};
   if (kind === 'official') {
-    const fiasa = (d.source || (t === 'fuel' ? 'FIASA' : '')).toUpperCase() === 'FIASA';
     return {
       tone: d.current === false ? 'warning' : 'success',
-      label: fiasa ? 'Official price (FIASA)' : 'Official price',
+      label: 'Official price',
     };
   }
   if (kind === 'benchmark') return { tone: 'neutral', label: 'Lane benchmark' };

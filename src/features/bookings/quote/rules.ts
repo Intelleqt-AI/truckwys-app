@@ -96,9 +96,24 @@ const pos = (v: unknown): number | null => {
 
 const NBSP = ' ';
 
-/** SA style: space thousands, comma decimals ("1 050", "32,80"). */
+/**
+ * ROUND_HALF_UP on the shortest decimal form of the double (backend
+ * _half_up_decimal): 1,005 → 1,01 and 2,5 → 3. Returns "123.45" style.
+ */
+export function halfUpFixed(v: number, dp: number): string {
+  const str = String(Math.abs(v));
+  if (/e/i.test(str)) return Math.abs(v).toFixed(dp);
+  const [ip = '0', fp = ''] = str.split('.');
+  if (fp.length <= dp) return dp ? `${ip}.${fp.padEnd(dp, '0')}` : ip;
+  let digits = BigInt(ip + fp.slice(0, dp));
+  if (Number(fp[dp]) >= 5) digits += 1n;
+  const out = digits.toString().padStart(dp + 1, '0');
+  return dp ? `${out.slice(0, -dp)}.${out.slice(-dp)}` : out;
+}
+
+/** SA style: space thousands, comma decimals ("1 050", "32,80"), half-up. */
 export function fmtNum(v: number, dp = 0): string {
-  const abs = Math.abs(v).toFixed(dp);
+  const abs = halfUpFixed(v, dp);
   const [i, d] = abs.split('.');
   const txt = `${(i ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}${d ? `,${d}` : ''}`;
   return (v < 0 && /[1-9]/.test(txt) ? '−' : '') + txt;
@@ -106,10 +121,9 @@ export function fmtNum(v: number, dp = 0): string {
 
 /** "R 32,80" / "R 1 050" (whole rand half-up when dp = 0). */
 export function fmtRand(v: number, dp = 0): string {
-  let x = v;
-  if (dp === 0) x = Math.floor(Math.abs(x) + 0.5) * (x >= 0 ? 1 : -1);
-  const sign = x < 0 && Math.abs(x) >= (dp === 0 ? 0.5 : 0.005) ? '−' : '';
-  return `${sign}R ${fmtNum(Math.abs(x), dp)}`;
+  const shown = Number(halfUpFixed(v, dp));
+  const sign = v < 0 && shown !== 0 ? '−' : '';
+  return `${sign}R ${fmtNum(Math.abs(v), dp)}`;
 }
 
 /** Display variant with non-breaking spaces (never wraps inside a figure). */
@@ -240,7 +254,15 @@ export function resolveDieselInput(d: Partial<DieselInput> | null | undefined): 
 }
 
 /** Port of quote_costing.diesel_warnings. */
-export function dieselWarnings(diesel: DieselResolution, litresTotal: number | null = null): QuoteWarning[] {
+/** Sum of the fuel line amounts (each to the cent) at `price`. */
+const fuelLinesTotal = (parts: number[], price: number) =>
+  cents(parts.reduce((s, l) => s + cents(l * price), 0));
+
+export function dieselWarnings(
+  diesel: DieselResolution,
+  litresTotal: number | null = null,
+  litresParts: number[] | null = null,
+): QuoteWarning[] {
   const out: QuoteWarning[] = [];
   const zoneTxt = diesel.zone === 'COASTAL' ? 'coastal' : 'inland';
   if (diesel.source === 'missing') {
@@ -270,15 +292,19 @@ export function dieselWarnings(diesel: DieselResolution, litresTotal: number | n
     const own = diesel.own_price!;
     const official = diesel.official_price;
     if (Math.abs(own - official) / official > 0.03) {
-      const impact = litresTotal !== null ? cents((own - official) * litresTotal) : null;
-      const moreLess =
-        impact !== null ? `: ${fmtRand(Math.abs(impact))} ${impact > 0 ? 'more' : 'less'} on this quote` : '';
+      // Exactly the difference of the fuel line totals.
+      const impact =
+        litresParts !== null
+          ? cents(fuelLinesTotal(litresParts, own) - fuelLinesTotal(litresParts, official))
+          : litresTotal !== null
+            ? cents((own - official) * litresTotal)
+            : null;
       out.push(
         warning(
           'diesel_own_off',
           'warn',
           'Your diesel price differs from official',
-          `Yours ${fmtRand(own, 2)}/L, official ${fmtRand(official, 2)}/L (${zoneTxt})${moreLess}.`,
+          `Yours ${fmtRand(own, 2)}/L, official ${fmtRand(official, 2)}/L (${zoneTxt}).`,
           impact,
           ['use_official', 'update_own'],
           { own_price: own, official_price: official },
@@ -617,6 +643,8 @@ export interface CostingInputs {
   include_empty_return?: boolean | null;
   settings?: { include_empty_return_default?: boolean | null; empty_return_min_km?: number | null } | null;
   minimum_charge?: number | null;
+  /** Company default price per km (default_base_rate_per_km); null = none. */
+  default_price_per_km?: number | null;
   target_margin_pct?: number | null;
   price?: number | null;
 }
@@ -686,6 +714,10 @@ export interface Costing {
   target_margin_pct: number | null;
   target_price: number | null;
   minimum_charge: number | null;
+  default_price_per_km: number | null;
+  rate_price: number | null;
+  default_price: number | null;
+  alternative_with_return_load: { floor: number | null; target_price: number | null; default_price: number | null } | null;
   price: number | null;
   margin: number | null;
   margin_pct: number | null;
@@ -810,8 +842,8 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     if (capT !== null && ((rated !== null && rated < 20 && capT >= 8) || capT > 40)) {
       const what =
         capT > 40
-          ? `${fmtNum(capT, 1)} t payload looks like GVM`
-          : `${fmtNum(rated ?? 0, 1)} L/100km for ${fmtNum(capT, 1)} t looks low`;
+          ? `A ${fmtNum(capT)} t payload looks like the GVM`
+          : `${fmtNum(rated ?? 0)} L/100 km is low for a ${fmtNum(capT)} t truck`;
       warnings.push(
         warning('truck_burn_suspect', 'warn', "Check this truck's fuel or capacity", `${what}.`, null, [
           'edit_vehicle',
@@ -827,7 +859,9 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
 
   // --- diesel (§1) ---
   const diesel = resolveDieselInput(inp.diesel);
-  warnings.push(...dieselWarnings(diesel, litresTotal));
+  const parts =
+    litresLoaded !== null && litresEmpty !== null ? [litresLoaded, ...(emptyReturn ? [litresEmpty] : [])] : null;
+  warnings.push(...dieselWarnings(diesel, litresTotal, parts));
   const priceL = diesel.price;
 
   const lines: CostingLine[] = [];
@@ -1062,7 +1096,7 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
         'below_minimum_charge',
         'block',
         'Price is below your minimum charge',
-        `Your minimum charge is ${fmtRand(minimum)}.`,
+        `${fmtRand(minimum - price)} below your ${fmtRand(minimum)} minimum.`,
         cents(minimum - price),
         ['use_minimum'],
       ),
@@ -1070,6 +1104,20 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
   }
 
   const blocking = warnings.filter((w) => w.severity === 'block').map((w) => w.code);
+
+  // Default price: max(rate price, target price) rounded UP to the rand; the
+  // rate price only with a company price per km > 0, on loaded km.
+  const ratePerKm = pos(inp.default_price_per_km);
+  const ratePrice = ratePerKm !== null && kmLoaded !== null ? cents(ratePerKm * kmLoaded) : null;
+  const defaultPrice = targetPrice !== null ? Math.ceil(Math.max(ratePrice ?? 0, targetPrice) - 1e-9) : null;
+
+  // The same quote with a return load booked (one-way, empty return included).
+  let alternative: Costing['alternative_with_return_load'] = null;
+  if (emptyReturn && requested !== false) {
+    const alt = computeCosting({ ...inp, include_empty_return: false });
+    alternative = { floor: alt.floor, target_price: alt.target_price, default_price: alt.default_price };
+  }
+
   return {
     version: 'qc-1',
     trip: {
@@ -1106,6 +1154,10 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     target_margin_pct: target,
     target_price: targetPrice,
     minimum_charge: minimum,
+    default_price_per_km: ratePerKm,
+    rate_price: ratePrice,
+    default_price: defaultPrice,
+    alternative_with_return_load: alternative,
     price,
     margin,
     margin_pct: marginPct,

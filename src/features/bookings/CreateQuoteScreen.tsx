@@ -122,7 +122,7 @@ import { PriceCheckCard } from './quote/priceCheck/PriceCheckCard';
 import { usePriceCheck } from './quote/priceCheck/usePriceCheck';
 import { moneyWhole, type Choice, type Review, type ItemKey } from './quote/priceCheck/types';
 import { QuoteSendPreview, type QuotePreviewData } from './QuoteSendPreview';
-import { CostBreakdownCard } from './quote/CostBreakdownCard';
+import { CostBreakdownCard, pct } from './quote/CostBreakdownCard';
 import { DriverBreakdownModal } from './quote/DriverBreakdownModal';
 import { AdjustmentModal } from './quote/AdjustmentModal';
 import { TollBreakdownModal } from './quote/TollBreakdownModal';
@@ -352,6 +352,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const weightInvalid = weight.trim() !== '' && weightTons == null;
   const weightTooLarge = weightTons != null && weightTons > WEIGHT_MAX_TONS;
   const baseRateNum = parseNum(baseRatePerKm) ?? 0;
+  // A new quote is priced at the rules' default price (QUOTE-RULES §7:
+  // ceil(max(rate × km, floor ÷ (1 − target)))) until the person sets a rate,
+  // a price or a market figure. A reopened quote keeps its saved price.
+  const [useDefaultPrice, setUseDefaultPrice] = useState(!editing);
   const driverNum = driverEdited ? (parseNum(driverAllowance) ?? 0) : 0;
   // An emptied box is not R 0: until a figure is typed the suggestion (or the
   // warning that there is none) stands.
@@ -1020,6 +1024,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         company,
         weightKg,
         baseRateNum,
+        useDefaultPrice,
         tollEdited: tollTyped,
         tollOverrideNum,
         driverOverride,
@@ -1042,6 +1047,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       company,
       weightKg,
       baseRateNum,
+      useDefaultPrice,
       tollTyped,
       tollOverrideNum,
       driverOverride,
@@ -1056,6 +1062,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       serverCosting,
     ],
   );
+  // The rate the price works out to (the default price's, or the typed one).
+  const effectiveRateNum = costs.priceIsDefault ? Math.round(costs.ratePerKmShown * 100) / 100 : baseRateNum;
+
   // An overloaded truck has no legitimate price: the cost card gives way to
   // the warning.
   // Delivery = collection + the nights the trip takes (9 driving hours a day).
@@ -1350,7 +1359,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     tollCost: costs.tollCost,
     driverAllowance: costs.driver,
     crossBorderCost: costs.crossBorderCost,
-    baseRatePerKm: baseRateNum,
+    baseRatePerKm: effectiveRateNum,
     pickupDate: pickupDate || null,
     marketAvgRate: num(pick(benchmark ?? {}, ['market_avg_rate'])),
     billingBlocked: subscription.blocked,
@@ -1456,6 +1465,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setDriverAllowance(next.driverAllowance);
     setDriverEdited(next.driverEdited);
     setBaseRatePerKm(next.baseRatePerKm);
+    setUseDefaultPrice(false);
     setServiceCharge(next.serviceCharge);
     preAiRef.current = { before, applied: next };
     setAiApplied({
@@ -1533,7 +1543,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const companyDefaultRate = num(pick(company ?? {}, ['default_base_rate_per_km']));
   // The truck's own rate wins over the company default, as on selection.
   const selectedVtRate = Number((vtypes ?? []).find((v) => v.name === pricedTruckName)?.base_rate) || 0;
-  const effectiveDefaultRate = selectedVtRate > 0 ? selectedVtRate : companyDefaultRate;
   // Where the Rate/km figure came from, for the haulage breakdown.
   const rateSource: string | null = !(baseRateNum > 0)
     ? null
@@ -1895,7 +1904,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       tolls_unknown: !costs.tollKnown,
       tolls_confirmed_none: tollsConfirmedNone,
       use_official_fuel: useOfficialDiesel,
+      // The saved driver figure is the person's only when they typed it.
+      driver_cost_is_override: driverEdited,
     };
+    if (costs.crossBorderCost > 0) out.border_cost = costs.crossBorderCost;
     if (returnLoadBooked) out.include_empty_return = false;
     const override = costs.costingInputs.diesel?.override_price;
     if (override != null && override > 0) out.fuel_price_override = override;
@@ -1927,7 +1939,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         winProb,
         stops,
         routeGeometry: mapGeometry,
-        baseRateNum,
+        baseRateNum: effectiveRateNum,
         aiApplied,
         // §9: the pricing snapshot, on every create and update, only for a
         // route worked out for these inputs (never the reopened stub).
@@ -2779,21 +2791,25 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           <RateBreakdownModal
             visible={rateModal}
             onClose={() => setRateModal(false)}
-            ratePerKm={baseRateNum}
+            ratePerKm={effectiveRateNum}
             km={costs.chargeDistance}
             amount={costs.baseCost}
-            source={rateSource}
+            source={costs.priceIsDefault ? `${pct(costs.costing.target_margin_pct ?? 10)} margin` : rateSource}
             edit={{
               label: 'Rate per km',
-              value: baseRatePerKm,
+              value: costs.priceIsDefault ? formatPlain(effectiveRateNum) : baseRatePerKm,
               placeholder: 'e.g. 25',
               onChangeText: (v) => {
                 rateTouchedRef.current = true;
+                setUseDefaultPrice(false);
                 setBaseRatePerKm(v);
               },
               back:
-                effectiveDefaultRate > 0 && baseRateNum !== effectiveDefaultRate
-                  ? { label: `${selectedVtRate > 0 ? 'Truck' : 'Default'} ${formatCurrency(effectiveDefaultRate)}/km`, onPress: () => setBaseRatePerKm(String(effectiveDefaultRate)) }
+                !costs.priceIsDefault && costs.defaultPrice !== null
+                  ? {
+                      label: `Default price ${formatCurrency(costs.defaultPrice, { maximumFractionDigits: 0 })}`,
+                      onPress: () => setUseDefaultPrice(true),
+                    }
                   : null,
             }}
           />

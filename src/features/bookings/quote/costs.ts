@@ -34,6 +34,12 @@ export interface ComputeCostsInput {
   company: Record<string, unknown> | undefined;
   weightKg: number;
   baseRateNum: number;
+  /**
+   * Price at the rules' default (ceil of max(rate price, target price)) until
+   * the person sets a rate, a price or a market figure; the base rate is then
+   * whatever the default leaves after the costs passed on.
+   */
+  useDefaultPrice?: boolean;
   tollEdited: boolean;
   tollOverrideNum: number;
   /** User-typed driver cost; null = the suggested nights × allowance. */
@@ -115,6 +121,11 @@ export interface CostBreakdown {
   driverMissing: boolean;
   /** Target-margin price with the other empty-return answer (one-way, 300 km+). */
   altReturnTargetPrice: number | null;
+  /** The price is the rules' default price (nobody set a rate or price). */
+  priceIsDefault: boolean;
+  defaultPrice: number | null;
+  /** The base rate per km the price works out to. */
+  ratePerKmShown: number;
   driverSuggested: number | null;
   nights: number | null;
   allowancePerNight: number | null;
@@ -155,6 +166,7 @@ export function computeCosts({
   company,
   weightKg,
   baseRateNum,
+  useDefaultPrice,
   tollEdited,
   tollOverrideNum,
   driverOverride,
@@ -281,6 +293,7 @@ export function computeCosts({
       empty_return_min_km: nullIfNotPositive(pick(c, ['empty_return_min_km'])),
     },
     minimum_charge: nullIfNotPositive(pick(c, ['minimum_charge'])),
+    default_price_per_km: nullIfNotPositive(pick(c, ['default_base_rate_per_km'])),
     // Backend target_margin(): the company target (default 10), clamped 1–40.
     target_margin_pct: Math.min(Math.max(nullIfNotPositive(pick(c, ['margin_target_pct'])) ?? 10, 1), 40),
     price: null,
@@ -297,8 +310,13 @@ export function computeCosts({
   const driver = driverLine?.amount ?? 0;
   const crossBorderCost = line('border')?.amount ?? 0;
   const loadedKm = pre.trip.km_loaded ?? 0;
-  const baseCost = Math.round(loadedKm * baseRateNum * 100) / 100;
-  const directCost = baseCost + fuelCost + tollCost + crossBorderCost + driver;
+  const passedOn = fuelCost + tollCost + crossBorderCost + driver;
+  const defaultPrice = pre.default_price;
+  const priceIsDefault = !!useDefaultPrice && defaultPrice !== null && loadedKm > 0;
+  const baseCost = priceIsDefault
+    ? Math.round((defaultPrice - passedOn) * 100) / 100
+    : Math.round(loadedKm * baseRateNum * 100) / 100;
+  const directCost = baseCost + passedOn;
   const total = Math.round((directCost + serviceCharge) * 100) / 100;
 
   const costingInputs: CostingInputs = { ...inputsBase, price: total > 0 ? total : null };
@@ -319,13 +337,20 @@ export function computeCosts({
 
   // The other answer to "does the truck come back empty?", priced at the
   // target margin, for the Empty | Loaded toggle.
-  const altReturn =
-    tripType === 'ONE_WAY' && (costing.trip.empty_return_default || returnLoadBooked)
-      ? computeCosting({ ...costingInputs, include_empty_return: returnLoadBooked ? null : false })
+  // The other answer to "does the truck come back empty?" at its default
+  // price: the rules' alternative_with_return_load, or (with a return load
+  // booked) the empty-return price.
+  const altReturnPrice = costing.alternative_with_return_load
+    ? costing.alternative_with_return_load.default_price
+    : tripType === 'ONE_WAY' && returnLoadBooked
+      ? computeCosting({ ...costingInputs, include_empty_return: null }).default_price
       : null;
 
   return {
-    altReturnTargetPrice: altReturn?.target_price ?? null,
+    altReturnTargetPrice: altReturnPrice,
+    priceIsDefault,
+    defaultPrice,
+    ratePerKmShown: loadedKm > 0 ? baseCost / loadedKm : baseRateNum,
     driverMissing: driverLine?.source === 'missing',
     distance,
     legs,
@@ -417,6 +442,8 @@ function withServerInputs(
     hours_per_day: server.hours_per_day ?? local.hours_per_day,
     settings: server.settings ?? local.settings,
     minimum_charge: server.minimum_charge !== undefined ? server.minimum_charge : local.minimum_charge,
+    default_price_per_km:
+      server.default_price_per_km !== undefined ? server.default_price_per_km : local.default_price_per_km,
     target_margin_pct: server.target_margin_pct ?? local.target_margin_pct,
   };
 }

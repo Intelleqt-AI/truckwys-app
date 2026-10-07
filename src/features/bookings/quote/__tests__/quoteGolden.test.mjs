@@ -59,7 +59,17 @@ for (const c of golden.cases) {
       exp.warnings.map((w) => [w.code, w.severity, w.impact_zar]),
       'warnings',
     );
+    // Copy too: the clients show the backend's words.
+    assert.deepEqual(
+      got.warnings.map((w) => [w.code, w.title, w.detail, w.actions]),
+      exp.warnings.map((w) => [w.code, w.title, w.detail, w.actions]),
+      'warning copy',
+    );
     assert.deepEqual(got.blocking, exp.blocking, 'blocking');
+    // Default price (rate price on loaded km, ceil to the rand) and the
+    // return-load alternative.
+    for (const k of ['default_price_per_km', 'rate_price', 'default_price']) assert.equal(got[k], exp[k], k);
+    assert.deepEqual(got.alternative_with_return_load, exp.alternative_with_return_load, 'alternative_with_return_load');
     assert.equal(got.can_send, exp.can_send, 'can_send');
 
     // Trip, vehicle, diesel and litres.

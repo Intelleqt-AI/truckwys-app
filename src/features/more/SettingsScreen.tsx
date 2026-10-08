@@ -71,9 +71,11 @@ import {
   hasPetrolRule,
   LEGACY_DIESEL_SENTINEL,
   petrolInputFromApi,
+  resolvePetrol,
   saShortDate,
 } from '@/features/bookings/quote/rules';
 import { capacityTons } from '@/features/bookings/quote/types';
+import { fuelChangeMessage } from './fuelChange';
 import {
   companyFieldErrors,
   ownPricePerLitreError,
@@ -1277,6 +1279,16 @@ function CompanySection() {
   const [boxErrors, setBoxErrors] = useState<Partial<Record<CompanyBox, string>>>({});
   // The price boxes as loaded: only a changed box is checked and sent.
   const loadedPricesRef = useRef<PriceBoxes>({ electric: null, hybrid: null, baseRate: null });
+  // The fuel choices as loaded: a change to them is confirmed before saving.
+  const loadedFuelRef = useRef<{
+    dieselMode: 'LIVE' | 'OWN';
+    dieselOwn: number | null;
+    petrolMode: 'LIVE' | 'OWN';
+    petrolOwn: number | null;
+    grade: '95' | '93';
+  }>({ dieselMode: 'LIVE', dieselOwn: null, petrolMode: 'LIVE', petrolOwn: null, grade: '95' });
+  const loadedPetrolOfficialRef = useRef<number | null>(null);
+  const [savedNote, setSavedNote] = useState('');
   const clearBox = (b: CompanyBox) => setBoxErrors((e) => (e[b] ? { ...e, [b]: undefined } : e));
   const [busy, setBusy] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
@@ -1427,10 +1439,25 @@ function CompanySection() {
         petrolRule: hasPetrolRule(data, livePrice),
       }).show,
     );
+    {
+      const d = dieselInputFromApi(data, livePrice);
+      const pMode =
+        str(pick(data, ['fuel_price_petrol_mode'])).toUpperCase() === 'OWN' && num(pick(data, ['fuel_price_petrol'])) > 0
+          ? 'OWN'
+          : 'LIVE';
+      loadedFuelRef.current = {
+        dieselMode: d.mode === 'OWN' && d.own_price != null ? 'OWN' : 'LIVE',
+        dieselOwn: d.mode === 'OWN' ? d.own_price : null,
+        petrolMode: pMode,
+        petrolOwn: num(pick(data, ['fuel_price_petrol'])) || null,
+        grade: str(pick(data, ['fuel_price_petrol_grade'])) === '93' ? '93' : '95',
+      };
+      loadedPetrolOfficialRef.current = resolvePetrol(data, livePrice).official_price;
+    }
     setSeeded(true);
   }, [data, seeded, liveLoaded, livePrice]);
 
-  const save = async () => {
+  const save = async (confirmed = false) => {
     if (demo.block()) return;
     // Every numeric box is validated through parseNum first. The old guards
     // compared Number(v) against bounds, and BOTH sides of a comparison are
@@ -1566,6 +1593,41 @@ function CompanySection() {
     if (ownDiesel != null && Math.abs(ownDiesel - LEGACY_DIESEL_SENTINEL) < 0.005 && !(data && 'fuel_price_mode' in data)) {
       return toast.error('R 23,50 is reserved here. Enter 23,49 or 23,51');
     }
+    // A change to the price quotes run on is confirmed first, in plain words.
+    const loaded = loadedFuelRef.current;
+    const dieselChange = fuelChangeMessage(
+      'diesel',
+      { mode: loaded.dieselMode, price: loaded.dieselMode === 'OWN' ? loaded.dieselOwn : officialDiesel.official_price },
+      { mode: dieselMode, price: dieselMode === 'OWN' ? parseNum(fuelPrice) : officialDiesel.official_price },
+    );
+    const petrolChange = petrolRule
+      ? fuelChangeMessage(
+          'petrol',
+          {
+            mode: loaded.petrolMode,
+            price: loaded.petrolMode === 'OWN' ? loaded.petrolOwn : loadedPetrolOfficialRef.current,
+            grade: loaded.grade,
+          },
+          {
+            mode: petrolMode,
+            price: petrolMode === 'OWN' ? parseNum(fuelPetrol) : officialPetrol.official_price,
+            grade: petrolGradeChoice,
+          },
+        )
+      : null;
+    const change = dieselChange ?? petrolChange;
+    if (change && !confirmed) {
+      const both = dieselChange && petrolChange;
+      Alert.alert(
+        both ? 'Change your fuel prices?' : change.title,
+        both ? `${dieselChange.message}\n\n${petrolChange.message}` : change.message,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: both ? 'Save' : change.confirm, onPress: () => void save(true) },
+        ],
+      );
+      return;
+    }
     setBusy(true);
     try {
       await updateCompanyProfile({
@@ -1625,7 +1687,17 @@ function CompanySection() {
         default_sla_hours: optionalNum(slaHours, 0),
       });
       invalidateFor(qc, 'company');
-      toast.success();
+      if (change) {
+        setSavedNote([dieselChange?.saved, petrolChange?.saved].filter(Boolean).join(' '));
+        loadedFuelRef.current = {
+          dieselMode,
+          dieselOwn: dieselMode === 'OWN' ? parseNum(fuelPrice) : loaded.dieselOwn,
+          petrolMode,
+          petrolOwn: petrolMode === 'OWN' ? parseNum(fuelPetrol) : loaded.petrolOwn,
+          grade: petrolGradeChoice,
+        };
+      }
+      toast.success(change ? [dieselChange?.saved, petrolChange?.saved].filter(Boolean).join(' ') : undefined);
     } catch (e) {
       // Field errors go to their box; the toast says where to look.
       const fieldErrs = companyFieldErrors((e as { data?: unknown }).data);
@@ -2089,9 +2161,10 @@ function CompanySection() {
         label={profileError ? "Couldn't load settings" : 'Save changes'}
         loading={busy}
         disabled={!seeded || profileError}
-        onPress={save}
+        onPress={() => void save()}
         fullWidth
       />
+      {!!savedNote && <Txt className="-mt-1 text-caption text-success">{savedNote}</Txt>}
     </View>
   );
 }

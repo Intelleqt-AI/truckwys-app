@@ -9,6 +9,7 @@ import type { PriceCheck } from './usePriceCheck';
 import {
   ITEM_LABELS,
   MISSING,
+  NO_MARKET_TEXT,
   TOPICS,
   checkedAgo,
   chipFor,
@@ -140,7 +141,9 @@ export function PriceCheckCard({
           onPress={() => void pc.runCheck()}
           disabled={!canCheck}
           accessibilityLabel={
-            !canCheck && waiting && secsLeft != null ? `${label}. Try again in ${secsLeft} seconds` : label
+            !canCheck && waiting && secsLeft != null
+              ? `${label}. Try again in ${secsLeft} seconds`
+              : label
           }
         />
       </View>
@@ -167,9 +170,7 @@ export function PriceCheckCard({
       </View>
     );
   } else if (outOfDate) {
-    body = (
-      <Txt className="text-sub text-muted">Trip changed. Re-check.</Txt>
-    );
+    body = <Txt className="text-sub text-muted">Trip changed. Re-check.</Txt>;
   } else if (unavailable) {
     const t = failText ?? { title: 'Not available yet', text: '' };
     body = <Txt className="text-sub text-muted">{t.title}</Txt>;
@@ -201,7 +202,11 @@ export function PriceCheckCard({
         {!!notice && <Txt className="mt-3 text-caption text-warning">{notice}</Txt>}
 
         {hasResult && detailsOpen && (
-          <Details pc={pc} fuelSettingStale={fuelSettingStale} onOpenFuelSettings={onOpenFuelSettings} />
+          <Details
+            pc={pc}
+            fuelSettingStale={fuelSettingStale}
+            onOpenFuelSettings={onOpenFuelSettings}
+          />
         )}
 
         {(hasResult || showSkeleton) && (
@@ -224,36 +229,43 @@ export function PriceCheckCard({
 
 // ── headline figure + win chance ────────────────────────────────────────────
 function Stats({ pc }: { pc: PriceCheck }) {
-  const { combo, total, quoteNote, winText, winNote, winStale } = pc;
+  const { combo, total, quoteNote, winText, winNote, winStale, noMarket } = pc;
   if (!combo) return null;
   return (
-    <View className="mb-3 flex-row gap-3">
-      <View className="flex-1 rounded-control border border-line bg-surface-hover p-3">
-        <Txt className="text-caption text-faint">Your quote</Txt>
-        <Txt
-          className="mt-0.5 text-heading font-semibold text-fg"
-          numberOfLines={1}
-          adjustsFontSizeToFit
-        >
-          {moneyWhole(total)}
-        </Txt>
-        {combo.below_target && !combo.below_floor ? (
-          <Txt className="mt-0.5 text-caption font-medium text-warning">Below target margin</Txt>
-        ) : (
-          <Txt className="mt-0.5 text-caption text-muted">{quoteNote}</Txt>
-        )}
-      </View>
-      <View className="flex-1 rounded-control border border-line bg-surface-hover p-3">
-        <Txt className="text-caption text-faint">Win chance</Txt>
-        <Txt
-          className={`mt-0.5 ${
-            winText === 'Not scored' ? 'text-callout font-semibold text-muted' : 'text-heading font-semibold text-fg'
-          }`}
-          numberOfLines={1}
-        >
-          {winText}
-        </Txt>
-        <Txt className={`mt-0.5 text-caption ${winStale ? 'text-warning' : 'text-muted'}`}>{winNote}</Txt>
+    <View className="mb-3 gap-3">
+      {noMarket && <Txt className="text-sub text-muted">{NO_MARKET_TEXT}</Txt>}
+      <View className="flex-row gap-3">
+        <View className="flex-1 rounded-control border border-line bg-surface-hover p-3">
+          <Txt className="text-caption text-faint">Your quote</Txt>
+          <Txt
+            className="mt-0.5 text-heading font-semibold text-fg"
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {moneyWhole(total)}
+          </Txt>
+          {/* Margins come from the quote's own current cost floor (the price
+            card), never from a check's figures. */}
+          <Txt className="mt-0.5 text-caption text-muted">
+            {noMarket ? 'Your costs plus your margin' : quoteNote}
+          </Txt>
+        </View>
+        <View className="flex-1 rounded-control border border-line bg-surface-hover p-3">
+          <Txt className="text-caption text-faint">Win chance</Txt>
+          <Txt
+            className={`mt-0.5 ${
+              winText === 'Not scored'
+                ? 'text-callout font-semibold text-muted'
+                : 'text-heading font-semibold text-fg'
+            }`}
+            numberOfLines={1}
+          >
+            {winText}
+          </Txt>
+          <Txt className={`mt-0.5 text-caption ${winStale ? 'text-warning' : 'text-muted'}`}>
+            {winNote}
+          </Txt>
+        </View>
       </View>
     </View>
   );
@@ -340,7 +352,9 @@ function ChoiceSwitch({
               on ? 'bg-raised' : 'bg-surface'
             }`}
           >
-            <Mono className={`text-caption ${on ? 'font-semibold text-fg' : 'font-medium text-muted'}`}>
+            <Mono
+              className={`text-caption ${on ? 'font-semibold text-fg' : 'font-medium text-muted'}`}
+            >
               {o.text}
             </Mono>
           </TouchableOpacity>
@@ -372,7 +386,10 @@ function ItemRow({
       <View className="flex-row items-center justify-between gap-2">
         <Txt className="text-callout font-medium text-fg">{ITEM_LABELS[t]}</Txt>
         {item.toggleable ? (
-          <Txt className="text-sub" accessibilityLabel={`Yours ${moneyWhole(item.current_value_zar)}, market ${moneyWhole(item.ai_value_zar)}`}>
+          <Txt
+            className="text-sub"
+            accessibilityLabel={`Yours ${moneyWhole(item.current_value_zar)}, market ${moneyWhole(item.ai_value_zar)}`}
+          >
             <Txt className={`text-sub ${mineOn ? 'font-semibold text-fg' : 'text-faint'}`}>
               {moneyWhole(item.current_value_zar)}
             </Txt>
@@ -384,7 +401,13 @@ function ItemRow({
         ) : (
           <Txt className="text-sub text-fg">
             {moneyWhole(item.current_value_zar)}{' '}
-            <Txt className="text-caption text-faint">{item.verdict !== 'accurate' ? 'yours kept' : t === 'fuel' ? 'official price' : 'at market'}</Txt>
+            <Txt className="text-caption text-faint">
+              {item.verdict !== 'accurate'
+                ? 'yours kept'
+                : t === 'fuel'
+                  ? 'official price'
+                  : 'at market'}
+            </Txt>
           </Txt>
         )}
       </View>
@@ -432,7 +455,9 @@ function Details({
           ...(item.source_url ? [{ url: item.source_url, title: item.source_name || '' }] : []),
           ...(item.sources || []),
         ].filter((s, i, all) => all.findIndex((x) => x.url === s.url) === i);
-        const hosts = safeSources(sources).map((s) => httpsHost(s.url)).filter(Boolean) as string[];
+        const hosts = safeSources(sources)
+          .map((s) => httpsHost(s.url))
+          .filter(Boolean) as string[];
         return (
           <View key={t}>
             <Txt className="text-sub font-semibold text-fg">{ITEM_LABELS[t]}</Txt>
@@ -450,9 +475,14 @@ function Details({
                 ) : null}
                 {plazas.map((p) => (
                   <Txt key={p.plaza} className="text-sub text-muted">
-                    <Txt className={`text-sub ${p.verified ? 'text-success-dot' : 'text-warning-dot'}`}>●</Txt>
+                    <Txt
+                      className={`text-sub ${p.verified ? 'text-success-dot' : 'text-warning-dot'}`}
+                    >
+                      ●
+                    </Txt>
                     {p.route ? `${clean(p.route)} ` : ''}
-                    {p.plaza}: yours {p.your_tariff_zar != null ? money(p.your_tariff_zar) : MISSING}, published{' '}
+                    {p.plaza}: yours{' '}
+                    {p.your_tariff_zar != null ? money(p.your_tariff_zar) : MISSING}, published{' '}
                     {p.market_tariff_zar != null ? money(p.market_tariff_zar) : MISSING}
                     <Txt className="text-caption text-faint">
                       {'  '}

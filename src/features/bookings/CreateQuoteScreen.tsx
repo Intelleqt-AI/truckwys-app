@@ -50,6 +50,7 @@ import {
   useCompanyProfileData,
   useFuelPrice,
   useQuoteFuelAlert,
+  refreshFuelPrices,
   suggestLocations,
   calculateRoute,
   analyzeQuote,
@@ -100,6 +101,7 @@ import {
   suggestTruck,
   pricedInEarlierPeriod,
   changesSincePriced,
+  saShortDate,
   type ChangesSincePriced,
   type QuoteWarning,
 } from './quote/rules';
@@ -1689,6 +1691,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setReopen({ state: 'done' });
   };
 
+  // "Try again" on a stale or missing fuel price: re-check it, then reprice.
+  const retryFuel = () => {
+    refreshFuelPrices()
+      .catch(() => toast.error("Couldn't check the fuel price"))
+      .finally(() => {
+        void qc.invalidateQueries({ queryKey: ['fuel-prices'] });
+        void qc.invalidateQueries({ queryKey: ['company-profile'] });
+      });
+  };
+
   // ── Warning actions (§10) ────────────────────────────────────────────────
   const onWarningAction = (id: string, w: QuoteWarning) => {
     switch (id) {
@@ -1715,8 +1727,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         navigation.navigate('Settings', { section: 'company' });
         break;
       case 'retry_diesel':
-        void qc.invalidateQueries({ queryKey: ['fuel-prices'] });
-        void qc.invalidateQueries({ queryKey: ['company-profile'] });
+        retryFuel();
         break;
       case 'choose_vehicle':
       case 'enter_weight':
@@ -1778,7 +1789,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // to price, plus the reopen notice.
   const visibleWarnings = useMemo<QuoteWarning[]>(() => {
     if (!ready || routeBlockedMessage || !vtypes) return [];
-    const list = routeBusy && !routeData ? [] : costs.warnings;
+    // Stale diesel and a missing allowance rate sit on their own cost lines.
+    const onLines = ['diesel_stale', 'driver_allowance_missing'];
+    const list = routeBusy && !routeData ? [] : costs.warnings.filter((w) => !onLines.includes(w.code));
     return reopenWarning ? [reopenWarning, ...list] : list;
   }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning]);
   const firstBlock = visibleWarnings.find((w) => w.severity === 'block') ?? null;
@@ -2272,6 +2285,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const o = pc.offer;
     // Market figures already in the quote (all or some): the way back comes first.
     if (aiApplied) return { kind: 'applied', onPress: undoMarket };
+    // No market evidence for the lane: nothing to recommend.
+    if (pc.noMarket) return null;
     if (o?.needsApply) {
       return {
         kind: 'apply',
@@ -2292,6 +2307,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     routeBlockedMessage,
     pc.offer,
     pc.unavailable,
+    pc.noMarket,
     aiApplied,
     jumpTo,
   ]);
@@ -2799,6 +2815,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       onCrossBorderPress={() => setBorderModal(true)}
                       onCostPress={() => setCostModal(true)}
                       onAdjustmentPress={() => setAdjustModal(true)}
+                      fuelNote={
+                        costs.warnings.some((w) => w.code === 'diesel_stale')
+                          ? `Price from ${saShortDate(costs.diesel.official_effective_from) ?? 'last period'}`
+                          : null
+                      }
+                      onFuelRetry={retryFuel}
+                      onSettingsPress={() => navigation.navigate('Settings', { section: 'company' })}
                     />
                   )}
                   <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />

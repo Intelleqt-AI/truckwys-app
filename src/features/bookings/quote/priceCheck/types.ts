@@ -111,7 +111,31 @@ export interface WinModel {
   scope: 'user' | 'global' | null;
   training_samples: number;
   reason: string | null;
+  /** How far the win model is from scoring (newer backends). */
+  model_progress?: unknown;
 }
+
+/**
+ * "Win chance appears after 200 won and 200 lost quotes (you have 12 and 3)"
+ * from a model_progress block (a tier {accepted, rejected, accepted_needed,
+ * rejected_needed}, or {company|user: tier}); null when it can't be said.
+ */
+export function winProgressText(progress: unknown): string | null {
+  if (!progress || typeof progress !== 'object') return null;
+  const p = progress as Record<string, unknown>;
+  const tier = (['company', 'user', 'global'].map((k) => p[k]).find((t) => t && typeof t === 'object') ??
+    p) as Record<string, unknown>;
+  const n = (k: string) => (typeof tier[k] === 'number' ? (tier[k] as number) : null);
+  const won = n('accepted');
+  const lost = n('rejected');
+  const needWon = n('accepted_needed');
+  const needLost = n('rejected_needed');
+  if (won === null || lost === null || needWon === null || needLost === null) return null;
+  return `Win chance appears after ${needWon} won and ${needLost} lost quotes (you have ${won} and ${lost})`;
+}
+
+/** No market evidence for this lane: the copy the market check shows instead. */
+export const NO_MARKET_TEXT = 'No market data for this lane yet. Prices are your costs plus your margin.';
 
 export interface ReturnLeg {
   fuel_zar: number;

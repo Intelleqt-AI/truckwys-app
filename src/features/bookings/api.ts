@@ -278,6 +278,20 @@ export function useCompanyProfileData() {
   });
 }
 
+/**
+ * Re-check the official fuel price now: POST fuel-prices/refresh/ (newer
+ * backends, any user), else the older GET ?force=true.
+ */
+export async function refreshFuelPrices(): Promise<void> {
+  try {
+    await postData({ url: 'fuel-prices/refresh/', data: {} });
+  } catch (e) {
+    const status = Number((e as { status?: number }).status);
+    if ([404, 405, 501].includes(status)) await fetchData('fuel-prices/current/?force=true');
+    else throw e;
+  }
+}
+
 export function useFuelPrice() {
   return useQuery<Record<string, unknown>>({
     queryKey: ['fuel-prices'],

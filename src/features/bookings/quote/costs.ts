@@ -7,6 +7,7 @@ import {
   resolveDieselInput,
   operatingCostPerKm,
   phoneWarning,
+  roundPrice,
   type Costing,
   type CostingInputs,
   type CostingLine,
@@ -310,7 +311,8 @@ export function computeCosts({
   const crossBorderCost = line('border')?.amount ?? 0;
   const loadedKm = pre.trip.km_loaded ?? 0;
   const passedOn = fuelCost + tollCost + crossBorderCost + driver;
-  const defaultPrice = pre.default_price;
+  // Rounded up like the price choices: next R 50 below R 20 000, else R 100.
+  const defaultPrice = pre.default_price === null ? null : roundPrice(pre.default_price);
   const priceIsDefault = !!useDefaultPrice && defaultPrice !== null && loadedKm > 0;
   const baseCost = priceIsDefault
     ? Math.round((defaultPrice - passedOn) * 100) / 100
@@ -322,10 +324,14 @@ export function computeCosts({
   const costing = computeCosting(costingInputs);
   // Before there's a route nothing is priced yet: route gaps are not warnings.
   const target = costing.target_margin_pct;
+  // A known R 0 toll is "No toll plazas on this route" on the Tolls line, not
+  // a warning: only tolls_unknown warns.
   const warnings = (
     hasRoute
-      ? costing.warnings
-      : costing.warnings.filter((w) => !['distance_missing', 'tolls_unknown', 'driver_nights_unknown'].includes(w.code))
+      ? costing.warnings.filter((w) => w.code !== 'tolls_none_found')
+      : costing.warnings.filter(
+          (w) => !['distance_missing', 'tolls_unknown', 'driver_nights_unknown', 'tolls_none_found'].includes(w.code),
+        )
   ).map((w) => phoneWarning(w, costing, target));
   const emptyLines = costing.lines.filter((l) => l.leg === 'empty_return');
   const emptyReturnTotal = emptyLines.length

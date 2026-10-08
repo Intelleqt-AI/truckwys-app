@@ -268,3 +268,11 @@ test('timestamps are SAST with offset, as the backend emits them', async () => {
   assert.equal(isoSast('2026-10-07T00:01:00.500+02:00'), '2026-10-07T00:01:00+02:00');
   assert.equal(isoSast(null), null);
 });
+
+test('default price rounds up like the choices (R 50 under R 20 000, else R 100)', async () => {
+  const { roundPrice } = await import('../rules.ts');
+  assert.equal(roundPrice(8256.26), 8300);
+  assert.equal(roundPrice(8250), 8250);
+  assert.equal(roundPrice(35612.4), 35700);
+  assert.equal(roundPrice(20000), 20000);
+});

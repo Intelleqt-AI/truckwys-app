@@ -1545,3 +1545,12 @@ export function phoneWarning(w: QuoteWarning, c: Costing, target: number | null)
   }
   return w;
 }
+
+/**
+ * Prices offered in whole amounts (backend pricing_analysis.round_price): up
+ * to the next R 50 below R 20 000, else the next R 100. Always up.
+ */
+export function roundPrice(price: number): number {
+  const unit = price < 20000 ? 50 : 100;
+  return Math.ceil(price / unit - 1e-9) * unit;
+}

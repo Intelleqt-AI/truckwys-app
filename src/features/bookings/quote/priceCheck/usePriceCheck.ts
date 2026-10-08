@@ -15,6 +15,7 @@ import {
   type Review,
   type ReviewItem,
   WIN_REASON_COPY,
+  winProgressText,
   joinWords,
   ITEM_WORDS,
   kindOf,
@@ -365,7 +366,15 @@ export function usePriceCheck(p: PriceCheckInputs) {
     ? 'Client, date or weight changed. Re-check to update.'
     : winP != null
       ? `${winModel!.scope === 'user' ? 'From your quotes' : 'From platform quotes'} · ${formatNumber(winModel!.training_samples, { maximumFractionDigits: 0 })} closed`
-      : WIN_REASON_COPY[winModel?.reason || ''] || WIN_REASON_COPY.not_enough_history!;
+      : winProgressText(winModel?.model_progress ?? (review as { model_progress?: unknown } | null)?.model_progress) ??
+        WIN_REASON_COPY[winModel?.reason || ''] ??
+        WIN_REASON_COPY.not_enough_history!;
+  // No market evidence for the lane: no recommendation, just say so.
+  const noMarket =
+    !!review &&
+    ((review as { recommendation?: unknown }).recommendation === null ||
+      (review as { market_available?: unknown }).market_available === false ||
+      (!!breakdown.base_rate && kindOf('base_rate', breakdown.base_rate) === 'unverified'));
   const winText = winP != null ? formatPercent(winP * 100, 0) : 'Not scored';
 
   // Headline: the live quote total, with a note on which figures it uses.
@@ -422,6 +431,7 @@ export function usePriceCheck(p: PriceCheckInputs) {
     noneVerified,
     winText,
     winNote,
+    noMarket,
     winStale,
     offer,
     // actions

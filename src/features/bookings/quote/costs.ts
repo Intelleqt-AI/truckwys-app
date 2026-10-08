@@ -59,6 +59,12 @@ export interface ComputeCostsInput {
    * not a market figure. The market figure wins when both are set.
    */
   quoteFuelPrice?: number | null;
+  /**
+   * Nights out given for this trip (costing_inputs.driver_nights): the driver
+   * line is allowance × these nights instead of the route's suggestion. A typed
+   * driver amount (driverOverride) still wins.
+   */
+  driverNights?: number | null;
   /** "Use official price" on this quote while the company is on its own price. */
   useOfficialDiesel?: boolean;
   /** A market toll total applied from the price check, per one-way leg. */
@@ -213,6 +219,7 @@ export function computeCosts({
   liveFuel,
   aiFuelPrice,
   quoteFuelPrice,
+  driverNights,
   useOfficialDiesel,
   aiTollOneWay,
   returnLoadBooked,
@@ -366,7 +373,7 @@ export function computeCosts({
     },
     driver: {
       allowance_per_night: nullIfNotPositive(pick(c, ['driver_allowance_per_night'])),
-      nights: null,
+      nights: driverNights != null && driverNights >= 0 ? driverNights : null,
       amount: driverOverride,
     },
     hours_per_day: null,

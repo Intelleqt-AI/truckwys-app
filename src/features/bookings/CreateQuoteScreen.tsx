@@ -1215,6 +1215,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         liveFuel,
         aiFuelPrice,
         quoteFuelPrice,
+        // Applied nights out; a typed driver amount still wins.
+        driverNights: spokenNights,
         useOfficialDiesel,
         aiTollOneWay,
         returnLoadBooked,
@@ -1242,6 +1244,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       liveFuel,
       aiFuelPrice,
       quoteFuelPrice,
+      spokenNights,
       useOfficialDiesel,
       aiTollOneWay,
       returnLoadBooked,

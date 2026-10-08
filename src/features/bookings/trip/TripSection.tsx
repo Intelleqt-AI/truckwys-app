@@ -1,6 +1,6 @@
 // Job detail: the trip margin card and the return-load link. Hidden whole on a
 // backend without trip economics (economics endpoint 404 / 405).
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Alert, View, TouchableOpacity } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Group, Icon, Txt, Mono } from '@/components/ui';
@@ -33,6 +33,8 @@ export function TripSection({
   const qc = useQueryClient();
   const { data: economics, refetch: refetchEconomics, isFetching } = useLoadEconomics(loadId);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Synchronous guard against a double tap before `busyId` re-renders.
+  const busyRef = useRef(false);
 
   const oneWay = tripType.toUpperCase() !== 'ROUND_TRIP';
   const linkable = !!economics && !economics.pair && oneWay && status !== 'CANCELLED';
@@ -49,6 +51,8 @@ export function TripSection({
   const link = (c: Candidate, direction: CandidateDirection) => {
     if (busyId) return;
     const go = async () => {
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusyId(String(c.loadId));
       try {
         const res =
@@ -60,6 +64,7 @@ export function TripSection({
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Couldn't link that load");
       } finally {
+        busyRef.current = false;
         setBusyId(null);
       }
     };
@@ -81,6 +86,8 @@ export function TripSection({
         text: 'Unlink',
         style: 'destructive',
         onPress: async () => {
+          if (busyRef.current) return;
+          busyRef.current = true;
           setBusyId('unlink');
           try {
             await unlinkReturnLoad(loadId);
@@ -89,6 +96,7 @@ export function TripSection({
           } catch (e) {
             toast.error(e instanceof Error ? e.message : "Couldn't unlink");
           } finally {
+            busyRef.current = false;
             setBusyId(null);
           }
         },

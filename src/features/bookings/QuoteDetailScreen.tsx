@@ -30,6 +30,7 @@ import {
   useQuoteFuelAlert,
   useQuoteCosting,
   useCompanyProfileData,
+  useBookedQuotedMargin,
   sendQuote,
   recordQuoteOutcome,
   deleteQuote,
@@ -62,7 +63,7 @@ import type { AppStackParamList } from '@/navigation/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { pricedInEarlierPeriod } from './quote/rules';
 import { pct } from './quote/CostBreakdownCard';
-import { actualsView } from './trip/economics';
+import { actualsView, percent } from './trip/economics';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -102,6 +103,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const { data: fuelAlert } = useQuoteFuelAlert(id, !!data && ['DRAFT', 'SENT'].includes(status));
   const { data: costing } = useQuoteCosting(id, !!data);
   const { data: company } = useCompanyProfileData();
+  // Once delivered (actuals recorded), the margin it was quoted at, from the job.
+  const { data: quotedMarginAtBooking } = useBookedQuotedMargin(
+    bookedLoadOf(data as Record<string, unknown> | undefined)?.id ?? null,
+    !!data && !!(data as Record<string, unknown>).actuals,
+  );
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
@@ -926,16 +932,25 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         // What the job really earned once delivered (QuoteOutcome actuals).
         <Group label="How it went">
           <DetailRow
-            label="Actual margin"
-            hint={actuals.basis === 'Estimate' ? 'Estimated costs' : undefined}
+            label={actuals.marginLabel}
             value={actuals.margin}
             valueColor={actuals.negative ? colors.danger : undefined}
             boldValue
           />
-          {actuals.revenue && <DetailRow label="Revenue" value={actuals.revenue} />}
+          {quotedMarginAtBooking != null && (
+            <DetailRow label="Quoted margin" value={percent(quotedMarginAtBooking)} />
+          )}
+          {actuals.revenue && <DetailRow label="Revenue excl. VAT" value={actuals.revenue} />}
           {actuals.cost && (
             <DetailRow
-              label={actuals.basis === 'Actual' ? 'Actual cost' : 'Cost'}
+              label={
+                actuals.basis === 'Actual'
+                  ? 'Actual cost excl. VAT'
+                  : actuals.basis === 'Estimate'
+                    ? 'Estimated cost excl. VAT'
+                    : 'Cost excl. VAT'
+              }
+              hint={actuals.basis === 'Part actual' ? 'Part actual, part estimate' : undefined}
               value={actuals.cost}
               last={!actuals.backhaul}
             />

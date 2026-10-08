@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -71,6 +71,9 @@ export function BookJobScreen({ route, navigation }: Props) {
   const [deliveryDate, setDeliveryDate] = useState<string | undefined>();
   const [choice, setChoice] = useState<ReturnChoice>('empty');
   const [busy, setBusy] = useState(false);
+  // Synchronous guards: a second tap lands before `busy` re-renders.
+  const bookingRef = useRef(false);
+  const linkingRef = useRef(false);
   const [result, setResult] = useState<BookingResult | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [linkedId, setLinkedId] = useState<string | null>(null);
@@ -149,7 +152,8 @@ export function BookJobScreen({ route, navigation }: Props) {
   };
 
   const book = async () => {
-    if (!canBook) return;
+    if (!canBook || bookingRef.current) return;
+    bookingRef.current = true;
     setBusy(true);
     try {
       // One call: the link is made with the booking. Only a backend whose
@@ -197,12 +201,14 @@ export function BookJobScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(bookErrorText(e));
     } finally {
+      bookingRef.current = false;
       setBusy(false);
     }
   };
 
   const link = async (c: Candidate, direction: CandidateDirection) => {
-    if (!result?.loadId || linkingId) return;
+    if (!result?.loadId || linkingId || linkingRef.current) return;
+    linkingRef.current = true;
     const key = String(c.loadId);
     setLinkingId(key);
     try {
@@ -222,6 +228,7 @@ export function BookJobScreen({ route, navigation }: Props) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't link that load");
     } finally {
+      linkingRef.current = false;
       setLinkingId(null);
     }
   };

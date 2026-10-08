@@ -43,12 +43,31 @@ export function percent(n: number | null | undefined, decimals = 1): string {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** `2026-10-12…` → `12 Oct`; anything else → ''. */
+/** South Africa is UTC+2 all year (no daylight saving). */
+const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * `12 Oct`, on the South African calendar. The API sends datetimes in UTC
+ * (`2026-10-11T22:00:00+00:00` is a 12 Oct collection in SAST), so a value
+ * with a time is moved to SAST before its day is read; a bare date is taken
+ * as written. Anything else → ''.
+ */
 export function shortDate(iso: string | null | undefined): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
-  if (!m) return '';
-  const month = MONTHS[Number(m[2]) - 1];
-  return month ? `${Number(m[3])} ${month}` : '';
+  const raw = iso ?? '';
+  let y: number, mo: number, d: number;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    [y, mo, d] = raw.split('-').map(Number) as [number, number, number];
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(raw)) return '';
+    // No offset given: the backend's naive datetimes are UTC.
+    const withZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : `${raw}Z`;
+    const t = Date.parse(withZone);
+    if (!Number.isFinite(t)) return '';
+    const sast = new Date(t + SAST_OFFSET_MS);
+    [y, mo, d] = [sast.getUTCFullYear(), sast.getUTCMonth() + 1, sast.getUTCDate()];
+  }
+  const month = MONTHS[mo - 1];
+  return month && y ? `${d} ${month}` : '';
 }
 
 /** An endpoint an older backend doesn't have: hide the feature, say nothing. */
@@ -185,8 +204,21 @@ export interface Economics {
   expectingReturn: boolean;
 }
 
-const basisOf = (v: unknown): Basis =>
-  v === 'actual' || v === 'estimate' || v === 'mixed' ? v : null;
+/** `part actual` / `part_actual` (quote actuals) are the same as `mixed`. */
+const basisOf = (v: unknown): Basis => {
+  const b = text(v).trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (b === 'actual' || b === 'estimate') return b;
+  if (b === 'mixed' || b === 'part_actual') return 'mixed';
+  return null;
+};
+
+/** Where revenue comes from: issued invoices, or the job's own price. */
+export function revenueBasisLabel(basis: Basis): string | null {
+  if (basis === 'actual') return 'Invoiced';
+  if (basis === 'estimate') return 'Job price';
+  if (basis === 'mixed') return 'Part invoiced';
+  return null;
+}
 
 const roleOf = (v: unknown): LegRole => (v === 'outbound' || v === 'return' ? v : 'single');
 
@@ -277,6 +309,8 @@ export interface LegView {
   lane: string;
   loadId: number | string | null;
   revenue: string;
+  /** `Invoiced` / `Job price`. */
+  revenueBasis: string | null;
   costLabel: string;
   cost: string;
   margin: string;
@@ -314,6 +348,7 @@ function legView(l: Leg, i: number): LegView {
     lane: l.lane,
     loadId: l.loadId,
     revenue: rand(l.revenue),
+    revenueBasis: revenueBasisLabel(l.revenueBasis),
     costLabel: l.costBasis === 'actual' ? 'Actual cost' : 'Estimated cost',
     cost: l.cost == null ? '—' : rand(l.cost),
     margin: marginText(l.margin, l.marginPct),
@@ -585,6 +620,8 @@ export function returnHistoryText(analysis: unknown): string | null {
 
 // ── Quote detail: what the job really earned ────────────────────────────────
 export interface ActualsView {
+  /** `Actual margin` / `Estimated margin` / `Part actual margin`. */
+  marginLabel: string;
   margin: string;
   negative: boolean;
   basis: string | null;
@@ -600,10 +637,13 @@ export function actualsView(raw: unknown): ActualsView | null {
   const revenue = numOrNull(a.actual_revenue);
   const cost = numOrNull(a.actual_cost);
   if (pct == null && revenue == null) return null;
+  const basis = basisOf(a.actual_cost_basis);
   return {
+    marginLabel:
+      basis === 'estimate' ? 'Estimated margin' : basis === 'mixed' ? 'Part actual margin' : 'Actual margin',
     margin: pct == null ? '—' : percent(pct),
     negative: (pct ?? 0) < 0,
-    basis: basisLabel(basisOf(a.actual_cost_basis)),
+    basis: basisLabel(basis),
     revenue: revenue == null ? null : rand(revenue),
     cost: cost == null ? null : rand(cost),
     backhaul: a.backhaul_found === true ? 'Came back loaded' : a.backhaul_found === false ? 'Came back empty' : null,

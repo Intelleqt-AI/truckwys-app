@@ -581,6 +581,25 @@ export function useBookingPreview(quoteId: string | number, pickupDate: string, 
   });
 }
 
+/**
+ * The margin as quoted, frozen on the job when it was booked
+ * (load.quoted_margin_pct, never changed afterwards). Shares the job's
+ * detail cache; null when the job has none.
+ */
+export function useBookedQuotedMargin(loadId: string | number | null, enabled: boolean) {
+  return useQuery<Record<string, unknown>, Error, number | null>({
+    queryKey: ['load', loadId ?? ''],
+    enabled: enabled && loadId != null && loadId !== '',
+    queryFn: () => fetchData(`loads/${loadId}/`),
+    select: (l) => {
+      const v = l?.quoted_margin_pct;
+      if (v == null || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    },
+  });
+}
+
 /** POST loads/{outbound}/link-return/ {return_load_id}. */
 export const linkReturnLoad = (outboundId: string | number, returnId: string | number) =>
   postData<Record<string, unknown>>({

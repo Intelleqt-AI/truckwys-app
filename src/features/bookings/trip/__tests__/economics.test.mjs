@@ -40,7 +40,14 @@ test('money and percentages read the SA way', () => {
   assert.equal(percent(18.24), '18,2%');
   assert.equal(percent(-3), '−3,0%');
   assert.equal(percent(-0.01), '0,0%');
+  // The API sends UTC: 22:00 UTC on 11 Oct is 12 Oct in SAST.
+  assert.equal(shortDate('2026-10-11T22:00:00+00:00'), '12 Oct');
+  assert.equal(shortDate('2026-10-11T22:00:00Z'), '12 Oct');
+  assert.equal(shortDate('2026-10-11T21:59:00+00:00'), '11 Oct');
   assert.equal(shortDate('2026-10-12T00:00:00+02:00'), '12 Oct');
+  assert.equal(shortDate('2026-12-31T23:30:00+00:00'), '1 Jan');
+  assert.equal(shortDate('2026-10-12'), '12 Oct');
+  assert.equal(shortDate('soon'), '');
   assert.equal(shortDate(null), '');
 });
 
@@ -57,8 +64,8 @@ const RAW_CANDIDATES = [
     customer_name: 'Highveld Grain',
     pickup: 'Durban',
     delivery: 'Johannesburg',
-    pickup_date: '2026-10-12T00:00:00+02:00',
-    delivery_date: '2026-10-13T00:00:00+02:00',
+    pickup_date: '2026-10-11T22:00:00+00:00',
+    delivery_date: '2026-10-12T22:00:00+00:00',
     total_amount: 18500,
     pickup_km_from_drop: 7.6,
     reverses_lane: true,
@@ -125,6 +132,8 @@ test('pair margin card: per leg, combined, empty return removed, missing prompts
   assert.equal(v.legs.length, 2);
   assert.equal(v.legs[0].title, 'Outbound');
   assert.equal(v.legs[0].costLabel, 'Actual cost');
+  assert.equal(v.legs[0].revenueBasis, 'Invoiced');
+  assert.equal(v.legs[1].revenueBasis, 'Job price');
   assert.equal(v.legs[0].basis, 'Actual');
   assert.equal(sp(v.legs[0].margin), 'R 9 000 · 30,0%');
   assert.equal(v.legs[0].quoted, 'Quoted 20,0%');
@@ -272,13 +281,20 @@ test('quote actuals once delivered', () => {
     actual_cost_basis: 'actual', recorded_at: '2026-10-08T10:00:00Z',
   });
   assert.equal(v.margin, '17,3%');
+  assert.equal(v.marginLabel, 'Actual margin');
   assert.equal(v.basis, 'Actual');
   assert.equal(v.backhaul, 'Came back loaded');
   assert.equal(sp(v.cost), 'R 24 825');
   assert.equal(actualsView(null), null);
   assert.equal(actualsView({ actual_margin_pct: null, actual_revenue: null }), null);
-  assert.equal(actualsView({ actual_margin_pct: -4, backhaul_found: false, actual_cost_basis: 'estimate' }).backhaul,
-    'Came back empty');
+  const est = actualsView({ actual_margin_pct: -4, backhaul_found: false, actual_cost_basis: 'estimate' });
+  assert.equal(est.backhaul, 'Came back empty');
+  assert.equal(est.marginLabel, 'Estimated margin');
+  for (const b of ['part actual', 'part_actual', 'mixed']) {
+    const part = actualsView({ actual_margin_pct: 12, actual_cost_basis: b });
+    assert.equal(part.marginLabel, 'Part actual margin');
+    assert.equal(part.basis, 'Part actual');
+  }
 });
 
 test('booking preview before booking: candidates, invoice, can_book', () => {

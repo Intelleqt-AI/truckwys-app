@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Modal, ScrollView, TouchableOpacity } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQueryClient } from '@tanstack/react-query';
@@ -90,7 +90,7 @@ export function DraftClauseLine({
   className?: string;
 }) {
   if (!adjustment?.clause) return null;
-  const line = draftClauseLine(fuelReferenceLine(quote), adjustment.clause);
+  const line = draftClauseLine(adjustment.reference ?? fuelReferenceLine(quote), adjustment.clause);
   if (!line) return null;
   return <Txt className={`text-caption text-faint ${className}`}>{line}</Txt>;
 }
@@ -157,6 +157,7 @@ function ReminderSheet({ quoteId, onClose }: { quoteId: string | number; onClose
   const qc = useQueryClient();
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
+  const inFlight = useRef(false);
   const settled = cleanNote(useDebouncedValue(note, 400));
   const preview = useReminderPreview(quoteId, settled, true);
   const p = preview.data?.preview ?? null;
@@ -170,10 +171,12 @@ function ReminderSheet({ quoteId, onClose }: { quoteId: string | number; onClose
   }, [preview.isError, preview.error]);
 
   const send = async () => {
-    if (sending || blocked || !to) return;
+    if (inFlight.current || sending || blocked || !to || catchingUp) return;
+    inFlight.current = true;
     setSending(true);
     try {
-      const res = await sendReminder(quoteId, cleanNote(note));
+      // Exactly the note the shown preview was built from.
+      const res = await sendReminder(quoteId, settled);
       toast.notice(reminderSentText(res?.sent_to || to));
       invalidateFor(qc, 'quote');
       onClose();
@@ -182,6 +185,7 @@ function ReminderSheet({ quoteId, onClose }: { quoteId: string | number; onClose
       // too_soon / expired / … : the card's state moved on.
       void qc.invalidateQueries({ queryKey: ['quote-follow-up', quoteId] });
     } finally {
+      inFlight.current = false;
       setSending(false);
     }
   };

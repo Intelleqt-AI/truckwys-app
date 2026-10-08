@@ -29,10 +29,12 @@ eq(dayText("2026-10-09T22:30:00Z"), "Sat 10 Oct");          // 00:30 SAST on the
 eq(dayText(null), "—");
 
 // --- fuel price adjustment row
-const base = { quote_id: 1, load_id: null, clause: "x", amount_zar: null, direction: null, description: null,
+const base = { quote_id: 1, load_id: null, clause: "x", stamped: true, amount_zar: null, direction: null, description: null,
   product: "diesel", price_at_pricing: 29.5551, price_on_trip: 32.7989, threshold_pct: 5 };
 eq(adjustmentRow({ ...base, applies: false, reason: "no_clause" }), null);
 eq(adjustmentRow({ ...base, applies: false, reason: "no_quote" }), null);
+// Booked straight from a draft: never stamped, never shown.
+eq(adjustmentRow({ ...base, stamped: false, applies: true, reason: "applies", amount_zar: 10, direction: "up", description: "x" }), null);
 eq(adjustmentRow({ ...base, applies: false, reason: "no_official_price" }).title, "No official price for the trip date yet.");
 eq(adjustmentRow({ ...base, applies: false, reason: "within_threshold", change_pct: -2.08 }).title,
   "Diesel moved 2,1%, inside your 5% clause. No change.");
@@ -123,6 +125,9 @@ eq(boundError("expiry_nudge_days", ""), "Enter a number of days between 1 and 14
 eq(apiMessage({ data: { success: false, code: "too_soon", message: "A reminder went out less than a day ago." } }, "x"),
   "A reminder went out less than a day ago.");
 eq(apiMessage(new Error("HTTP error! status: 500"), "Could not send."), "Could not send.");
+eq(apiMessage(Object.assign(new Error("x"), { status: 403, data: { detail: "Only an admin can do this." } }), "y"), "Only an admin can do this.");
+eq(apiMessage(Object.assign(new Error("x"), { status: 403, data: {} }), "y"), "You don’t have permission to do this.");
+eq(apiMessage(Object.assign(new Error("x"), { status: 502, data: "<html>" }), "Could not send."), "Could not send. (server error 502)");
 deq(fieldErrors({ data: { code: "invalid_input", errors: { follow_up_after_days: "Enter a number of days between 1 and 30." } } }),
   { follow_up_after_days: "Enter a number of days between 1 and 30." });
 

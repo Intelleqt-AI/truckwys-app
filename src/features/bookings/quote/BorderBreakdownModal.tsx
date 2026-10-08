@@ -42,10 +42,13 @@ function ComponentList({
   title,
   items,
   agentFeeTyped,
+  agentFeeValue,
 }: {
   title?: string;
   items: Record<string, unknown>[];
   agentFeeTyped?: boolean;
+  /** The typed fee: shown on the agent row (the route isn't re-run for it). */
+  agentFeeValue?: number | null;
 }) {
   return (
     <View className={title ? 'mt-3' : ''}>
@@ -64,7 +67,11 @@ function ComponentList({
                 {detail ? <Txt className="text-caption text-faint">{` · ${detail}`}</Txt> : null}
               </Txt>
             </View>
-            <Mono className="shrink-0 text-sub text-fg">{formatCurrency(num(pick(i, ['amount'])))}</Mono>
+            <Mono className="shrink-0 text-sub text-fg">
+              {formatCurrency(
+                agentFeeTyped && agentFeeValue != null && /agent/i.test(str(i.code)) ? agentFeeValue : num(pick(i, ['amount'])),
+              )}
+            </Mono>
           </View>
         );
       })}
@@ -85,6 +92,7 @@ function BorderBreakdownModalImpl({
   edit,
   agentEdit,
   agentFeeTyped,
+  agentFeeValue,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -95,6 +103,7 @@ function BorderBreakdownModalImpl({
   agentEdit?: BreakdownEdit | null;
   /** The person typed their agent's fee: the agent row is "Your fee". */
   agentFeeTyped?: boolean;
+  agentFeeValue?: number | null;
 }) {
   const items = costs.crossBorderBreakdown.filter((i) => num(pick(i, ['amount'])) > 0);
   const rows: BreakdownRow[] = items.length
@@ -123,10 +132,10 @@ function BorderBreakdownModalImpl({
       edit={agentEdit ?? edit}
     >
       {items.length > 0 && (
-        <ComponentList title={back.length ? 'Out' : undefined} items={items} agentFeeTyped={agentFeeTyped} />
+        <ComponentList title={back.length ? 'Out' : undefined} items={items} agentFeeTyped={agentFeeTyped} agentFeeValue={agentFeeValue} />
       )}
       {back.length > 0 && (
-        <ComponentList title={costs.legs === 2 ? 'Back' : 'Back, empty'} items={back} agentFeeTyped={agentFeeTyped} />
+        <ComponentList title={costs.legs === 2 ? 'Back' : 'Back, empty'} items={back} agentFeeTyped={agentFeeTyped} agentFeeValue={agentFeeValue} />
       )}
     </BreakdownModal>
   );

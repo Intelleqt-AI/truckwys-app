@@ -736,6 +736,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       setTollsConfirmedNone(snap.tolls_confirmed_none === true);
       setDistanceConfirmed(snap.distance_confirmed === true);
       setUseOfficialDiesel(snap.use_official === true);
+      // The quote's own border choices (costing_inputs, newer backends).
+      const ci = (pick(q, ['costing_inputs']) ?? {}) as Record<string, unknown>;
+      setAbnormalLoad(ci.abnormal_load === true);
+      if (typeof ci.clearing_agent_fee === 'number') setAgentFee(formatPlain(ci.clearing_agent_fee));
       rateTouchedRef.current = true;
       const fuelUsed = num(pick(q, ['fuel_price_used'])) || num(snap.fuel_price_per_litre_used);
       savedPricingRef.current = {
@@ -929,7 +933,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           trip_type: tripType,
           include_return: tripType === 'ONE_WAY' && !returnLoadBooked,
           // The agent's fee typed on this quote (priced into the border lines).
-          ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
           // Zimbabwe charges an abnormal load its own access toll.
           ...(abnormalLoad ? { abnormal_load: true } : {}),
           // No fallback needed: this effect only runs once `ready`, and
@@ -961,9 +964,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-    // agentFee / abnormalLoad: the border lines are re-priced by the server
-    // (the agent row then reads "Your fee"), debounced like every input.
-  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce, pickupDate, tripType, returnLoadBooked, agentFee, abnormalLoad]);
+    // abnormalLoad changes the border lines the route prices. The agent's fee
+    // does not re-route (every lookup costs): it's applied to the border
+    // lines already here, and sent with the costing and the save.
+  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce, pickupDate, tripType, returnLoadBooked, abnormalLoad]);
 
   // A confirmation ("no tolls", "distance is right") belongs to the route it
   // was given for: a new route asks again.
@@ -2048,6 +2052,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // The way home and border figures the route gave, so the backend re-prices
     // the saved quote the same way (newer backends keep them).
     for (const [k, v] of Object.entries(costs.savedCostingExtras)) if (v != null && v >= 0) out[k] = v;
+    if (abnormalLoad) out.abnormal_load = true;
     // Saved so the send check knows which border costs aren't on file.
     if (costs.costingInputs.border_costs_unknown) out.border_costs_unknown = costs.costingInputs.border_costs_unknown;
     if (returnLoadBooked) out.include_empty_return = false;
@@ -2952,6 +2957,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             onClose={() => setBorderModal(false)}
             costs={costs}
             agentFeeTyped={parseNum(agentFee) != null}
+            agentFeeValue={parseNum(agentFee)}
             agentEdit={
               costs.agentEstimate !== null
                 ? {

@@ -54,6 +54,7 @@ import {
   suggestLocations,
   calculateRoute,
   analyzeQuote,
+  useReturnLoadHistory,
   benchmarkQuote,
   aiChatQuote,
   aiVoiceQuote,
@@ -62,6 +63,7 @@ import {
   sendQuote,
   type AiChatTurn,
 } from './api';
+import { returnHistoryText } from './trip/economics';
 import { useCustomers } from '@/features/customers/api';
 import type { GeoPoint } from '@/lib/routeGeometry';
 import { MapCanvas } from './quote/MapCanvas';
@@ -1318,6 +1320,26 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [analysis],
   );
   const winProb = num(pick(opt, ['win_probability_at_optimal']));
+
+  // How often this lane's trips found a return load (pricing analysis
+  // `return_load_history`), shown under Empty / Loaded. Context only: it never
+  // changes the empty-return default. From the analysis when it carries it,
+  // else one pricing-analysis call per lane; nothing on an older backend.
+  const analysisReturnHistory = returnHistoryText(analysis);
+  const historyLane = useMemo(
+    () =>
+      tripType === 'ONE_WAY' && costs.emptyReturnEligible && pickup && delivery
+        ? {
+            origin: extractCode(pickup.label),
+            destination: extractCode(delivery.label),
+            pickup: pickup.label,
+            delivery: delivery.label,
+          }
+        : null,
+    [tripType, costs.emptyReturnEligible, pickup, delivery],
+  );
+  const { data: fetchedReturnHistory } = useReturnLoadHistory(historyLane, analysisReturnHistory);
+  const returnHistory = analysisReturnHistory ?? fetchedReturnHistory ?? null;
   const submitNL = async (text: string) => {
     const message = text.trim();
     if (!message || nlBusy) return;
@@ -2756,6 +2778,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                         {returnLoadBooked ? 'Back empty' : 'Loaded back'}:{' '}
                         {formatCurrency(costs.altReturnTargetPrice, { maximumFractionDigits: 0 })}
                       </Mono>
+                    )}
+                    {returnHistory && (
+                      <Txt className="mt-1 text-caption text-muted">{returnHistory}</Txt>
                     )}
                   </View>
                 )}

@@ -23,6 +23,7 @@ export function useAppNavigation() {
       nav.navigate('InvoiceDetail', { id, preview }),
     openAssign: (params: AppStackParamList['AssignDriverVehicle']) =>
       nav.navigate('AssignDriverVehicle', params),
+    openBookJob: (params: AppStackParamList['BookJob']) => nav.navigate('BookJob', params),
     openCustomer: (id: string | number, preview?: Record<string, unknown>) =>
       nav.navigate('CustomerDetail', { id, preview }),
     openImport: (entity: 'customers' | 'vehicles') => nav.navigate('Import', { entity }),

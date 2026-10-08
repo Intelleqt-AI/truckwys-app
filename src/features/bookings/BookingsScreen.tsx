@@ -238,7 +238,7 @@ const quoteItemType = (q: QuoteLite) => {
 // for search, filter or a page arriving doesn't re-render every visible card.
 const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
   const { colors } = useTheme();
-  const { openQuote, openAssign, openLoad } = useAppNavigation();
+  const { openQuote, openBookJob, openLoad } = useAppNavigation();
   const stage = quoteStage(quote.raw) ?? quote.status;
   // The quote API names the load it was booked as, so no scan of the loads
   // table is needed.
@@ -253,8 +253,7 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
   })();
   const onPress = () => openQuote(quote.id, quote.raw);
   const onConvert = () =>
-    openAssign({
-      mode: 'convert',
+    openBookJob({
       quoteId: quote.id,
       reference: quote.code,
       vehicleType: str(pick(quote.raw, ['vehicle_type'])) || undefined,
@@ -296,7 +295,7 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
           activeOpacity={0.7}
           className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row"
         >
-          <Mono className="text-sub font-medium text-link">Convert to booking</Mono>
+          <Mono className="text-sub font-medium text-link">Book job</Mono>
           <Icon name="arrowRight" size={14} color={colors.link} />
         </TouchableOpacity>
       )}

@@ -6,6 +6,15 @@ import { useInfiniteList } from '@/lib/api/useInfiniteList';
 import { normalizeQuote, normalizeLoad, type LoadLite } from '@/types/domain';
 import { roundTo } from '@/lib/formatters';
 import { parseErrorBody, sendBlockMessage } from './quote/sendBlock';
+import {
+  isMissingEndpoint,
+  parseCandidates,
+  parseEconomics,
+  returnHistoryText,
+  type Candidate,
+  type CandidateDirection,
+  type Economics,
+} from './trip/economics';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
 /**
@@ -420,10 +429,21 @@ export const recordQuoteOutcome = (id: string | number, data: QuoteOutcome) =>
 
 // Driver/vehicle are optional — converting with neither leaves the booking
 // unassigned, to be picked up later from the load detail screen.
-export const convertQuoteToLoad = (
-  id: string | number,
-  data: { driver_id?: string; vehicle_id?: string } = {},
-) => postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
+//
+// One-tap booking (trip economics): idempotent — an already-booked quote
+// answers 200 with its job. Dates are YYYY-MM-DD; `return_of_load_id` books
+// this job as the return of that load, `expect_return` flags it as an
+// outbound waiting for one. Newer backends add `booking` (see trip/economics).
+export interface ConvertToLoadBody {
+  driver_id?: string;
+  vehicle_id?: string;
+  pickup_date?: string;
+  delivery_date?: string;
+  return_of_load_id?: number | string;
+  expect_return?: boolean;
+}
+export const convertQuoteToLoad = (id: string | number, data: ConvertToLoadBody = {}) =>
+  postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
@@ -491,3 +511,90 @@ export const uploadLoadPod = (id: string | number, file: { uri: string; name: st
     config: { headers: { 'Content-Type': 'multipart/form-data' } },
   });
 };
+
+// ── Trip economics (return loads, round-trip margins) ───────────────────────
+// Each answers `null` on a backend without the endpoint (404 / 405 / 501), so
+// the screen hides the feature instead of showing an error.
+async function orNullIfMissing<T>(fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (isMissingEndpoint((e as { status?: number }).status)) return null;
+    throw e;
+  }
+}
+
+/** GET loads/{id}/economics/: the job's margin, or its return pair's. */
+export function useLoadEconomics(id: string | number, enabled = true) {
+  return useQuery<Economics | null>({
+    queryKey: ['load-economics', id],
+    enabled: enabled && id != null && id !== '',
+    retry: false,
+    queryFn: async () =>
+      parseEconomics(await orNullIfMissing(() => fetchData(`loads/${id}/economics/`))),
+  });
+}
+
+/**
+ * GET loads/{id}/return-candidates/: `return` = loads that could bring this
+ * job's truck home; `outbound` = loads this job could be the return of.
+ */
+export function useReturnCandidates(id: string | number, direction: CandidateDirection, enabled = true) {
+  return useQuery<Candidate[] | null>({
+    queryKey: ['return-candidates', id, direction],
+    enabled: enabled && id != null && id !== '',
+    retry: false,
+    queryFn: async () => {
+      const res = await orNullIfMissing(() =>
+        fetchData<Record<string, unknown>>(`loads/${id}/return-candidates/?direction=${direction}`),
+      );
+      return res == null ? null : parseCandidates(res.candidates);
+    },
+  });
+}
+
+/** POST loads/{outbound}/link-return/ {return_load_id}. */
+export const linkReturnLoad = (outboundId: string | number, returnId: string | number) =>
+  postData<Record<string, unknown>>({
+    url: `loads/${outboundId}/link-return/`,
+    data: { return_load_id: returnId },
+  });
+
+/** POST loads/{id}/unlink-return/ (either leg). */
+export const unlinkReturnLoad = (id: string | number) =>
+  postData<Record<string, unknown>>({ url: `loads/${id}/unlink-return/`, data: {} });
+
+/**
+ * How often this company's trips on the lane found a return load
+ * (pricing analysis `return_load_history`). Context only, one call per lane;
+ * null on an older backend or any failure.
+ */
+export function useReturnLoadHistory(
+  lane: { origin: string; destination: string; pickup?: string; delivery?: string } | null,
+  known: string | null,
+) {
+  return useQuery<string | null>({
+    queryKey: ['return-load-history', lane?.origin ?? '', lane?.destination ?? ''],
+    enabled: !!lane && !!lane.origin && !!lane.destination && !known,
+    retry: false,
+    staleTime: 30 * 60 * 1000,
+    queryFn: async () => {
+      try {
+        const res = await postData<Record<string, unknown>>({
+          url: 'quotes/pricing-analysis/',
+          data: {
+            origin: lane!.origin,
+            destination: lane!.destination,
+            pickup_location: lane!.pickup ?? lane!.origin,
+            delivery_location: lane!.delivery ?? lane!.destination,
+            trip_type: 'ONE_WAY',
+          },
+          config: { timeout: 10000 },
+        });
+        return returnHistoryText(res);
+      } catch {
+        return null;
+      }
+    },
+  });
+}

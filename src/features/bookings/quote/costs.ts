@@ -149,6 +149,7 @@ export interface CostBreakdown {
     toll_cost_return: number | null;
     border_cost_empty_return: number | null;
     border_estimate: number | null;
+    border_estimate_empty_return: number | null;
     clearing_agent_fee: number | null;
   };
   /** Target-margin price with the other empty-return answer (one-way, 300 km+). */
@@ -313,6 +314,9 @@ export function computeCosts({
   const estBack =
     legs === 2 ? (retOk ? legEstimate(retBreakdown, ret!.border_estimate_zar) : estOut) : 0;
   const borderEstimate = Math.round((estOut + estBack) * 100) / 100 || null;
+  // The empty run home's own estimate (one-way with an empty return).
+  const borderEstimateEmptyReturn =
+    legs === 1 && retOk ? Math.round(legEstimate(retBreakdown, ret!.border_estimate_zar) * 100) / 100 || null : null;
   // What the border schedules assumed about the truck (gross mass, axles).
   const vp = (bsrc.border_vehicle_profile && typeof bsrc.border_vehicle_profile === 'object'
     ? bsrc.border_vehicle_profile
@@ -358,6 +362,7 @@ export function computeCosts({
     border_cost: borderOverride != null && borderOverride >= 0 ? borderOverride : borderTotal,
     border_cost_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? retBorder : null,
     border_estimate: borderOverride == null ? borderEstimate : null,
+    border_estimate_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? borderEstimateEmptyReturn : null,
     international: !!international,
     // Parts of the route with no border figures on file (newer backends);
     // a border figure the person typed covers them.
@@ -462,6 +467,7 @@ export function computeCosts({
       toll_cost_return: ownRouteTolls && tripType === 'ROUND_TRIP' ? retToll : null,
       border_cost_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? retBorder : null,
       border_estimate: borderOverride == null ? borderEstimate : null,
+      border_estimate_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? borderEstimateEmptyReturn : null,
       clearing_agent_fee: agentFeeOverride ?? null,
     },
     priceIsDefault,

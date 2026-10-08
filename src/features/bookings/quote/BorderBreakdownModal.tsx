@@ -29,7 +29,13 @@ export function borderDetail(i: Record<string, unknown>): string {
   const cur = str(i.currency).toUpperCase();
   if (cur && cur !== 'ZAR' && i.amount_foreign != null) {
     // The rate at the precision the server gives (R 16,6391; R 0,25608).
-    const rate = fx && fx.zar_per_unit != null ? `R ${String(fx.zar_per_unit).replace('.', ',')}` : '';
+    const rate = fx
+      ? str(fx.zar_per_unit_text)
+        ? `R ${str(fx.zar_per_unit_text)}`
+        : fx.zar_per_unit != null
+          ? `R ${String(fx.zar_per_unit).replace('.', ',')}`
+          : ''
+      : '';
     const when = fx && fx.is_fallback === true && str(fx.as_of) ? ` (rate as of ${formatDate(str(fx.as_of))})` : '';
     parts.push(`${cur} ${formatNumber(num(i.amount_foreign))}${rate ? ` at ${rate}` : ''}${when}`);
   }

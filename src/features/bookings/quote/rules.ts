@@ -948,6 +948,10 @@ export interface CostingInputs {
   border_cost_empty_return?: number | null;
   /** The part of border_cost that is an estimate (not a published tariff). */
   border_estimate?: number | null;
+  /** The same for the empty run home's border cost. */
+  border_estimate_empty_return?: number | null;
+  /** Carried, not costed: the route priced the border with it. */
+  abnormal_load?: boolean | null;
   include_empty_return?: boolean | null;
   settings?: { include_empty_return_default?: boolean | null; empty_return_min_km?: number | null } | null;
   minimum_charge?: number | null;
@@ -1442,7 +1446,14 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
       // The empty truck crosses back: the route calculation prices that leg
       // (exit-only charges, its own km); else the loaded leg's figure.
       const back = toNum(inp.border_cost_empty_return);
-      add('border_return', 'empty_return', cents(back !== null ? back : border), 'Border costs crossing back, empty');
+      const estBack = back !== null ? toNum(inp.border_estimate_empty_return) : null;
+      add(
+        'border_return',
+        'empty_return',
+        cents(back !== null ? back : border),
+        'Border costs crossing back, empty' + (estBack ? ` (includes ${fmtRand(estBack, 2)} estimated)` : ''),
+        estBack ? { estimate: estBack } : {},
+      );
     }
   }
 

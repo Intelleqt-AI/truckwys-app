@@ -273,3 +273,12 @@ test('border chip: only from what this Fill stated', () => {
   assert.equal(buildChips([], 'en', {}).length, 0);
   assert.equal(buildChips([], 'en', { borderPost: 'Beitbridge' })[0].label, 'Via Beitbridge');
 });
+
+test('vehicle hint "other": the backend label names the truck', () => {
+  const r = readChatResult({ vehicle_hint: 'other', vehicle_hint_label: 'Lowbed' });
+  assert.equal(r.vehicleHintLabel, 'Lowbed');
+  assert.equal(vehicleHintLabel(r.vehicleHint, 'en', r.vehicleHintLabel), 'Lowbed? Pick a truck');
+  assert.equal(vehicleHintLabel('other', 'af', 'Lowbed'), 'Lowbed? Kies ’n trok');
+  assert.equal(vehicleHintLabel('interlink', 'en', 'Interlink'), 'Superlink? Pick a truck');
+  assert.equal(readChatResult({}).vehicleHintLabel, null);
+});

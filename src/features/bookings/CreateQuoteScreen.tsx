@@ -306,6 +306,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     stopsLow: boolean;
     notUnderstood: string[];
     vehicleHint: string | null;
+    vehicleHintLabel: string | null;
     driverNights: number | null;
     fuelPrice: number | null;
     // Cross-border as this Fill stated it (not a sticky earlier one).
@@ -1763,6 +1764,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         stopsLow: isLow('stops', r.confidence),
         notUnderstood: r.notUnderstood,
         vehicleHint: r.vehicleHint && !ex.vehicleType && !nextPending ? r.vehicleHint : null,
+        vehicleHintLabel: r.vehicleHintLabel,
         driverNights: ex.driverNights ?? null,
         fuelPrice: ex.fuelPriceOverride ?? null,
         borderPost: ex.borderPost ?? null,
@@ -3135,7 +3137,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onChipPress={onFillChipPress}
                 didntCatch={didntCatchLine(fillView?.notUnderstood ?? [], nlLang)}
                 vehicleHint={
-                  fillView?.vehicleHint && !vehicleType ? vehicleHintLabel(fillView.vehicleHint, nlLang) : null
+                  fillView?.vehicleHint && !vehicleType ? vehicleHintLabel(fillView.vehicleHint, nlLang, fillView.vehicleHintLabel) : null
                 }
                 onVehicleHint={() => {
                   jumpTo('load');

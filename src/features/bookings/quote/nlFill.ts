@@ -261,6 +261,8 @@ export interface ChatResult {
   notUnderstood: string[];
   language: string | null;
   vehicleHint: string | null;
+  /** The backend's own name for the truck said (used when the hint is "other"). */
+  vehicleHintLabel: string | null;
   reply: string;
   /** The places as said ("Kaapstad"), for the chips; the fields keep the geocodable name. */
   spokenPlaces: { pickup?: string; delivery?: string };
@@ -330,6 +332,7 @@ export function readChatResult(res: unknown): ChatResult {
     notUnderstood: nu,
     language: s(r.language) || null,
     vehicleHint: text(r.vehicle_hint) ?? null,
+    vehicleHintLabel: text(r.vehicle_hint_label) ?? null,
     reply: s(r.reply).trim(),
   };
 }
@@ -355,8 +358,13 @@ const HINT_NAMES: Record<string, string> = {
 };
 
 /** "Superlink? Pick a truck" — the spoken truck matched nothing in the fleet. */
-export const vehicleHintLabel = (hint: string, lang: UiLang): string =>
-  t(lang, 'pick_truck', { hint: HINT_NAMES[hint.toLowerCase()] ?? hint });
+export const vehicleHintLabel = (hint: string, lang: UiLang, label?: string | null): string =>
+  t(lang, 'pick_truck', {
+    hint:
+      hint.toLowerCase() === 'other' && label
+        ? label
+        : (HINT_NAMES[hint.toLowerCase()] ?? label ?? hint),
+  });
 
 // ── Formatting ──────────────────────────────────────────────────────────────
 

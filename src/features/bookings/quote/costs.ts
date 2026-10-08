@@ -8,6 +8,7 @@ import {
   operatingCostPerKm,
   phoneWarning,
   withServerInputs,
+  borderEstimateOf,
   borderCostsUnknownFromRoute,
   type Costing,
   type CostingInputs,
@@ -303,7 +304,15 @@ export function computeCosts({
     ? num(retAdd.border_fees) + num(retAdd.weighbridge_fees) + num(retAdd.non_sa_tolls) + agentDelta(retBreakdown)
     : null;
   const borderTotal = legs === 2 && retBorder !== null ? outBorder + retBorder : outBorder * legs;
-  const borderEstimate = num(pick(bsrc, ['border_estimate_zar'])) || null;
+  // The estimated share of the border fees: out + back on a round trip (the
+  // way home has its own lines); an agent line stops being an estimate once
+  // the person types their agent's fee.
+  const legEstimate = (items: Record<string, unknown>[], fallback: unknown) =>
+    borderEstimateOf(items, fallback, agentFeeOverride != null);
+  const estOut = legEstimate(crossBorderBreakdown, pick(bsrc, ['border_estimate_zar']));
+  const estBack =
+    legs === 2 ? (retOk ? legEstimate(retBreakdown, ret!.border_estimate_zar) : estOut) : 0;
+  const borderEstimate = Math.round((estOut + estBack) * 100) / 100 || null;
   // What the border schedules assumed about the truck (gross mass, axles).
   const vp = (bsrc.border_vehicle_profile && typeof bsrc.border_vehicle_profile === 'object'
     ? bsrc.border_vehicle_profile

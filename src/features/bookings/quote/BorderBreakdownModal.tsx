@@ -7,8 +7,11 @@ import { BreakdownModal, type BreakdownEdit, type BreakdownRow } from './Breakdo
 import type { CostBreakdown } from './costs';
 
 /** "Published" / "Estimate" / "Unverified" / "Agent estimate". */
-export function borderLabel(i: Record<string, unknown>): { text: string; tone: 'ok' | 'estimate' } {
-  if (/agent/i.test(str(i.code))) return { text: 'Agent estimate', tone: 'estimate' };
+export function borderLabel(
+  i: Record<string, unknown>,
+  agentFeeTyped = false,
+): { text: string; tone: 'ok' | 'estimate' } {
+  if (/agent/i.test(str(i.code))) return agentFeeTyped ? { text: 'Your fee', tone: 'ok' } : { text: 'Agent estimate', tone: 'estimate' };
   const label = str(i.label).toLowerCase();
   if (label === 'unverified') return { text: 'Unverified', tone: 'estimate' };
   if (i.verified === true || label === 'published') return { text: 'Published', tone: 'ok' };
@@ -25,7 +28,8 @@ export function borderDetail(i: Record<string, unknown>): string {
   const fx = (i.fx && typeof i.fx === 'object' ? i.fx : null) as Record<string, unknown> | null;
   const cur = str(i.currency).toUpperCase();
   if (cur && cur !== 'ZAR' && i.amount_foreign != null) {
-    const rate = fx ? `${formatCurrency(num(fx.zar_per_unit))}` : '';
+    // The rate at the precision the server gives (R 16,6391; R 0,25608).
+    const rate = fx && fx.zar_per_unit != null ? `R ${String(fx.zar_per_unit).replace('.', ',')}` : '';
     const when = fx && fx.is_fallback === true && str(fx.as_of) ? ` (rate as of ${formatDate(str(fx.as_of))})` : '';
     parts.push(`${cur} ${formatNumber(num(i.amount_foreign))}${rate ? ` at ${rate}` : ''}${when}`);
   }
@@ -34,12 +38,20 @@ export function borderDetail(i: Record<string, unknown>): string {
   return parts.join(' · ');
 }
 
-function ComponentList({ title, items }: { title?: string; items: Record<string, unknown>[] }) {
+function ComponentList({
+  title,
+  items,
+  agentFeeTyped,
+}: {
+  title?: string;
+  items: Record<string, unknown>[];
+  agentFeeTyped?: boolean;
+}) {
   return (
     <View className={title ? 'mt-3' : ''}>
       {title ? <Label className="mb-1 text-faint">{title}</Label> : null}
       {items.map((i, n) => {
-        const tag = borderLabel(i);
+        const tag = borderLabel(i, agentFeeTyped);
         const detail = borderDetail(i);
         return (
           <View key={`${str(i.code)}-${n}`} className="min-h-[44px] flex-row items-center justify-between gap-3 border-b border-line-row py-1.5">
@@ -72,6 +84,7 @@ function BorderBreakdownModalImpl({
   costs,
   edit,
   agentEdit,
+  agentFeeTyped,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -80,6 +93,8 @@ function BorderBreakdownModalImpl({
   edit?: BreakdownEdit | null;
   /** The clearing agent's fee for this quote (when the route has one). */
   agentEdit?: BreakdownEdit | null;
+  /** The person typed their agent's fee: the agent row is "Your fee". */
+  agentFeeTyped?: boolean;
 }) {
   const items = costs.crossBorderBreakdown.filter((i) => num(pick(i, ['amount'])) > 0);
   const rows: BreakdownRow[] = items.length
@@ -107,8 +122,12 @@ function BorderBreakdownModalImpl({
       }}
       edit={agentEdit ?? edit}
     >
-      {items.length > 0 && <ComponentList title={back.length ? 'Out' : undefined} items={items} />}
-      {back.length > 0 && <ComponentList title={costs.legs === 2 ? 'Back' : 'Back, empty'} items={back} />}
+      {items.length > 0 && (
+        <ComponentList title={back.length ? 'Out' : undefined} items={items} agentFeeTyped={agentFeeTyped} />
+      )}
+      {back.length > 0 && (
+        <ComponentList title={costs.legs === 2 ? 'Back' : 'Back, empty'} items={back} agentFeeTyped={agentFeeTyped} />
+      )}
     </BreakdownModal>
   );
 }

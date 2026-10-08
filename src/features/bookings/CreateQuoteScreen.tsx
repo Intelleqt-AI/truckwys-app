@@ -275,9 +275,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [borderOverride, setBorderOverride] = useState('');
   // The clearing agent's fee typed on this quote; '' = the agent estimate.
   const [agentFee, setAgentFee] = useState('');
-  // Read by the route call without re-routing on every keystroke.
-  const agentFeeRef = useRef('');
-  agentFeeRef.current = agentFee;
+  // An abnormal load (Zimbabwe charges it a different access toll).
+  const [abnormalLoad, setAbnormalLoad] = useState(false);
   const [tollsConfirmedNone, setTollsConfirmedNone] = useState(false);
   const [distanceConfirmed, setDistanceConfirmed] = useState(false);
   // "Use official price" on this quote while the company prices on its own.
@@ -930,7 +929,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           trip_type: tripType,
           include_return: tripType === 'ONE_WAY' && !returnLoadBooked,
           // The agent's fee typed on this quote (priced into the border lines).
-          ...(parseNum(agentFeeRef.current) != null ? { clearing_agent_fee_zar: parseNum(agentFeeRef.current) } : {}),
+          ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
+          // Zimbabwe charges an abnormal load its own access toll.
+          ...(abnormalLoad ? { abnormal_load: true } : {}),
           // No fallback needed: this effect only runs once `ready`, and
           // weight is one of the priceGaps, so weightKg is guaranteed
           // positive here.
@@ -960,7 +961,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce, pickupDate, tripType, returnLoadBooked]);
+    // agentFee / abnormalLoad: the border lines are re-priced by the server
+    // (the agent row then reads "Your fee"), debounced like every input.
+  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce, pickupDate, tripType, returnLoadBooked, agentFee, abnormalLoad]);
 
   // A confirmation ("no tolls", "distance is right") belongs to the route it
   // was given for: a new route asks again.
@@ -1049,6 +1052,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             cargo_description: cargo || null,
             ...(pickupDate ? { pickup_date: pickupDate } : {}),
             ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
+            ...(abnormalLoad ? { abnormal_load: true } : {}),
             // The route's own border data: the server works out what's unknown.
             route: {
               cross_border: !!pick(routeData ?? {}, ['cross_border']),
@@ -1062,7 +1066,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalLoad],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1074,6 +1078,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const at = nextServerSuggested.indexOf('@');
     setServerSuggested({ id: nextServerSuggested.slice(0, at), key: nextServerSuggested.slice(at + 1) });
   }, [nextServerSuggested]);
+
+  // A border schedule that depends on an abnormal load: Zimbabwe's access toll.
+  const routeCrossesZimbabwe = [
+    ...asArray<string>(pick(routeData ?? {}, ['countries'])),
+    ...asArray<string>(pick(currentRoute, ['countries'])),
+    pickup?.cc,
+    delivery?.cc,
+    ...stops.map((st) => st.loc?.cc),
+  ].some((c) => /^(ZW|ZWE|Zimbabwe)$/i.test(String(c ?? '')));
 
   // ── Cost breakdown ──────────────────────────────────────────────────────
   // quote/costs.ts: the price lines, and the cost floor, margin and warnings
@@ -2701,6 +2714,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 />
                 {/* §5: a long one-way trip prices the empty run home unless a
                     return load is booked. Reserved height: no layout jump. */}
+                {/* Only where a border schedule depends on it (Zimbabwe). */}
+                {routeCrossesZimbabwe && (
+                  <View className="mt-3">
+                    <Label className="mb-2 text-muted">Abnormal load</Label>
+                    <SegmentedControl
+                      options={[
+                        { label: 'No', value: 'NO' },
+                        { label: 'Yes', value: 'YES' },
+                      ]}
+                      value={abnormalLoad ? 'YES' : 'NO'}
+                      onChange={(v) => setAbnormalLoad(v === 'YES')}
+                      tall
+                    />
+                  </View>
+                )}
                 {tripType === 'ONE_WAY' && costs.emptyReturnEligible && (
                   <View className="mt-3">
                     <Label className="mb-2 text-muted">Truck comes back</Label>
@@ -2923,6 +2951,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={borderModal}
             onClose={() => setBorderModal(false)}
             costs={costs}
+            agentFeeTyped={parseNum(agentFee) != null}
             agentEdit={
               costs.agentEstimate !== null
                 ? {

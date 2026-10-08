@@ -1708,3 +1708,15 @@ export function withServerInputs(
     target_margin_pct: server.target_margin_pct ?? local.target_margin_pct,
   };
 }
+
+/**
+ * The estimated (not published) share of one leg's border lines; an agent
+ * line stops being an estimate once the person typed their agent's fee. With
+ * no itemised lines (older backends), the route's own border_estimate_zar.
+ */
+export function borderEstimateOf(items: Record<string, unknown>[], fallback: unknown, agentFeeTyped: boolean): number {
+  if (!items.length) return toNum(fallback) ?? 0;
+  return items
+    .filter((i) => i.verified !== true && !(agentFeeTyped && /agent/i.test(String(i.code ?? ''))))
+    .reduce((sum, i) => sum + (toNum(i.amount) ?? 0), 0);
+}

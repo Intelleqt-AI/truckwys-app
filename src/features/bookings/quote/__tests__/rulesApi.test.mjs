@@ -366,3 +366,15 @@ test('way home on its own route: round-trip tolls, empty-return border, estimate
   assert.equal(border.basis, 'Border, permit and non-SA toll costs (includes R 10 950,85 estimated)');
   assert.equal(zw.lines.find((l) => l.key === 'border_return').amount, 4711.19);
 });
+
+test('border estimate: unverified lines only; a typed agent fee is not an estimate', async () => {
+  const { borderEstimateOf } = await import('../rules.ts');
+  const out = [
+    { code: 'zw_border_access_toll', verified: true, amount: 3677.24 },
+    { code: 'zw_clearing_agent', verified: false, amount: 2005 },
+    { code: 'zw_toll_gates', verified: false, amount: 1331.13 },
+  ];
+  assert.equal(borderEstimateOf(out, null, false), 3336.13);
+  assert.equal(borderEstimateOf(out, null, true), 1331.13);
+  assert.equal(borderEstimateOf([], 500, false), 500);
+});

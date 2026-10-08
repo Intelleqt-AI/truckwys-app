@@ -24,6 +24,10 @@ import {
   returnHistoryText,
   actualsView,
   EMPTY_RETURN_REMOVED,
+  parseBookingPreview,
+  bookingBodyFor,
+  economicsPending,
+  analysisHasReturnHistory,
 } from '../economics.ts';
 
 // Intl puts non-breaking spaces in `R 1 020`; compare with plain ones.
@@ -275,4 +279,66 @@ test('quote actuals once delivered', () => {
   assert.equal(actualsView({ actual_margin_pct: null, actual_revenue: null }), null);
   assert.equal(actualsView({ actual_margin_pct: -4, backhaul_found: false, actual_cost_basis: 'estimate' }).backhaul,
     'Came back empty');
+});
+
+test('booking preview before booking: candidates, invoice, can_book', () => {
+  const p = parseBookingPreview({
+    preview: true, can_book: true, blocked: null, load_id: null,
+    booking: {
+      return_candidates: RAW_CANDIDATES.slice(0, 1),
+      outbound_candidates: [],
+      invoice_preview: { state: 'on_delivery', lines: [], subtotal: 100, vat_amount: 15, total: 115, payment_terms: 'NET30' },
+    },
+  });
+  assert.equal(p.preview, true);
+  assert.equal(p.canBook, true);
+  assert.equal(p.blockedText, null);
+  assert.equal(p.returnCandidates[0].loadId, 41);
+  assert.equal(p.invoice.heading, 'Invoice on delivery');
+});
+
+test('booking preview: blocked, already booked, not a preview', () => {
+  const blocked = parseBookingPreview({
+    preview: true, can_book: false, load_id: null,
+    blocked: { code: 'quote_send_blocked', warnings: [{ severity: 'block', title: 'Tolls could not be worked out' }] },
+    booking: {},
+  });
+  assert.equal(blocked.blockedText, 'Tolls could not be worked out');
+  assert.equal(parseBookingPreview({ preview: true, can_book: false, blocked: { code: 'quote_not_bookable', error: 'Declined.' }, booking: {} }).blockedText, 'Declined.');
+  const booked = parseBookingPreview({ preview: false, can_book: true, load_id: 77, booking: {} });
+  assert.equal(booked.preview, false);
+  assert.equal(booked.loadId, 77);
+  assert.equal(parseBookingPreview({ detail: 'Not found.' }), null);
+});
+
+test('return choice becomes one convert_to_load body', () => {
+  assert.deepEqual(bookingBodyFor('empty'), {});
+  assert.deepEqual(bookingBodyFor('expect'), { expect_return: true });
+  assert.deepEqual(bookingBodyFor('out:42'), { return_of_load_id: '42' });
+  assert.deepEqual(bookingBodyFor('ret:41'), { linkReturnId: '41' });
+});
+
+test('tolls being worked out: a calm pending note, not a missing prompt', () => {
+  const e = parseEconomics({
+    pair: false,
+    legs: [{
+      load_id: 5, role: 'single', revenue: 12000, cost: null, cost_basis: null, margin: null,
+      missing: [
+        { code: 'tolls_pending', prompt: 'Working out tolls…', pending: true, blocks: 'tolls_unknown' },
+        { code: 'no_vehicle', prompt: 'Add the truck to cost this job' },
+      ],
+    }],
+  });
+  const v = marginCardView(e);
+  assert.equal(v.pending, 'Working out tolls…');
+  assert.deepEqual(v.missing, ['Add the truck to cost this job']);
+  assert.equal(economicsPending(e), true);
+  assert.equal(economicsPending(parseEconomics(PAIR)), false);
+  assert.equal(marginCardView(parseEconomics(PAIR)).pending, null);
+});
+
+test('return history: the analysis field (even null) means no fallback call', () => {
+  assert.equal(analysisHasReturnHistory({ return_load_history: null }), true);
+  assert.equal(analysisHasReturnHistory({ success: true }), false);
+  assert.equal(analysisHasReturnHistory(null), false);
 });

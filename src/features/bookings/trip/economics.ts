@@ -143,6 +143,8 @@ export type Basis = 'actual' | 'estimate' | 'mixed' | null;
 export interface MissingInput {
   code: string;
   prompt: string;
+  /** Being worked out (e.g. `tolls_pending`): nothing to ask the user. */
+  pending: boolean;
 }
 
 export interface Leg {
@@ -191,7 +193,7 @@ const roleOf = (v: unknown): LegRole => (v === 'outbound' || v === 'return' ? v 
 function parseMissing(raw: unknown): MissingInput[] {
   return arr(raw)
     .map((m) => obj(m))
-    .map((m) => ({ code: text(m.code), prompt: text(m.prompt) }))
+    .map((m) => ({ code: text(m.code), prompt: text(m.prompt), pending: m.pending === true }))
     .filter((m) => m.prompt);
 }
 
@@ -296,7 +298,10 @@ export interface MarginCardView {
     below: boolean;
   };
   emptyReturnNote: string | null;
+  /** Things to add before the job can be costed. */
   missing: string[];
+  /** An in-progress note (`Working out tolls…`): shown calmly, with a refresh. */
+  pending: string | null;
 }
 
 const LEG_TITLE: Record<LegRole, string> = { single: 'This job', outbound: 'Outbound', return: 'Return' };
@@ -327,8 +332,13 @@ export function marginCardView(e: Economics): MarginCardView {
   const removed = e.pair && (c?.emptyReturnRemoved ?? 0) > 0;
   const seen = new Set<string>();
   const missing: string[] = [];
+  let pending: string | null = null;
   for (const l of e.legs) {
     for (const m of l.missing) {
+      if (m.pending) {
+        pending = pending ?? m.prompt;
+        continue;
+      }
       if (seen.has(m.prompt)) continue;
       seen.add(m.prompt);
       missing.push(m.prompt);
@@ -348,6 +358,7 @@ export function marginCardView(e: Economics): MarginCardView {
       : null,
     emptyReturnNote: removed ? EMPTY_RETURN_REMOVED : null,
     missing,
+    pending,
   };
 }
 
@@ -476,6 +487,68 @@ export function parseBooking(body: unknown): BookingResult {
   };
 }
 
+/** True while some leg's costing is still being worked out (poll / refresh). */
+export const economicsPending = (e: Economics | null | undefined): boolean =>
+  !!e && e.legs.some((l) => l.missing.some((m) => m.pending));
+
+// ── Booking preview (GET quotes/{id}/booking-preview/, no job created) ──────
+export interface BookingPreview {
+  /** False when the quote is already booked: `loadId` is its job. */
+  preview: boolean;
+  canBook: boolean;
+  /** Why booking would be refused, in the server's words. */
+  blockedText: string | null;
+  loadId: number | string | null;
+  returnCandidates: Candidate[];
+  outboundCandidates: Candidate[];
+  invoice: InvoicePreviewView | null;
+}
+
+function blockedSentence(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const b = obj(raw);
+  const block = arr(b.warnings)
+    .map((w) => obj(w))
+    .find((w) => w.severity === 'block' && text(w.title));
+  if (block) return text(block.title);
+  return text(b.error) || "This quote can't be booked yet.";
+}
+
+/** Null when the body isn't a booking preview. */
+export function parseBookingPreview(body: unknown): BookingPreview | null {
+  const b = obj(body);
+  if (typeof b.can_book !== 'boolean' || !b.booking) return null;
+  const bk = obj(b.booking);
+  return {
+    preview: b.preview !== false,
+    canBook: b.can_book,
+    blockedText: b.can_book ? null : blockedSentence(b.blocked),
+    loadId: (b.load_id as number | string | undefined) ?? null,
+    returnCandidates: parseCandidates(bk.return_candidates),
+    outboundCandidates: parseCandidates(bk.outbound_candidates),
+    invoice: invoicePreviewView(bk.invoice_preview),
+  };
+}
+
+/**
+ * The "Coming back loaded?" choice before booking: back empty, expecting one,
+ * or a specific load. `out:<id>` = this job is that load's return (sent as
+ * return_of_load_id); `ret:<id>` = that load brings this truck home (linked
+ * right after booking).
+ */
+export type ReturnChoice = 'empty' | 'expect' | `out:${string}` | `ret:${string}`;
+
+export function bookingBodyFor(choice: ReturnChoice): {
+  expect_return?: boolean;
+  return_of_load_id?: string;
+  linkReturnId?: string;
+} {
+  if (choice === 'expect') return { expect_return: true };
+  if (choice.startsWith('out:')) return { return_of_load_id: choice.slice(4) };
+  if (choice.startsWith('ret:')) return { linkReturnId: choice.slice(4) };
+  return {};
+}
+
 /** What a refused booking says: the server's own sentence where it has one. */
 export function bookErrorText(err: unknown): string {
   const e = obj(err);
@@ -486,6 +559,13 @@ export function bookErrorText(err: unknown): string {
 }
 
 // ── Pricing analysis: how often this lane found a return load ───────────────
+/**
+ * The analysis answered and carries the field (even as null): no fallback
+ * call. False while it's loading and on an older backend.
+ */
+export const analysisHasReturnHistory = (analysis: unknown): boolean =>
+  !!analysis && typeof analysis === 'object' && 'return_load_history' in (analysis as Raw);
+
 /** `On this lane 60% of your trips found a return load (12 of 20).`, or null. */
 export function returnHistoryText(analysis: unknown): string | null {
   const a = obj(analysis);

@@ -81,10 +81,15 @@ export function TripMarginCard({
   view,
   pair,
   onOpenLeg,
+  onRefresh,
+  refreshing,
 }: {
   view: MarginCardView;
   pair: boolean;
   onOpenLeg?: (loadId: number | string) => void;
+  /** Shown with the in-progress note (e.g. tolls being worked out). */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const { colors } = useTheme();
   return (
@@ -93,7 +98,7 @@ export function TripMarginCard({
         <View
           key={leg.key}
           className={
-            i < view.legs.length - 1 || view.combined || view.emptyReturnNote || view.missing.length
+            i < view.legs.length - 1 || view.combined || view.emptyReturnNote || view.missing.length || view.pending
               ? 'border-b border-line-row'
               : ''
           }
@@ -179,6 +184,29 @@ export function TripMarginCard({
           <Txt className="shrink text-caption text-muted">{m}</Txt>
         </View>
       ))}
+      {view.pending && (
+        <View
+          className={`min-h-[44px] flex-row items-center gap-2 px-3.5 py-2 ${
+            view.combined || view.emptyReturnNote || view.missing.length ? 'border-t border-line-row' : ''
+          }`}
+        >
+          <ActivityIndicator size="small" color={colors.faint} />
+          <Txt className="flex-1 text-caption text-muted">{view.pending}</Txt>
+          {onRefresh && (
+            <TouchableOpacity
+              onPress={onRefresh}
+              disabled={refreshing}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              activeOpacity={0.6}
+              accessibilityRole="button"
+              accessibilityLabel="Refresh the job margin"
+              className="min-h-[44px] justify-center px-1"
+            >
+              <Mono className="text-sub font-medium text-link">{refreshing ? 'Checking…' : 'Refresh'}</Mono>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </Group>
   );
 }

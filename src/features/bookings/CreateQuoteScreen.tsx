@@ -63,7 +63,7 @@ import {
   sendQuote,
   type AiChatTurn,
 } from './api';
-import { returnHistoryText } from './trip/economics';
+import { analysisHasReturnHistory, returnHistoryText } from './trip/economics';
 import { useCustomers } from '@/features/customers/api';
 import type { GeoPoint } from '@/lib/routeGeometry';
 import { MapCanvas } from './quote/MapCanvas';
@@ -1323,8 +1323,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // How often this lane's trips found a return load (pricing analysis
   // `return_load_history`), shown under Empty / Loaded. Context only: it never
-  // changes the empty-return default. From the analysis when it carries it,
-  // else one pricing-analysis call per lane; nothing on an older backend.
+  // changes the empty-return default. From /quotes/analyze/; an older backend
+  // without the field gets one pricing-analysis call per lane instead.
   const analysisReturnHistory = returnHistoryText(analysis);
   const historyLane = useMemo(
     () =>
@@ -1338,7 +1338,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         : null,
     [tripType, costs.emptyReturnEligible, pickup, delivery],
   );
-  const { data: fetchedReturnHistory } = useReturnLoadHistory(historyLane, analysisReturnHistory);
+  const { data: fetchedReturnHistory } = useReturnLoadHistory(
+    historyLane,
+    !!analysis && !analysisHasReturnHistory(analysis),
+  );
   const returnHistory = analysisReturnHistory ?? fetchedReturnHistory ?? null;
   const submitNL = async (text: string) => {
     const message = text.trim();

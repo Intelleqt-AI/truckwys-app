@@ -31,7 +31,7 @@ export function TripSection({
 }) {
   const { colors } = useTheme();
   const qc = useQueryClient();
-  const { data: economics } = useLoadEconomics(loadId);
+  const { data: economics, refetch: refetchEconomics, isFetching } = useLoadEconomics(loadId);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const oneWay = tripType.toUpperCase() !== 'ROUND_TRIP';
@@ -100,7 +100,13 @@ export function TripSection({
 
   return (
     <>
-      <TripMarginCard view={view} pair={economics.pair} onOpenLeg={(id) => String(id) !== String(loadId) && onOpenLoad(id)} />
+      <TripMarginCard
+        view={view}
+        pair={economics.pair}
+        onOpenLeg={(id) => String(id) !== String(loadId) && onOpenLoad(id)}
+        onRefresh={() => void refetchEconomics()}
+        refreshing={isFetching}
+      />
 
       {economics.pair && partner && (
         <Group label="Return load" action={busyId === 'unlink' ? undefined : 'Unlink'} onAction={unlink}>

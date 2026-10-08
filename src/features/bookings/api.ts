@@ -7,7 +7,10 @@ import { normalizeQuote, normalizeLoad, type LoadLite } from '@/types/domain';
 import { roundTo } from '@/lib/formatters';
 import { parseErrorBody, sendBlockMessage } from './quote/sendBlock';
 import {
+  economicsPending,
   isMissingEndpoint,
+  parseBookingPreview,
+  type BookingPreview,
   parseCandidates,
   parseEconomics,
   returnHistoryText,
@@ -530,6 +533,8 @@ export function useLoadEconomics(id: string | number, enabled = true) {
     queryKey: ['load-economics', id],
     enabled: enabled && id != null && id !== '',
     retry: false,
+    // Tolls still being worked out (`tolls_pending`): look again calmly.
+    refetchInterval: (query) => (economicsPending(query.state.data) ? 20000 : false),
     queryFn: async () =>
       parseEconomics(await orNullIfMissing(() => fetchData(`loads/${id}/economics/`))),
   });
@@ -553,6 +558,27 @@ export function useReturnCandidates(id: string | number, direction: CandidateDir
   });
 }
 
+/**
+ * GET quotes/{id}/booking-preview/: candidates, invoice preview and whether it
+ * can be booked, WITHOUT creating the job. Null on an older backend.
+ */
+export function useBookingPreview(quoteId: string | number, pickupDate: string, deliveryDate: string) {
+  return useQuery<BookingPreview | null>({
+    queryKey: ['booking-preview', quoteId, pickupDate, deliveryDate],
+    retry: false,
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (pickupDate) params.set('pickup_date', pickupDate);
+      if (deliveryDate) params.set('delivery_date', deliveryDate);
+      const qs = params.toString();
+      return parseBookingPreview(
+        await orNullIfMissing(() => fetchData(`quotes/${quoteId}/booking-preview/${qs ? `?${qs}` : ''}`)),
+      );
+    },
+  });
+}
+
 /** POST loads/{outbound}/link-return/ {return_load_id}. */
 export const linkReturnLoad = (outboundId: string | number, returnId: string | number) =>
   postData<Record<string, unknown>>({
@@ -565,17 +591,17 @@ export const unlinkReturnLoad = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `loads/${id}/unlink-return/`, data: {} });
 
 /**
- * How often this company's trips on the lane found a return load
- * (pricing analysis `return_load_history`). Context only, one call per lane;
- * null on an older backend or any failure.
+ * Fallback for backends whose /quotes/analyze/ predates `return_load_history`:
+ * one pricing-analysis call per lane, only once the analysis has answered
+ * without the field. Null on any failure.
  */
 export function useReturnLoadHistory(
   lane: { origin: string; destination: string; pickup?: string; delivery?: string } | null,
-  known: string | null,
+  needed: boolean,
 ) {
   return useQuery<string | null>({
     queryKey: ['return-load-history', lane?.origin ?? '', lane?.destination ?? ''],
-    enabled: !!lane && !!lane.origin && !!lane.destination && !known,
+    enabled: needed && !!lane && !!lane.origin && !!lane.destination,
     retry: false,
     staleTime: 30 * 60 * 1000,
     queryFn: async () => {

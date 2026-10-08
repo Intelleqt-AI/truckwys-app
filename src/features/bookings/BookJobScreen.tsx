@@ -16,9 +16,13 @@ import {
   type Option,
 } from '@/components/ui';
 import { str, pick } from '@/lib/api/list';
-import { convertQuoteToLoad, linkReturnLoad, seedLoad, useQuote } from './api';
+import { convertQuoteToLoad, linkReturnLoad, seedLoad, useBookingPreview, useQuote } from './api';
 import {
   bookErrorText,
+  bookingBodyFor,
+  candidateSub,
+  candidateTitle,
+  type ReturnChoice,
   marginCardView,
   parseBooking,
   parseEconomics,
@@ -65,7 +69,7 @@ export function BookJobScreen({ route, navigation }: Props) {
   // Undefined until touched: the quote's own dates show (and are sent) until then.
   const [pickupDate, setPickupDate] = useState<string | undefined>();
   const [deliveryDate, setDeliveryDate] = useState<string | undefined>();
-  const [comingBack, setComingBack] = useState<'empty' | 'expect'>('empty');
+  const [choice, setChoice] = useState<ReturnChoice>('empty');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<BookingResult | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
@@ -74,6 +78,9 @@ export function BookJobScreen({ route, navigation }: Props) {
   const pickupShown = pickupDate ?? dateOnly(pick(q, ['pickup_date']));
   const deliveryShown = deliveryDate ?? dateOnly(pick(q, ['delivery_date']));
   const datesOutOfOrder = !!pickupShown && !!deliveryShown && deliveryShown < pickupShown;
+  // What booking would give, before booking (newer backends; null otherwise).
+  const { data: preview } = useBookingPreview(quoteId, pickupShown, deliveryShown);
+  const alreadyBookedId = preview && !preview.preview ? preview.loadId : null;
 
   const { data: driversRaw, isLoading: driversLoading } = useQuery({
     queryKey: ['drivers-available-for-assign'],
@@ -111,7 +118,30 @@ export function BookJobScreen({ route, navigation }: Props) {
   const noVehicles = !vehiclesLoading && vehicleOptions.length === 1;
 
   const driverWithoutTruck = !!driverId && !vehicleId;
-  const canBook = !busy && !driverWithoutTruck && !datesOutOfOrder;
+
+  // Back empty / expecting one, then the suggested loads (best first, 3 each).
+  const returnOptions = useMemo(() => {
+    const opts: { label: string; value: string; sub?: string }[] = [
+      { label: 'Back empty', value: 'empty' },
+      {
+        label: 'Expecting a return load',
+        value: 'expect',
+        sub: preview ? undefined : 'Loads near the drop are suggested once it is booked',
+      },
+    ];
+    for (const c of preview?.returnCandidates.slice(0, 3) ?? []) {
+      const sub = candidateSub(c, 'return');
+      opts.push({ label: `Back with ${candidateTitle(c)}`, value: `ret:${c.loadId}`, sub: [c.loadNumber, sub].filter(Boolean).join(' · ') });
+    }
+    for (const c of preview?.outboundCandidates.slice(0, 3) ?? []) {
+      const sub = candidateSub(c, 'outbound');
+      opts.push({ label: `Return of ${candidateTitle(c)}`, value: `out:${c.loadId}`, sub: [c.loadNumber, sub].filter(Boolean).join(' · ') });
+    }
+    return opts;
+  }, [preview]);
+  // A suggestion that dropped off a refreshed preview falls back to Back empty.
+  const choiceShown = returnOptions.some((o) => o.value === choice) ? choice : 'empty';
+  const canBook = !busy && !driverWithoutTruck && !datesOutOfOrder && preview?.canBook !== false;
 
   const openJob = (id: number | string, title?: string) => {
     navigation.pop(popCallerOnSuccess ? 2 : 1);
@@ -122,17 +152,37 @@ export function BookJobScreen({ route, navigation }: Props) {
     if (!canBook) return;
     setBusy(true);
     try {
+      const { linkReturnId, ...returnBody } = oneWay ? bookingBodyFor(choiceShown) : {};
       const body = await convertQuoteToLoad(quoteId, {
         ...(vehicleId ? { vehicle_id: vehicleId } : {}),
         ...(driverId ? { driver_id: driverId } : {}),
         ...(pickupDate ? { pickup_date: pickupDate } : {}),
         ...(deliveryDate ? { delivery_date: deliveryDate } : {}),
-        ...(oneWay && comingBack === 'expect' ? { expect_return: true } : {}),
+        ...returnBody,
       });
       const booked = parseBooking(body);
       seedLoad(qc, body, booked.loadId ?? undefined);
       invalidateFor(qc, 'quote', 'load');
       if (booked.loadId == null) throw new Error("Couldn't book this job. Try again.");
+      if (preview) {
+        // Everything was chosen up front: straight to the job. A load that
+        // brings this truck home is linked now the job exists.
+        let note: string | null = booked.returnLink?.error ?? booked.returnLink?.warnings[0]?.title ?? null;
+        if (linkReturnId) {
+          try {
+            const res = await linkReturnLoad(booked.loadId, linkReturnId);
+            note = parseWarnings((res ?? {}).warnings)[0]?.title ?? note;
+            invalidateFor(qc, 'load');
+          } catch (e) {
+            note = e instanceof Error ? `Booked. ${e.message}` : "Booked. The return load couldn't be linked.";
+          }
+        }
+        if (booked.alreadyConverted) toast.info(`Already booked as ${booked.loadNumber || 'a job'}`);
+        else if (note) toast.info(note.startsWith('Booked') ? note : `Booked. ${note}`);
+        else toast.success('Booked');
+        openJob(booked.loadId, booked.loadNumber);
+        return;
+      }
       if (!booked.hasBooking) {
         // Older backend: no booking block to show, straight to the job.
         toast.success('Booked');
@@ -258,6 +308,20 @@ export function BookJobScreen({ route, navigation }: Props) {
     );
   }
 
+  // ── Already booked (the preview says so) ─────────────────────────────────
+  if (alreadyBookedId != null) {
+    return (
+      <SheetScreen
+        variant="modal"
+        title="Book job"
+        onBack={() => navigation.goBack()}
+        footer={<Button label="Open job" icon="arrowRight" onPress={() => openJob(alreadyBookedId)} fullWidth />}
+      >
+        <Txt className="text-sub text-muted">{`${reference || 'This quote'} is already booked.`}</Txt>
+      </SheetScreen>
+    );
+  }
+
   // ── Form ──────────────────────────────────────────────────────────────────
   return (
     <SheetScreen
@@ -269,6 +333,11 @@ export function BookJobScreen({ route, navigation }: Props) {
       <Txt className="mb-5 text-sub text-muted">
         {`Book ${reference || 'this quote'} as a job. Truck, driver and dates can wait.`}
       </Txt>
+      {preview?.blockedText && (
+        <View className="mb-5">
+          <Banner tone="warning" message={preview.blockedText} />
+        </View>
+      )}
 
       <View className="gap-4">
         <SelectField
@@ -307,19 +376,18 @@ export function BookJobScreen({ route, navigation }: Props) {
         {oneWay && (
           <RadioRows
             label="Coming back loaded?"
-            value={comingBack}
-            onSelect={(v) => setComingBack(v === 'expect' ? 'expect' : 'empty')}
-            options={[
-              { label: 'Back empty', value: 'empty' },
-              {
-                label: 'Expecting a return load',
-                value: 'expect',
-                sub: 'Loads near the drop are suggested once it is booked',
-              },
-            ]}
+            value={choiceShown}
+            onSelect={(v) => setChoice(v as ReturnChoice)}
+            options={returnOptions}
           />
         )}
       </View>
+
+      {preview?.invoice && (
+        <View className="mt-5">
+          <InvoicePreviewGroup preview={preview.invoice} />
+        </View>
+      )}
     </SheetScreen>
   );
 }

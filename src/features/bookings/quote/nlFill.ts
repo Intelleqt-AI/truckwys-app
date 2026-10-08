@@ -426,6 +426,8 @@ export interface FillPlan {
   apply: FieldChange[];
   /** The person typed or picked something else here: ask first. */
   conflicts: FieldChange[];
+  /** Stated, but the form already says so (shown as a trip-shape chip only). */
+  unchanged: FieldChange[];
 }
 
 /** The response's own name for each field, for field_confidence. */
@@ -474,13 +476,16 @@ export function planFill({
   defaults?: Partial<Record<FillKey, string>>;
   confidence?: Record<string, number>;
 }): FillPlan {
-  const plan: FillPlan = { apply: [], conflicts: [] };
+  const plan: FillPlan = { apply: [], conflicts: [], unchanged: [] };
   for (const key of Object.keys(proposed) as FillKey[]) {
     const to = proposed[key];
     if (!to || !to.value) continue;
     const from = current[key] ?? { value: '', display: '' };
-    if (sameField(from, to)) continue;
     const change: FieldChange = { key, from, to, low: isLow(key, confidence) };
+    if (sameField(from, to)) {
+      plan.unchanged.push(change);
+      continue;
+    }
     const empty = !from.value || (defaults[key] != null && norm(from.value) === norm(defaults[key]!));
     const aiSet = aiWritten[key] != null && norm(aiWritten[key]!) === norm(from.value);
     (empty || aiSet ? plan.apply : plan.conflicts).push(change);
@@ -570,9 +575,16 @@ export function buildChips(
     international?: boolean;
     /** False: the route doesn't touch Zimbabwe, so an abnormal load is only noted. */
     zimbabwe?: boolean;
+    /**
+     * Stated this turn but already on the form. Only the trip shape uses them:
+     * "one way, back empty" is worth confirming even when it is the default.
+     */
+    stated?: FieldChange[];
   } = {},
 ): FillChip[] {
   const by = new Map<FillKey, FieldChange>(changes.map((c) => [c.key, c]));
+  for (const c of extra.stated ?? [])
+    if ((c.key === 'tripType' || c.key === 'returnLoad') && !by.has(c.key)) by.set(c.key, c);
   const get = (k: FillKey) => by.get(k);
   const parts: Partial<Record<ChipGroup, { label: string; keys: FillKey[]; low: boolean }>> = {};
   const add = (g: ChipGroup, label: string, keys: FillKey[], lowExtra = false) => {

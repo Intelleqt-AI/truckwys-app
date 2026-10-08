@@ -308,6 +308,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     vehicleHint: string | null;
     driverNights: number | null;
     fuelPrice: number | null;
+    // Cross-border as this Fill stated it (not a sticky earlier one).
+    borderPost: string | null;
+    international: boolean | null;
+    stated: FieldChange[];
   } | null>(null);
   // The fields a Fill would overwrite that the person typed: asked about first.
   const [pendingFill, setPendingFill] = useState<{
@@ -326,6 +330,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [aiBorder, setAiBorder] = useState<{ international?: boolean; borderPost?: string } | null>(null);
   const [truckPickerReq, setTruckPickerReq] = useState(0);
   const weightInputRef = useRef<TextInput>(null);
+  // Each filled field's box, so a chip can move the screen reader to it.
+  const fieldRefs = useRef<Partial<Record<FillKey, View | null>>>({});
   const cargoInputRef = useRef<TextInput>(null);
   // The form's starting values are not "typed": a Fill replaces them freely.
   const fillDefaultsRef = useRef({ pickupDate: editing ? '' : plusDays(1), validUntil: plusDays(7) });
@@ -1558,6 +1564,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       aiWrittenRef.current[c.key] = c.to.value;
     }
     const all = [...restores, ...extraRestores];
+    // A new Fill closes the previous one's Undo, even when it applied nothing
+    // itself (only conflicts): Undo never reaches back past the latest Fill.
+    if (!extend) {
+      undoRef.current = null;
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      setCanUndo(false);
+    }
     if (!all.length) return;
     const prev = extend ? undoRef.current : null;
     undoRef.current = {
@@ -1749,6 +1762,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         vehicleHint: r.vehicleHint && !ex.vehicleType && !nextPending ? r.vehicleHint : null,
         driverNights: ex.driverNights ?? null,
         fuelPrice: ex.fuelPriceOverride ?? null,
+        borderPost: ex.borderPost ?? null,
+        international: ex.international ?? null,
+        stated: plan.unchanged,
       });
 
       nlBarRef.current?.setText('');
@@ -1780,12 +1796,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         ? buildChips(fillView.applied, nlLang, {
             stops: fillView.stops,
             stopsLow: fillView.stopsLow,
-            borderPost: aiBorder?.borderPost,
-            international: aiBorder?.international,
+            borderPost: fillView.borderPost ?? undefined,
+            international: fillView.international ?? undefined,
             zimbabwe: routeCrossesZimbabwe,
+            stated: fillView.stated,
           })
         : [],
-    [fillView, nlLang, aiBorder, routeCrossesZimbabwe],
+    [fillView, nlLang, routeCrossesZimbabwe],
   );
   // Fields the last Fill was unsure about: "Check this" under each.
   const lowFields = useMemo(
@@ -1829,10 +1846,17 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             ? 'schedule'
             : 'route';
     jumpTo(section);
-    if (chip.group === 'load') {
-      const input = chip.keys.includes('weight') ? weightInputRef : cargoInputRef;
-      setTimeout(() => input.current?.focus(), 350);
-    }
+    // Text fields take keyboard focus; the rest take the screen reader's.
+    const first: FillKey | undefined =
+      chip.group === 'trip' || chip.group === 'border'
+        ? 'tripType'
+        : (chip.keys[0] ?? (chip.group === 'route' ? 'pickup' : undefined));
+    setTimeout(() => {
+      if (first === 'weight') return weightInputRef.current?.focus();
+      if (first === 'cargo') return cargoInputRef.current?.focus();
+      const box = first ? fieldRefs.current[first] : null;
+      if (box) AccessibilityInfo.sendAccessibilityEvent(box, 'focus');
+    }, 350);
   };
 
   const onVoiceCaptured = async (uri: string, language: VoiceLangPref = 'auto') => {
@@ -3127,6 +3151,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             accordion, no wizard. QuoteJumpBar above scrolls to each; the
             fields themselves keep the exact props/handlers they had before. */}
             <QuoteSection id="client" label="" onLayout={registerSectionY}>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.client = r;
+                }}
+              >
               <SelectField
                 label="Client"
                 icon="user"
@@ -3137,9 +3166,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 error={showIssue('client', false)}
               />
               {lowFields.has('client') && <CheckHint lang={nlLang} />}
+              </View>
             </QuoteSection>
 
             <QuoteSection id="route" label="Route" onLayout={registerSectionY}>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.pickup = r;
+                }}
+              >
               <LocationField
                 label="Collection"
                 value={pickup}
@@ -3149,6 +3184,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 error={showIssue('pickup', false)}
               />
               {lowFields.has('pickup') && <CheckHint lang={nlLang} />}
+              </View>
 
               {/* Stops between Collection and Delivery, in visit order — mirrors the
               physical route rather than sitting off to the side of it. */}
@@ -3174,6 +3210,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 />
               )}
 
+              <View
+                ref={(r) => {
+                  fieldRefs.current.delivery = r;
+                }}
+              >
               <LocationField
                 label="Delivery"
                 value={delivery}
@@ -3183,6 +3224,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 error={showIssue('dropoff', false)}
               />
               {lowFields.has('delivery') && <CheckHint lang={nlLang} />}
+              </View>
 
               {/* Early heads-up the moment a picked location is outside SA, before the
               rest of the form is filled in. The real enforcement happens once
@@ -3191,7 +3233,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <Banner tone="warning" message="Outside SA. Cross-border is off in Settings." />
               )}
 
-              <View>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.tripType = r;
+                }}
+              >
                 <Label className="mb-2 text-muted">Trip</Label>
                 <SegmentedControl
                   options={[
@@ -3297,6 +3343,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               {lowFields.has('weight') && <CheckHint lang={nlLang} />}
               {/* Every quote is priced on a real truck (§3): the suggested one
                   for the load until the person picks another. */}
+              <View
+                ref={(r) => {
+                  fieldRefs.current.vehicle = r;
+                }}
+              >
               <SelectField
                 label={!vehicleType && suggestedTruck ? 'Truck · suggested' : 'Truck'}
                 icon="truck"
@@ -3307,6 +3358,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 openRequest={truckPickerReq}
               />
               {lowFields.has('vehicle') && <CheckHint lang={nlLang} />}
+              </View>
               <TextField
                 ref={cargoInputRef}
                 label="Cargo"
@@ -3319,6 +3371,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             </QuoteSection>
 
             <QuoteSection id="schedule" label="Schedule" onLayout={registerSectionY}>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.pickupDate = r;
+                }}
+              >
               <DateField
                 label="Pickup date"
                 required
@@ -3328,6 +3385,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 error={showIssue('pickupDate', false)}
               />
               {lowFields.has('pickupDate') && <CheckHint lang={nlLang} />}
+              </View>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.deliveryDate = r;
+                }}
+              >
               <DateField
                 label="Delivery date"
                 required
@@ -3340,6 +3403,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 error={showIssue('deliveryDate', false)}
               />
               {lowFields.has('deliveryDate') && <CheckHint lang={nlLang} />}
+              </View>
               <DateField
                 label="Valid until"
                 value={validUntil}

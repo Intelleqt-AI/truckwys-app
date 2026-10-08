@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { AccessibilityInfo, TouchableOpacity, View } from 'react-native';
+import type React from 'react';
 import { Txt } from '@/components/ui';
+import { useTheme } from '@/theme/ThemeProvider';
 import { t, type FillChip, type UiLang } from './nlFill';
 
 // What the last "Describe the load" Fill did, under the bar: one chip per
@@ -9,7 +11,23 @@ import { t, type FillChip, type UiLang } from './nlFill';
 // colour as a signal — a low-confidence field gets a dotted underline AND
 // the words "Check this".
 
-const dotted = { textDecorationLine: 'underline', textDecorationStyle: 'dotted' } as const;
+/**
+ * A dotted underline drawn as dots, since textDecorationStyle is iOS-only and
+ * a one-sided dotted border doesn't draw on every Android version.
+ */
+function Dotted({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+  return (
+    <View className="shrink">
+      {children}
+      <View className="flex-row overflow-hidden" style={{ height: 1, gap: 2 }}>
+        {Array.from({ length: 80 }).map((_, i) => (
+          <View key={i} style={{ width: 2, height: 1, backgroundColor: colors.muted }} />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 export interface FillSuggestion {
   id: string;
@@ -38,9 +56,17 @@ function Chip({
       accessibilityLabel={a11y}
       className="min-h-[44px] flex-row items-center gap-1.5 rounded-control border border-line px-3"
     >
-      <Txt className="text-callout text-fg" style={low ? dotted : undefined} numberOfLines={1}>
-        {label}
-      </Txt>
+      {low ? (
+        <Dotted>
+          <Txt className="text-callout text-fg" numberOfLines={1}>
+            {label}
+          </Txt>
+        </Dotted>
+      ) : (
+        <Txt className="text-callout text-fg" numberOfLines={1}>
+          {label}
+        </Txt>
+      )}
       {low ? <Txt className="text-caption text-muted">· {t(lang, 'check_this')}</Txt> : null}
     </TouchableOpacity>
   );
@@ -76,14 +102,16 @@ export function FillSummary({
 }) {
   const replaceRef = useRef<View>(null);
 
-  // The confirm takes the screen reader's focus when it appears.
+  // The confirm takes the screen reader's focus once, when it appears — keyed
+  // on what it asks, not the object (which is new on every render).
+  const conflictId = conflict ? `${conflict.title}|${conflict.detail}` : null;
   useEffect(() => {
-    if (!conflict) return;
+    if (!conflictId) return;
     const id = setTimeout(() => {
       if (replaceRef.current) AccessibilityInfo.sendAccessibilityEvent(replaceRef.current, 'focus');
     }, 150);
     return () => clearTimeout(id);
-  }, [conflict]);
+  }, [conflictId]);
 
   if (!chips.length && !didntCatch && !vehicleHint && !suggestions.length && !conflict && !canUndo)
     return null;
@@ -162,8 +190,10 @@ export function FillSummary({
 /** The "Check this" line under a field the last Fill was unsure about. */
 export function CheckHint({ lang }: { lang: UiLang }) {
   return (
-    <Txt className="mt-1 text-caption text-muted" style={dotted}>
-      {t(lang, 'check_this')}
-    </Txt>
+    <View className="mt-1 self-start">
+      <Dotted>
+        <Txt className="text-caption text-muted">{t(lang, 'check_this')}</Txt>
+      </Dotted>
+    </View>
   );
 }

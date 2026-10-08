@@ -110,6 +110,11 @@ export function VoiceQuoteSheet({
   const [elapsed, setElapsed] = useState(0);
   const [stopping, setStopping] = useState(false);
   const startedAt = useRef(Date.now());
+  // The timer (and the 60 s limit) only runs once recording has really started,
+  // not while the permission prompt is up.
+  const [recording, setRecording] = useState(false);
+  // A tap on the language chip wins over the stored choice loading late.
+  const prefTouched = useRef(false);
   const [level, setLevel] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   // Auto / English / Afrikaans, remembered on this device.
@@ -125,7 +130,7 @@ export function VoiceQuoteSheet({
     (async () => {
       try {
         const saved = await AsyncStorage.getItem(VOICE_LANG_KEY);
-        if (alive) setPref(asLangPref(saved));
+        if (alive && !prefTouched.current) setPref(asLangPref(saved));
       } catch {
         /* no stored choice: Auto */
       }
@@ -137,6 +142,7 @@ export function VoiceQuoteSheet({
 
   const cyclePref = () => {
     const next = nextLangPref(pref);
+    prefTouched.current = true;
     setPref(next);
     AccessibilityInfo.announceForAccessibility(listeningLine(next, lang));
     AsyncStorage.setItem(VOICE_LANG_KEY, next).catch(() => {});
@@ -165,6 +171,7 @@ export function VoiceQuoteSheet({
         if (!alive) return;
         recorder.record();
         startedAt.current = Date.now();
+        setRecording(true);
         haptic(Haptics.ImpactFeedbackStyle.Medium);
         AccessibilityInfo.announceForAccessibility(
           `${t(lang, 'listening')} ${listeningLine(prefRef.current, lang)}`,
@@ -182,7 +189,7 @@ export function VoiceQuoteSheet({
 
   // Drive the bars off the real input level, and keep the elapsed timer.
   useEffect(() => {
-    if (stopping) return;
+    if (stopping || !recording) return;
     const id = setInterval(() => {
       const db = recorder.getStatus().metering;
       // metering is legitimately undefined until the first sample arrives.
@@ -200,7 +207,7 @@ export function VoiceQuoteSheet({
     }, METER_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopping, recorder]);
+  }, [stopping, recording, recorder]);
 
   const stoppingRef = useRef(false);
   const submit = async (atLimit = false) => {

@@ -252,3 +252,24 @@ test('spoken places: read for the chips, absent on an older backend', () => {
   );
   assert.equal(chips[0].label, 'Na Kaapstad');
 });
+
+test('trip shape: stated one way + back empty shows a chip even on the defaults (acceptance 1)', () => {
+  const plan = planFill({
+    proposed: { tripType: v('ONE_WAY'), returnLoad: v('no'), weight: v('28', '28 t') },
+    current: { tripType: v('ONE_WAY'), returnLoad: v('no'), weight: v('') },
+    aiWritten: {},
+    defaults: { tripType: 'ONE_WAY', returnLoad: 'no' },
+  });
+  assert.deepEqual(plan.apply.map((c) => c.key), ['weight']);
+  assert.deepEqual(plan.unchanged.map((c) => c.key), ['tripType', 'returnLoad']);
+  const chips = buildChips(plan.apply, 'af', { stated: plan.unchanged });
+  assert.deepEqual(chips.map((c) => c.label), ['28 t', 'Eenrigting, leeg terug']);
+  // Only the trip shape: an unchanged weight or place makes no chip.
+  const same = planFill({ proposed: { weight: v('28', '28 t') }, current: { weight: v('28', '28 t') }, aiWritten: {} });
+  assert.equal(buildChips([], 'en', { stated: same.unchanged }).length, 0);
+});
+
+test('border chip: only from what this Fill stated', () => {
+  assert.equal(buildChips([], 'en', {}).length, 0);
+  assert.equal(buildChips([], 'en', { borderPost: 'Beitbridge' })[0].label, 'Via Beitbridge');
+});

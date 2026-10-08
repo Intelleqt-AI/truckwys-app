@@ -109,6 +109,7 @@ import { QuoteWarnings } from './quote/QuoteWarnings';
 import { CostFloorModal } from './quote/CostFloorModal';
 import { useServerCosting } from './quote/useServerCosting';
 import { analysisPayload } from './quote/analysisPayload';
+import { reopenedInputs } from './quote/reopenInputs';
 import { buildQuotePayload } from './quote/payload';
 import { compactStoredSnapshot } from './quote/routeSnapshot';
 import { LocationField } from './quote/LocationField';
@@ -738,8 +739,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       setUseOfficialDiesel(snap.use_official === true);
       // The quote's own border choices (costing_inputs, newer backends).
       const ci = (pick(q, ['costing_inputs']) ?? {}) as Record<string, unknown>;
-      setAbnormalLoad(ci.abnormal_load === true);
-      if (typeof ci.clearing_agent_fee === 'number') setAgentFee(formatPlain(ci.clearing_agent_fee));
+      const reopened = reopenedInputs(ci);
+      setAbnormalLoad(reopened.abnormalLoad);
+      setAgentFee(reopened.agentFee);
+      setBorderOverride(reopened.borderOverride);
       rateTouchedRef.current = true;
       const fuelUsed = num(pick(q, ['fuel_price_used'])) || num(snap.fuel_price_per_litre_used);
       savedPricingRef.current = {
@@ -2047,7 +2050,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       // The saved driver figure is the person's only when they typed it.
       driver_cost_is_override: driverEdited,
     };
-    if (costs.crossBorderCost > 0) out.border_cost = costs.crossBorderCost;
+    // A typed border figure is saved even at R 0, so a reopen restores it.
+    if (costs.crossBorderCost > 0 || costs.costingInputs.border_cost_is_override) out.border_cost = costs.crossBorderCost;
     if (costs.costingInputs.border_cost_is_override) out.border_cost_is_override = true;
     // The way home and border figures the route gave, so the backend re-prices
     // the saved quote the same way (newer backends keep them).

@@ -262,6 +262,8 @@ export interface ChatResult {
   language: string | null;
   vehicleHint: string | null;
   reply: string;
+  /** The places as said ("Kaapstad"), for the chips; the fields keep the geocodable name. */
+  spokenPlaces: { pickup?: string; delivery?: string };
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -317,7 +319,12 @@ export function readChatResult(res: unknown): ChatResult {
   const nu = Array.isArray(r.not_understood)
     ? r.not_understood.map((x) => text(x)).filter((x): x is string => !!x).slice(0, 5)
     : [];
+  const sp = (r.spoken_places && typeof r.spoken_places === 'object' ? r.spoken_places : {}) as Record<string, unknown>;
+  const spokenPlaces: ChatResult['spokenPlaces'] = {};
+  if (text(sp.pickup)) spokenPlaces.pickup = text(sp.pickup);
+  if (text(sp.delivery)) spokenPlaces.delivery = text(sp.delivery);
   return {
+    spokenPlaces,
     extracted,
     confidence,
     notUnderstood: nu,

@@ -241,3 +241,14 @@ test('chips: an abnormal load off a Zimbabwe route is only noted', () => {
   assert.equal(buildChips(ab, 'en', { zimbabwe: true })[0].label, 'Abnormal load');
   assert.match(buildChips(ab, 'af', { zimbabwe: false })[0].label, /^Abnormale vrag genoteer/);
 });
+
+test('spoken places: read for the chips, absent on an older backend', () => {
+  const r = readChatResult({ spoken_places: { pickup: 'Joburg', delivery: 'Kaapstad', x: 1 } });
+  assert.deepEqual(r.spokenPlaces, { pickup: 'Joburg', delivery: 'Kaapstad' });
+  assert.deepEqual(readChatResult({}).spokenPlaces, {});
+  const chips = buildChips(
+    [{ key: 'delivery', from: v(''), to: v('cape town, western cape', 'Kaapstad'), low: false }],
+    'af',
+  );
+  assert.equal(chips[0].label, 'Na Kaapstad');
+});

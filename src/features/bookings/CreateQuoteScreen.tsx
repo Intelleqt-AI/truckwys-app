@@ -376,6 +376,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // belongs to the plazas it was checked for (routeKey).
   const [aiFuel, setAiFuel] = useState<AiInputs['aiFuel']>(null);
   // A diesel price the person gave for this quote: the per-quote override, not a market figure.
+  // Driver nights said in the description and applied: saved as
+  // costing_inputs.driver_nights (a typed driver amount still wins).
+  const [spokenNights, setSpokenNights] = useState<number | null>(null);
   const [quoteFuel, setQuoteFuel] = useState<{ pricePerL: number; fuelType: string } | null>(null);
   const [aiToll, setAiToll] = useState<AiInputs['aiToll']>(null);
   // Set while market figures are in use: the check it came from and its win chance.
@@ -837,6 +840,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             }
           : null,
       );
+      const savedNights = num(pick(ci, ['driver_nights']));
+      setSpokenNights(savedNights > 0 ? Math.round(savedNights) : null);
       // A diesel price given for this quote (not a market figure) comes back too.
       const savedOverride = num(pick(ci, ['fuel_price_override']));
       setQuoteFuel(
@@ -1153,6 +1158,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             ...(pickupDate ? { pickup_date: pickupDate } : {}),
             ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
             ...(abnormalApplies ? { abnormal_load: true } : {}),
+            // Nights said for this trip; a typed driver amount still wins.
+            ...(spokenNights != null && !driverEdited ? { driver_nights: spokenNights } : {}),
             // The route's own border data: the server works out what's unknown.
             route: {
               cross_border: !!pick(routeData ?? {}, ['cross_border']),
@@ -1166,7 +1173,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, quoteFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalApplies],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, quoteFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalApplies, spokenNights, driverEdited],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1644,14 +1651,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       ]);
       const locs: Partial<Record<FillKey, Loc>> = {};
       const proposed: Partial<Record<FillKey, FieldVal>> = {};
-      const locVal = (l: Loc): FieldVal => ({ value: l.label, display: placeShort(l.label), lat: l.lat, lon: l.lon });
+      // The field gets the geocodable name (Cape Town); the chip says what was said (Kaapstad).
+      const locVal = (l: Loc, said?: string): FieldVal => ({
+        value: l.label,
+        display: said || placeShort(l.label),
+        lat: l.lat,
+        lon: l.lon,
+      });
       if (pickLoc) {
         locs.pickup = pickLoc;
-        proposed.pickup = locVal(pickLoc);
+        proposed.pickup = locVal(pickLoc, r.spokenPlaces.pickup);
       }
       if (delLoc) {
         locs.delivery = delLoc;
-        proposed.delivery = locVal(delLoc);
+        proposed.delivery = locVal(delLoc, r.spokenPlaces.delivery);
       }
       if (ex.weightTons != null)
         proposed.weight = { value: plainNumber(ex.weightTons), display: tonsLabel(ex.weightTons) };
@@ -1782,14 +1795,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // Driver nights and a diesel price change the price basis: offered, never applied silently.
   const fillSuggestions: FillSuggestion[] = [];
-  if (fillView?.driverNights && (costs.allowancePerNight ?? 0) > 0) {
+  if (fillView?.driverNights && fillView.driverNights !== spokenNights) {
     const nights = fillView.driverNights;
     fillSuggestions.push({
       id: 'nights',
       label: nightsLabel(nights, nlLang),
       onPress: () => {
-        setDriverAllowance(formatPlain(Math.round(nights * (costs.allowancePerNight ?? 0) * 100) / 100));
-        setDriverEdited(true);
+        // Nights, not an amount: the driver line becomes allowance × nights.
+        setSpokenNights(nights);
         setFillView((v) => (v ? { ...v, driverNights: null } : v));
       },
     });
@@ -2495,6 +2508,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // the saved quote the same way (newer backends keep them).
     for (const [k, v] of Object.entries(costs.savedCostingExtras)) if (v != null && v >= 0) out[k] = v;
     if (abnormalLoad) out.abnormal_load = true;
+    if (spokenNights != null) out.driver_nights = spokenNights;
     // Saved so the send check knows which border costs aren't on file.
     if (costs.costingInputs.border_costs_unknown) out.border_costs_unknown = costs.costingInputs.border_costs_unknown;
     if (returnLoadBooked) out.include_empty_return = false;
@@ -3372,6 +3386,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                           : quoteFuelLabel
                       }
                       onFuelRetry={costs.warnings.some((w) => w.code === 'diesel_stale') ? retryFuel : undefined}
+                      driverNote={
+                        spokenNights != null && !driverEdited
+                          ? `${spokenNights} night${spokenNights === 1 ? '' : 's'}${
+                              costs.allowancePerNight
+                                ? ` × ${formatCurrency(costs.allowancePerNight, { maximumFractionDigits: 0 })}`
+                                : ''
+                            }`
+                          : null
+                      }
                       borderHint={
                         aiBorder?.borderPost ? t(nlLang, 'via', { post: borderPostShort(aiBorder.borderPost) }) : null
                       }

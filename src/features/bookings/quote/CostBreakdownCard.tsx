@@ -32,6 +32,7 @@ function CostBreakdownCardImpl({
   onAdjustmentPress,
   fuelNote,
   borderHint,
+  driverNote,
   onFuelRetry,
   onSettingsPress,
 }: {
@@ -50,6 +51,8 @@ function CostBreakdownCardImpl({
   fuelNote?: string | null;
   /** "Via Beitbridge": the border post the person described. */
   borderHint?: string | null;
+  /** "3 nights × R 450" when the nights were given for this trip. */
+  driverNote?: string | null;
   onFuelRetry?: (() => void) | null;
   /** Opens Settings (the target margin). */
   onSettingsPress?: () => void;
@@ -100,7 +103,7 @@ function CostBreakdownCardImpl({
               value={costs.driverKnown && !costs.driverMissing ? randWhole(costs.driver) : '—'}
               warn={!costs.driverKnown || costs.driverMissing}
               onPress={onDriverPress}
-              note={costs.driverMissing ? 'No rate set' : null}
+              note={costs.driverMissing ? 'No rate set' : (driverNote ?? null)}
             />
           )}
           {costs.emptyReturnIncluded && (

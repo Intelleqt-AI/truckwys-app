@@ -282,13 +282,19 @@ export function useCompanyProfileData() {
  * Re-check the official fuel price now: POST fuel-prices/refresh/ (newer
  * backends, any user), else the older GET ?force=true.
  */
-export async function refreshFuelPrices(): Promise<void> {
+export async function refreshFuelPrices(): Promise<{ ok: boolean; message: string | null }> {
   try {
-    await postData({ url: 'fuel-prices/refresh/', data: {} });
+    const res = (await postData<Record<string, unknown>>({ url: 'fuel-prices/refresh/', data: {} })) ?? {};
+    // refresh {attempted, ok, throttled, changed, message}
+    const r = (res.refresh ?? res) as Record<string, unknown>;
+    return { ok: r.ok !== false, message: typeof r.message === 'string' && r.message ? r.message : null };
   } catch (e) {
     const status = Number((e as { status?: number }).status);
-    if ([404, 405, 501].includes(status)) await fetchData('fuel-prices/current/?force=true');
-    else throw e;
+    if ([404, 405, 501].includes(status)) {
+      await fetchData('fuel-prices/current/?force=true');
+      return { ok: true, message: null };
+    }
+    throw e;
   }
 }
 

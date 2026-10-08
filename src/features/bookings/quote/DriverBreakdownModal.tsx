@@ -32,6 +32,9 @@ function DriverBreakdownModalImpl({
       rows={rows}
       total={{ label: 'Driver allowance', value: unknown ? '—' : formatCurrency(costs.driver), tone: unknown ? 'danger' : undefined }}
       edit={edit}
+      // The rule behind the figure, in the backend's words (e.g. the
+      // NBCRFLI allowance or "No night away").
+      note={costs.costLines.find((l) => l.key === 'driver')?.basis ?? null}
     />
   );
 }

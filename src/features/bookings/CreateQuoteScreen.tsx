@@ -1694,6 +1694,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // "Try again" on a stale or missing fuel price: re-check it, then reprice.
   const retryFuel = () => {
     refreshFuelPrices()
+      .then((r) => {
+        // The server's own words ("Checked: no newer price yet", …).
+        if (r.message) (r.ok ? toast.info : toast.error)(r.message);
+      })
       .catch(() => toast.error("Couldn't check the fuel price"))
       .finally(() => {
         void qc.invalidateQueries({ queryKey: ['fuel-prices'] });

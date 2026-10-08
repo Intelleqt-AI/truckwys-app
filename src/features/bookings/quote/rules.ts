@@ -1161,16 +1161,7 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
       ),
     );
   }
-  if (tollOneWay === 0 && !tolls.confirmed_none) {
-    // R 0 from the route means no plazas were FOUND, not that the road has
-    // none: say so and ask to check (a warning: tolls are small).
-    warnings.push(
-      warning('tolls_none_found', 'warn', 'No tolls found on this route', 'Check it if the trip uses toll roads.', null, [
-        'enter_tolls',
-        'confirm_no_tolls',
-      ]),
-    );
-  }
+  // R 0 from a toll lookup that worked is a known R 0: the route has no plazas.
   const tollAmt = tollOneWay !== null ? cents(tollOneWay * legsLoaded) : null;
   add(
     'tolls',
@@ -1178,7 +1169,9 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     tollAmt,
     tollOneWay === null
       ? 'Unknown'
-      : roundTrip
+      : tollOneWay === 0
+        ? 'No toll plazas on this route'
+        : roundTrip
         ? `${fmtRand(tollOneWay, 2)} × 2 legs`
         : `${fmtRand(tollOneWay, 2)} one way`,
     { one_way: tollOneWay, legs: legsLoaded },
@@ -1395,7 +1388,8 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
   // rate price only with a company price per km > 0, on loaded km.
   const ratePerKm = pos(inp.default_price_per_km);
   const ratePrice = ratePerKm !== null && kmLoaded !== null ? cents(ratePerKm * kmLoaded) : null;
-  const defaultPrice = targetPrice !== null ? Math.ceil(Math.max(ratePrice ?? 0, targetPrice) - 1e-9) : null;
+  // Rounded UP like the choices (next R 50 below R 20 000, else R 100).
+  const defaultPrice = targetPrice !== null ? roundPrice(Math.max(ratePrice ?? 0, targetPrice)) : null;
 
   // The same quote with a return load booked (one-way, empty return included).
   let alternative: Costing['alternative_with_return_load'] = null;

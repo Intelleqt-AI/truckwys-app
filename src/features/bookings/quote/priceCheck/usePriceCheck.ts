@@ -366,7 +366,11 @@ export function usePriceCheck(p: PriceCheckInputs) {
     ? 'Client, date or weight changed. Re-check to update.'
     : winP != null
       ? `${winModel!.scope === 'user' ? 'From your quotes' : 'From platform quotes'} · ${formatNumber(winModel!.training_samples, { maximumFractionDigits: 0 })} closed`
-      : winProgressText(winModel?.model_progress ?? (review as { model_progress?: unknown } | null)?.model_progress) ??
+      : winProgressText(
+          winModel?.model_progress ??
+            (review as { win_prediction?: { model_progress?: unknown } } | null)?.win_prediction?.model_progress ??
+            (review as { model_progress?: unknown } | null)?.model_progress,
+        ) ??
         WIN_REASON_COPY[winModel?.reason || ''] ??
         WIN_REASON_COPY.not_enough_history!;
   // No market evidence for the lane: no recommendation, just say so.

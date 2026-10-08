@@ -152,7 +152,11 @@ export function BookJobScreen({ route, navigation }: Props) {
     if (!canBook) return;
     setBusy(true);
     try {
-      const { linkReturnId, ...returnBody } = oneWay ? bookingBodyFor(choiceShown) : {};
+      // One call: the link is made with the booking. Only a backend whose
+      // preview predates link_fields gets a follow-up link-return call.
+      const { linkReturnId, ...returnBody } = oneWay
+        ? bookingBodyFor(choiceShown, preview?.linksInOneCall ?? false)
+        : {};
       const body = await convertQuoteToLoad(quoteId, {
         ...(vehicleId ? { vehicle_id: vehicleId } : {}),
         ...(driverId ? { driver_id: driverId } : {}),
@@ -165,8 +169,7 @@ export function BookJobScreen({ route, navigation }: Props) {
       invalidateFor(qc, 'quote', 'load');
       if (booked.loadId == null) throw new Error("Couldn't book this job. Try again.");
       if (preview) {
-        // Everything was chosen up front: straight to the job. A load that
-        // brings this truck home is linked now the job exists.
+        // Everything was chosen up front: straight to the job.
         let note: string | null = booked.returnLink?.error ?? booked.returnLink?.warnings[0]?.title ?? null;
         if (linkReturnId) {
           try {

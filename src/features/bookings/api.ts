@@ -443,6 +443,8 @@ export interface ConvertToLoadBody {
   pickup_date?: string;
   delivery_date?: string;
   return_of_load_id?: number | string;
+  /** That existing load brings this job's truck home (newer backends). */
+  return_load_id?: number | string;
   expect_return?: boolean;
 }
 export const convertQuoteToLoad = (id: string | number, data: ConvertToLoadBody = {}) =>

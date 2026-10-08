@@ -295,6 +295,12 @@ test('booking preview before booking: candidates, invoice, can_book', () => {
   assert.equal(p.blockedText, null);
   assert.equal(p.returnCandidates[0].loadId, 41);
   assert.equal(p.invoice.heading, 'Invoice on delivery');
+  assert.equal(p.linksInOneCall, false);
+  const withFields = parseBookingPreview({
+    preview: true, can_book: true, load_id: null,
+    booking: { link_fields: { outbound_candidates: 'return_of_load_id', return_candidates: 'return_load_id' } },
+  });
+  assert.equal(withFields.linksInOneCall, true);
 });
 
 test('booking preview: blocked, already booked, not a preview', () => {
@@ -315,7 +321,10 @@ test('return choice becomes one convert_to_load body', () => {
   assert.deepEqual(bookingBodyFor('empty'), {});
   assert.deepEqual(bookingBodyFor('expect'), { expect_return: true });
   assert.deepEqual(bookingBodyFor('out:42'), { return_of_load_id: '42' });
-  assert.deepEqual(bookingBodyFor('ret:41'), { linkReturnId: '41' });
+  assert.deepEqual(bookingBodyFor('ret:41'), { return_load_id: '41' });
+  // A backend without return_load_id: link right after booking.
+  assert.deepEqual(bookingBodyFor('ret:41', false), { linkReturnId: '41' });
+  assert.deepEqual(bookingBodyFor('out:42', false), { return_of_load_id: '42' });
 });
 
 test('tolls being worked out: a calm pending note, not a missing prompt', () => {

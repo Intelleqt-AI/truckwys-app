@@ -502,6 +502,8 @@ export interface BookingPreview {
   returnCandidates: Candidate[];
   outboundCandidates: Candidate[];
   invoice: InvoicePreviewView | null;
+  /** The backend takes `return_load_id` on convert_to_load (sent as `link_fields`). */
+  linksInOneCall: boolean;
 }
 
 function blockedSentence(raw: unknown): string | null {
@@ -527,25 +529,32 @@ export function parseBookingPreview(body: unknown): BookingPreview | null {
     returnCandidates: parseCandidates(bk.return_candidates),
     outboundCandidates: parseCandidates(bk.outbound_candidates),
     invoice: invoicePreviewView(bk.invoice_preview),
+    linksInOneCall: obj(bk.link_fields).return_candidates === 'return_load_id',
   };
 }
 
 /**
  * The "Coming back loaded?" choice before booking: back empty, expecting one,
  * or a specific load. `out:<id>` = this job is that load's return (sent as
- * return_of_load_id); `ret:<id>` = that load brings this truck home (linked
- * right after booking).
+ * return_of_load_id); `ret:<id>` = that load brings this truck home (sent as
+ * return_load_id; a backend without it links right after booking instead).
  */
 export type ReturnChoice = 'empty' | 'expect' | `out:${string}` | `ret:${string}`;
 
-export function bookingBodyFor(choice: ReturnChoice): {
+export function bookingBodyFor(
+  choice: ReturnChoice,
+  linksInOneCall = true,
+): {
   expect_return?: boolean;
   return_of_load_id?: string;
+  return_load_id?: string;
   linkReturnId?: string;
 } {
   if (choice === 'expect') return { expect_return: true };
   if (choice.startsWith('out:')) return { return_of_load_id: choice.slice(4) };
-  if (choice.startsWith('ret:')) return { linkReturnId: choice.slice(4) };
+  if (choice.startsWith('ret:')) {
+    return linksInOneCall ? { return_load_id: choice.slice(4) } : { linkReturnId: choice.slice(4) };
+  }
   return {};
 }
 

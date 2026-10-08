@@ -3,7 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { getMessagingLib, getNotifeeLib } from '@/lib/pushNative';
 import { registerForPush, presentForeground, syncBadge } from '@/lib/push';
-import { resolveNotificationLink } from '@/lib/notificationLink';
+import { pushChannelFor, resolveNotificationLink } from '@/lib/notificationLink';
 import { invalidateForServerEvent } from '@/lib/queryInvalidation';
 import { useUnreadCount } from '@/features/more/api';
 import { useAuthStore } from '@/stores/authStore';
@@ -78,7 +78,7 @@ export function usePushNotifications() {
       refreshLists(data.event_id);
       const title = msg.notification?.title ?? 'Truckwys';
       const body = msg.notification?.body ?? '';
-      await presentForeground(title, body, data, data.channel);
+      await presentForeground(title, body, data, pushChannelFor(data.event_id, data.channel));
     });
 
     // Tapping a notification the OS displayed while the app was backgrounded.

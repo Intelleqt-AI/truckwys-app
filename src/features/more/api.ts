@@ -147,13 +147,24 @@ export type NotificationPrefs = Record<NotificationChannel, Record<string, boole
 // App Store Review 4.5.4 forbids using push for marketing or promotion without
 // an express opt-in.
 export const NOTIFICATION_DEFAULTS: NotificationPrefs = {
-  email: { quotes: true, invoices: true, payments: true, fleet_alerts: true, weekly_reports: false },
+  email: {
+    quotes: true,
+    invoices: true,
+    payments: true,
+    fleet_alerts: true,
+    weekly_reports: false,
+    // Quote follow-ups: the fuel change alert email and the Monday margin email (admins).
+    fuel_alerts: true,
+    margin_report: true,
+  },
   push: {
     new_bookings: true,
     payment_received: true,
     maintenance_due: true,
     driver_updates: false,
     product_news: false,
+    // Quote follow-ups: expiry / no-answer nudges and fuel price alerts.
+    quote_reminders: true,
   },
   sms: { critical_alerts: false, payment_confirmations: false },
 };

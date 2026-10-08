@@ -69,6 +69,7 @@ import { SubscriptionDetailModal } from '@/features/more/SubscriptionDetailModal
 import { useAuthStore } from '@/stores/authStore';
 import { mediaUrl } from '@/lib/api/client';
 import { useOnboardingGate } from '@/features/onboarding/useOnboardingGate';
+import { FuelClausePrompt, PricingSetupCard } from '@/features/more/FollowUpPrompts';
 
 const wholeRand = (n: number) => formatCurrency(n, { maximumFractionDigits: 0 });
 
@@ -299,6 +300,12 @@ export function HomeScreen() {
             />
           </View>
         )}
+
+        {/* First run for admins: confirm the pricing defaults quotes use. */}
+        <PricingSetupCard />
+        {/* One-time sheet for admins: "Add a fuel price clause to your quotes?".
+            Home is always mounted under the tabs, so it shows on the next open. */}
+        <FuelClausePrompt />
 
         {/* Silent while the figures are current. Tracks the OLDEST figure on
             screen, and "Refresh now" refetches everything Home shows. An

@@ -25,6 +25,8 @@ import {
 import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { RouteMap } from '@/components/RouteMap';
 import { useLoad, updateLoadStatus, uploadLoadPod, seedLoad, saveWeighbridge } from './api';
+import { useFuelAdjustment } from './followupsApi';
+import { FuelAdjustmentGroup } from './FollowUps';
 import { WeighbridgeFields, WeighbridgeGroup } from './WeighbridgeGroup';
 import { fmtRatePerTonne, fmtTonnes, parseTonnes, type LoadTonnage } from './quote/tonnage';
 import { assignedIds } from './AssignDriverVehicleScreen';
@@ -49,6 +51,8 @@ type Props = NativeStackScreenProps<AppStackParamList, 'LoadDetail'>;
 export function LoadDetailScreen({ route, navigation }: Props) {
   const { id, preview, title } = route.params;
   const { data, error, isError, isPending, refetch } = useLoad(id, preview);
+  // The quote's fuel price clause, worked out for this load's trip date.
+  const { data: fuelAdjustment } = useFuelAdjustment('loads', id, !!data);
   const { colors } = useTheme();
   const qc = useQueryClient();
   const subscription = useSubscription();
@@ -556,6 +560,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           </>
         ) : null}
       </Group>
+
+      <FuelAdjustmentGroup adjustment={fuelAdjustment} onOpenInvoice={(inv) => nav.openInvoice(inv)} />
 
       {(fuelEst != null || fuelAct != null) && (
         <Group label="Fuel cost">

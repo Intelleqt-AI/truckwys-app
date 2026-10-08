@@ -24,10 +24,11 @@ export function fmtRatePerTonne(v: number | string | null | undefined, whole = f
 export const truckText = (t: Pick<TonnageTruck, "name" | "payload_t">) => `${t.name || "Truck"} ${fmtTonnes(t.payload_t)}`;
 
 /** One line: which truck the quote is priced on, and why. */
-export function basisReason(t: Tonnage | null | undefined): string | null {
+export function basisReason(t: Tonnage | null | undefined, held = false): string | null {
   if (!t) return null;
   const basis = t.trucks.find((x) => x.is_basis);
   if (!basis) return null;
+  if (held) return `Priced on ${truckText(basis)}.`;
   if (t.basis_reason === "chosen") return `Priced on ${truckText(basis)}, your choice.`;
   if (t.basis_reason === "costs_unknown") return `Priced on ${truckText(basis)} until costs are known.`;
   return t.trucks.length > 1
@@ -48,6 +49,8 @@ export interface LoadTonnage {
 export interface VolumeContract {
   total_tonnes: number; booked_tonnes: number; delivered_tonnes?: number; remaining_tonnes: number;
   loads_booked: number; loads_planned: number | null; tonnes_per_load: number | null;
+  /** The most one call-off can carry (the largest eligible truck), when known. */
+  max_tonnes_per_load?: number | null;
   contract_start?: string | null; contract_end?: string | null;
   loads?: { id: number; load_number: string; status: string; pickup_date: string | null; planned_tonnes: number | null;
     actual_tonnes: number | null; weighbridge_slip: string | null; total_amount: number }[];
@@ -76,3 +79,5 @@ export const parseTonnes = (text: string): number | null => {
   const n = Number(text.replace(/\s/g, "").replace(",", "."));
   return text.trim() !== "" && Number.isFinite(n) && n > 0 && n <= 100 ? n : null;
 };
+
+export { nextAutoBasis, AUTO_BASIS_START, callOffCap, checkCallOff, type AutoBasis } from './tonnageRules';

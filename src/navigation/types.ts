@@ -56,7 +56,7 @@ export type AppStackParamList = {
     popCallerOnSuccess?: boolean;
     /** Volume contract (tonnage quote): tonnes left and the planned load size;
      *  the screen asks the tonnes on this load. */
-    callOff?: { remaining: number; size: number | null };
+    callOff?: { remaining: number; size: number | null; max?: number | null };
   };
   Customers: undefined;
   CustomerDetail: { id: Id; preview?: Record<string, unknown> };

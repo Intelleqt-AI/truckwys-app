@@ -658,7 +658,15 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           reference: str(pick(q, ['quote_number'])),
           vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
           popCallerOnSuccess: true,
-          ...(contract ? { callOff: { remaining: contract.remaining_tonnes, size: contract.tonnes_per_load } } : {}),
+          ...(contract
+            ? {
+                callOff: {
+                  remaining: contract.remaining_tonnes,
+                  size: contract.tonnes_per_load,
+                  max: contract.max_tonnes_per_load ?? null,
+                },
+              }
+            : {}),
         }),
     },
     send: {

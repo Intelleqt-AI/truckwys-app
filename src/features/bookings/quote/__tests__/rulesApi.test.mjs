@@ -276,3 +276,30 @@ test('default price rounds up like the choices (R 50 under R 20 000, else R 100)
   assert.equal(roundPrice(35612.4), 35700);
   assert.equal(roundPrice(20000), 20000);
 });
+
+test('server inputs: the cross-border allowance only for an international trip', async () => {
+  const { withServerInputs, computeCosting } = await import('../rules.ts');
+  const local = {
+    trip_type: 'ONE_WAY',
+    distance_km: 412.6,
+    duration_minutes: 560,
+    load_kg: 12000,
+    vehicle: { id: 27, name: 'Flatbed Truck', capacity: 20, rated_burn_l_per_100km: 36 },
+    diesel: { zone: 'INLAND', mode: 'LIVE', official_price: 32.7989 },
+    operating_cost_per_km: 14.5,
+    tolls: { one_way: 318.5 },
+    driver: { allowance_per_night: null, nights: null, amount: null },
+    border_cost: 1850,
+    international: true,
+  };
+  // Scratch backend (0159, no company allowance): Durban → Thaba-Tseka is
+  // priced at the cross-border NBCRFLI rate, an SA trip at the SA rate.
+  const serverIntl = { ...local, driver: { allowance_per_night: 487.05 }, international: true };
+  const serverSa = { ...local, driver: { allowance_per_night: 243.63 }, international: false };
+  assert.equal(withServerInputs(local, serverIntl, 27).driver.allowance_per_night, 487.05);
+  // A stale SA answer never prices an international trip.
+  assert.equal(withServerInputs(local, serverSa, 27).driver.allowance_per_night, null);
+  const merged = withServerInputs(local, serverIntl, 27);
+  const c = computeCosting(merged);
+  assert.equal(c.lines.find((l) => l.key === 'driver').rate_per_night, 487.05);
+});

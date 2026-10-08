@@ -89,7 +89,6 @@ const REJECTION_REASONS = [
   'Other',
 ] as const;
 
-
 export function QuoteDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const subscription = useSubscription();
@@ -169,9 +168,21 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       : routeSnap.cost_floor != null
         ? num(routeSnap.cost_floor)
         : null;
-  const costFloor = serverFloor ?? storedFloor;
+  // Tolls that were unknown when saved (costing_inputs), or that the backend's
+  // costing for the quote can't work out: the floor is incomplete.
+  const costingInputs = (pick(q, ['costing_inputs']) ?? {}) as Record<string, unknown>;
+  const serverTollLine = asArray<Record<string, unknown>>(costing?.lines).find(
+    (l) => l.key === 'tolls',
+  );
+  const tollsUnknown =
+    costingInputs.tolls_unknown === true ||
+    (serverTollLine != null && serverTollLine.amount === null);
+  const costFloor = tollsUnknown && serverFloor === null ? null : (serverFloor ?? storedFloor);
   const marginPct = costFloor !== null && total > 0 ? ((total - costFloor) / total) * 100 : null;
-  const targetMargin = Math.min(Math.max(num(pick(company ?? {}, ['margin_target_pct'])) || 10, 1), 40);
+  const targetMargin = Math.min(
+    Math.max(num(pick(company ?? {}, ['margin_target_pct'])) || 10, 1),
+    40,
+  );
   const roundTrip = str(pick(q, ['trip_type'])).toUpperCase() === 'ROUND_TRIP';
   const token = str(pick(q, ['token', 'view_token']));
   const shareUrl = token ? quoteShareUrl(id, token) : undefined;
@@ -252,9 +263,15 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     { label: 'Driver allowance', value: driver },
   ];
   if (additional !== 0)
-    costRows.push({ label: pick(q, ['is_international']) === true ? 'Border and adjustment' : 'Adjustment', value: additional });
+    costRows.push({
+      label: pick(q, ['is_international']) === true ? 'Border and adjustment' : 'Adjustment',
+      value: additional,
+    });
   if (roundTrip && returnBaseRate > 0)
-    costRows.push({ label: `Return leg (${str(pick(q, ['return_cargo'])) ? 'with cargo' : 'empty'})`, value: returnBaseRate });
+    costRows.push({
+      label: `Return leg (${str(pick(q, ['return_cargo'])) ? 'with cargo' : 'empty'})`,
+      value: returnBaseRate,
+    });
   // A stored total that carries charges not broken down here gets its own line
   // rather than an unexplained gap.
   const linesSum = costRows.reduce((a, r) => a + r.value, 0);
@@ -331,11 +348,19 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       setSendChecking(false);
     }
     if (warnings === null) {
-      const block = asArray<Record<string, unknown>>(pick(q, ['warnings'])).find((w) => w.severity === 'block');
+      const block = asArray<Record<string, unknown>>(pick(q, ['warnings'])).find(
+        (w) => w.severity === 'block',
+      );
       warnings = [
         ...(block ? [block] : []),
         ...(pricedAt && pricedInEarlierPeriod(pricedAt)
-          ? [{ code: 'diesel_period_changed', severity: 'warn', title: 'Priced on an earlier diesel price' }]
+          ? [
+              {
+                code: 'diesel_period_changed',
+                severity: 'warn',
+                title: 'Priced on an earlier diesel price',
+              },
+            ]
           : []),
       ];
     }
@@ -347,7 +372,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     const older = warnings.find((w) => w.code === 'diesel_period_changed');
     if (older) {
       Alert.alert(str(older.title, 'Priced on older diesel'), str(older.detail) || undefined, [
-        { text: 'Edit quote', style: 'cancel', onPress: () => navigation.navigate('CreateQuote', { quoteId: id }) },
+        {
+          text: 'Edit quote',
+          style: 'cancel',
+          onPress: () => navigation.navigate('CreateQuote', { quoteId: id }),
+        },
         { text: 'Send anyway', onPress: go },
       ]);
       return;
@@ -359,7 +388,10 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const validMs = validUntil ? Date.parse(validUntil) : NaN;
   const validNote = lapsed
     ? 'expired'
-    : openStatus && Number.isFinite(validMs) && validMs > Date.now() && validMs - Date.now() < 48 * 3600_000
+    : openStatus &&
+        Number.isFinite(validMs) &&
+        validMs > Date.now() &&
+        validMs - Date.now() < 48 * 3600_000
       ? `${Math.ceil((validMs - Date.now()) / 3600_000)} h left`
       : '';
   const outcome = str(pick(q, ['outcome'])).toLowerCase();
@@ -695,13 +727,13 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         {outcome === 'rejected' && status !== 'DECLINED' && <StatusPill status="LOST" />}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
         {marginPct !== null && (
-          <Mono className={`text-caption ${marginPct < 0 ? 'text-danger' : 'text-faint'}`}>Margin {pct(marginPct)}</Mono>
+          <Mono className={`text-caption ${marginPct < 0 ? 'text-danger' : 'text-faint'}`}>
+            Margin {pct(marginPct)}
+          </Mono>
         )}
       </View>
 
-      {booked && (
-        <Txt className="-mt-2 mb-4 text-sub text-muted">Booked as {bookedLabel}</Txt>
-      )}
+      {booked && <Txt className="-mt-2 mb-4 text-sub text-muted">Booked as {bookedLabel}</Txt>}
       {loadStateOnly && (
         <Txt className="-mt-2 mb-4 text-sub text-muted">
           Marked {(LEGACY_STATUS_LABELS[status] ?? status).toLowerCase()} on an older record. No
@@ -732,8 +764,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           origin={origin}
           dest={dest}
           stops={stopLabels}
-          distance={distanceKm > 0 ? `${formatNumber(distanceKm, { maximumFractionDigits: 1 })} km` : undefined}
-          duration={pick(q, ['sla_hours']) ? `Delivery within ${num(pick(q, ['sla_hours']))} h` : undefined}
+          distance={
+            distanceKm > 0
+              ? `${formatNumber(distanceKm, { maximumFractionDigits: 1 })} km`
+              : undefined
+          }
+          duration={
+            pick(q, ['sla_hours']) ? `Delivery within ${num(pick(q, ['sla_hours']))} h` : undefined
+          }
         />
         {hasRouteCoords && (
           <View className="mt-3">
@@ -751,7 +789,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         <View className="mb-5">
           <Banner
             tone={marginPct < 0 ? 'danger' : 'warning'}
-            message={marginPct < 0 ? 'Price is below your costs' : `Margin under your ${pct(targetMargin)} target`}
+            message={
+              marginPct < 0
+                ? 'Price is below your costs'
+                : `Margin under your ${pct(targetMargin)} target`
+            }
             onPress={!booked && openStatus ? editQuote : undefined}
           />
         </View>
@@ -806,9 +848,20 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
       {total > 0 && (
         <Group label="Cost breakdown">
-          {costRows.map((c) => (
-            <DetailRow key={c.label} label={c.label} value={formatCurrency(c.value)} />
-          ))}
+          {costRows.map((c) =>
+            c.label === 'Tolls' && tollsUnknown ? (
+              // Saved while the toll lookup had failed: unknown, never R 0.
+              <DetailRow
+                key={c.label}
+                label="Tolls"
+                hint="Not worked out: edit the quote to add them"
+                value="—"
+                valueColor={colors.danger}
+              />
+            ) : (
+              <DetailRow key={c.label} label={c.label} value={formatCurrency(c.value)} />
+            ),
+          )}
           {hasGap && (
             <DetailRow
               label="Not itemised"
@@ -819,10 +872,17 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
               {roundTrip ? 'Price, both legs, excl. VAT' : 'Price excl. VAT'}
-
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
+          {costFloor === null && tollsUnknown && (
+            <DetailRow
+              label="Cost floor"
+              hint="Incomplete: tolls unknown"
+              value="—"
+              valueColor={colors.danger}
+            />
+          )}
           {costFloor !== null && (
             <>
               {/* Today's costs (backend costing) against the price as quoted,

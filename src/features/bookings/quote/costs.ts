@@ -7,6 +7,7 @@ import {
   resolveDieselInput,
   operatingCostPerKm,
   phoneWarning,
+  withServerInputs,
   type Costing,
   type CostingInputs,
   type CostingLine,
@@ -409,49 +410,5 @@ export function computeCosts({
     costingInputs,
     warnings,
     blocked: warnings.some((w) => w.severity === 'block'),
-  };
-}
-
-/**
- * Local inputs with what only the server knows taken from its resolution.
- * The person's own choices (use official, a market price, tolls, driver
- * amount, trip shape) always stay local.
- */
-function withServerInputs(
-  local: CostingInputs,
-  server: CostingInputs | null,
-  truckId: number | string | null,
-  family: ReturnType<typeof fuelFamily>,
-): CostingInputs {
-  if (!server) return local;
-  const sameTruck = server.vehicle != null && truckId != null && String(server.vehicle.id) === String(truckId);
-  // The server's fuel resolution only for the same fuel: a reply for a
-  // diesel truck must not price a petrol one while the next is in flight.
-  const sameFuel = !!server.diesel && fuelFamily(server.diesel.fuel_type ?? 'Diesel') === family;
-  return {
-    ...local,
-    diesel: server.diesel && sameFuel
-      ? {
-          ...server.diesel,
-          use_official: local.diesel?.use_official ?? false,
-          override_price: local.diesel?.override_price ?? null,
-        }
-      : local.diesel,
-    ...(sameTruck
-      ? {
-          operating_cost_per_km: server.operating_cost_per_km ?? local.operating_cost_per_km,
-          operating_cost_source: server.operating_cost_source ?? local.operating_cost_source,
-        }
-      : {}),
-    driver: {
-      ...local.driver,
-      allowance_per_night: server.driver?.allowance_per_night ?? local.driver?.allowance_per_night ?? null,
-    },
-    hours_per_day: server.hours_per_day ?? local.hours_per_day,
-    settings: server.settings ?? local.settings,
-    minimum_charge: server.minimum_charge !== undefined ? server.minimum_charge : local.minimum_charge,
-    default_price_per_km:
-      server.default_price_per_km !== undefined ? server.default_price_per_km : local.default_price_per_km,
-    target_margin_pct: server.target_margin_pct ?? local.target_margin_pct,
   };
 }

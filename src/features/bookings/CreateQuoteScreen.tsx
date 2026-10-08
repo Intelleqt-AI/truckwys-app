@@ -56,6 +56,7 @@ import {
   suggestLocations,
   calculateRoute,
   analyzeQuote,
+  useReturnLoadHistory,
   benchmarkQuote,
   aiChatQuote,
   aiVoiceQuote,
@@ -64,6 +65,7 @@ import {
   sendQuote,
   type AiChatTurn,
 } from './api';
+import { analysisHasReturnHistory, returnHistoryText } from './trip/economics';
 import { useCustomers } from '@/features/customers/api';
 import type { GeoPoint } from '@/lib/routeGeometry';
 import { MapCanvas } from './quote/MapCanvas';
@@ -1546,6 +1548,30 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [analysis],
   );
   const winProb = num(pick(opt, ['win_probability_at_optimal']));
+
+  // How often this lane's trips found a return load (pricing analysis
+  // `return_load_history`), shown under Empty / Loaded. Context only: it never
+  // changes the empty-return default. From /quotes/analyze/; an older backend
+  // without the field gets one pricing-analysis call per lane instead.
+  const analysisReturnHistory = returnHistoryText(analysis);
+  const historyLane = useMemo(
+    () =>
+      tripType === 'ONE_WAY' && costs.emptyReturnEligible && pickup && delivery
+        ? {
+            origin: extractCode(pickup.label),
+            destination: extractCode(delivery.label),
+            pickup: pickup.label,
+            delivery: delivery.label,
+          }
+        : null,
+    [tripType, costs.emptyReturnEligible, pickup, delivery],
+  );
+  const { data: fetchedReturnHistory } = useReturnLoadHistory(
+    historyLane,
+    !!analysis && !analysisHasReturnHistory(analysis),
+  );
+  const returnHistory = analysisReturnHistory ?? fetchedReturnHistory ?? null;
+
   // ── Describe the load (typed or voice) ────────────────────────────────────
   // The form as the Fill rule compares it (nlFill.planFill): value '' = empty.
   const fillCurrent = (lang: UiLang): Partial<Record<FillKey, FieldVal>> => {
@@ -3446,6 +3472,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                         {returnLoadBooked ? 'Back empty' : 'Loaded back'}:{' '}
                         {formatCurrency(costs.altReturnTargetPrice, { maximumFractionDigits: 0 })}
                       </Mono>
+                    )}
+                    {returnHistory && (
+                      <Txt className="mt-1 text-caption text-muted">{returnHistory}</Txt>
                     )}
                   </View>
                 )}

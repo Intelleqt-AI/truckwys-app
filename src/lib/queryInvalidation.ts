@@ -50,15 +50,15 @@ const MAP: Record<DomainEvent, string[]> = {
   // A load's status drives revenue recognition, fleet utilisation and the
   // Home heatmap; delivering one can also auto-raise an invoice. A quote reports
   // the load it was booked as (booked_load), so quotes move with loads too.
-  load: ['loads', 'load', 'ledger-loads', 'ledger-quotes', 'quotes', 'quote', 'customer-quotes', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'driver-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
+  load: ['loads', 'load', 'load-economics', 'return-candidates', 'ledger-loads', 'ledger-quotes', 'quotes', 'quote', 'customer-quotes', 'invoices', 'vehicles', 'vehicle', 'vehicle-loads', 'driver-loads', 'drivers', ...ASSIGN, ...DASHBOARD, ...FINANCE],
   // Credit notes move an invoice's balance and status, so they ride along with
   // invoice and payment changes (the backend pushes no credit-note topic of its
   // own; issuing one saves the invoice, which does push).
-  invoice: ['invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'credit-notes', 'credit-note', 'ledger-creditNotes', 'customer', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
+  invoice: ['load-economics', 'invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'credit-notes', 'credit-note', 'ledger-creditNotes', 'customer', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
   payment: ['invoices', 'invoice', 'ledger-payments', 'ledger-invoices', 'invoice-payments', 'credit-notes', 'credit-note', 'ledger-creditNotes', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
-  'credit-note': ['credit-notes', 'credit-note', 'ledger-creditNotes', 'invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
+  'credit-note': ['load-economics', 'credit-notes', 'credit-note', 'ledger-creditNotes', 'invoices', 'invoice', 'ledger-invoices', 'invoice-payments', 'customers', ...DASHBOARD, ...FINANCE, ...RISK],
   supplier: ['suppliers', 'supplier', 'expenses', 'expense', 'ledger-expenses'],
-  expense: ['expenses', 'expense', 'ledger-expenses', 'suppliers', 'vehicle-loads', ...DASHBOARD, ...FINANCE],
+  expense: ['load-economics', 'expenses', 'expense', 'ledger-expenses', 'suppliers', 'vehicle-loads', ...DASHBOARD, ...FINANCE],
   vehicle: ['vehicles', 'vehicle', 'ledger-vehicles', 'vehicle-loads', 'vehicle-types', 'drivers', ...ASSIGN, ...DASHBOARD],
   // Drivers are Users too — AddDriverScreen POSTs to users/ as well.
   driver: ['drivers', 'driver', 'driver-loads', 'vehicles', 'vehicle', 'users', ...ASSIGN, ...DASHBOARD],

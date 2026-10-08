@@ -30,6 +30,7 @@ import {
   useQuoteFuelAlert,
   useQuoteCosting,
   useCompanyProfileData,
+  useBookedQuotedMargin,
   sendQuote,
   recordQuoteOutcome,
   deleteQuote,
@@ -64,6 +65,7 @@ import { pricedInEarlierPeriod } from './quote/rules';
 import { pct } from './quote/CostBreakdownCard';
 import { TonnageTermsGroup } from './TonnageTermsGroup';
 import type { VolumeContract } from './quote/tonnage';
+import { actualsView, percent } from './trip/economics';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -103,6 +105,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const { data: fuelAlert } = useQuoteFuelAlert(id, !!data && ['DRAFT', 'SENT'].includes(status));
   const { data: costing } = useQuoteCosting(id, !!data);
   const { data: company } = useCompanyProfileData();
+  // Once delivered (actuals recorded), the margin it was quoted at, from the job.
+  const { data: quotedMarginAtBooking } = useBookedQuotedMargin(
+    bookedLoadOf(data as Record<string, unknown> | undefined)?.id ?? null,
+    !!data && !!(data as Record<string, unknown>).actuals,
+  );
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
@@ -305,6 +312,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const shownStatus = booked ? 'BOOKED' : lapsed ? 'EXPIRED' : status;
   const canConvert =
     (['ACCEPTED', 'APPROVED'].includes(status) || (contractOpen && bookedLoad !== null)) && !booked && !loadStateOnly;
+  // Newer backends: what the job really earned once delivered (null until then).
+  const actuals = actualsView(pick(q, ['actuals']));
   const bookedLabel = bookedLoad
     ? `${bookedLoad.load_number || 'a booking'}${
         bookedLoad.status ? ` · ${LOAD_STATUS_LABEL(String(bookedLoad.status).toUpperCase())}` : ''
@@ -640,12 +649,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         navigation.navigate('LoadDetail', { id: bookedLoad!.id, title: bookedLoad!.load_number }),
     },
     convert: {
-      label: contract ? 'Book a load' : 'Convert to booking',
+      label: contract ? 'Book a load' : 'Book job',
       icon: 'arrowRight' as IconName,
       disabled: subscription.blocked,
       onPress: () =>
-        nav.openAssign({
-          mode: 'convert',
+        nav.openBookJob({
           quoteId: id,
           reference: str(pick(q, ['quote_number'])),
           vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
@@ -932,6 +940,31 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
               <DetailRow label="VAT" value="Not charged (not VAT-registered)" mono={false} last />
             )
           ) : null}
+        </Group>
+      )}
+
+      {actuals && (
+        // What the job really earned once delivered (QuoteOutcome actuals).
+        <Group label="How it went">
+          <DetailRow
+            label={actuals.marginLabel}
+            value={actuals.margin}
+            valueColor={actuals.negative ? colors.danger : undefined}
+            boldValue
+          />
+          {quotedMarginAtBooking != null && (
+            <DetailRow label="Quoted margin" value={percent(quotedMarginAtBooking)} />
+          )}
+          {actuals.revenue && <DetailRow label="Revenue excl. VAT" value={actuals.revenue} />}
+          {actuals.cost && (
+            <DetailRow
+              label={`${actuals.costRowLabel} excl. VAT`}
+              hint={actuals.basis ?? undefined}
+              value={actuals.cost}
+              last={!actuals.backhaul}
+            />
+          )}
+          {actuals.backhaul && <DetailRow label="Return" value={actuals.backhaul} mono={false} last />}
         </Group>
       )}
 

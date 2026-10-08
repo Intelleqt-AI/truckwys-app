@@ -28,6 +28,7 @@ import { useLoad, updateLoadStatus, uploadLoadPod, seedLoad, saveWeighbridge } f
 import { WeighbridgeFields, WeighbridgeGroup } from './WeighbridgeGroup';
 import { fmtRatePerTonne, fmtTonnes, parseTonnes, type LoadTonnage } from './quote/tonnage';
 import { assignedIds } from './AssignDriverVehicleScreen';
+import { TripSection } from './trip/TripSection';
 import { useSubscription } from '@/hooks/useSubscription';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL, stepIndexFor } from './constants';
 import { num, str, pick, asArray } from '@/lib/api/list';
@@ -257,7 +258,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     }
     // Cancelling a load that's already moving is destructive — confirm first.
     if (next === 'CANCELLED' && !['PENDING', 'LOADING'].includes(status)) {
-      Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it.', [
+      Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it. If it is in a return pair, the pair is unlinked.', [
         { text: 'Keep', style: 'cancel' },
         { text: 'Cancel load', style: 'destructive', onPress: () => doStatus('CANCELLED') },
       ]);
@@ -579,6 +580,15 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           )}
         </Group>
       )}
+
+      {/* Trip margin (quoted vs actual) and the return-load link. Hidden on
+          a backend without trip economics. */}
+      <TripSection
+        loadId={id}
+        status={status}
+        tripType={str(pick(l, ['trip_type']), 'ONE_WAY')}
+        onOpenLoad={(other) => navigation.push('LoadDetail', { id: other })}
+      />
 
       {/* Assignment */}
       <Group

@@ -45,8 +45,17 @@ export type AppStackParamList = {
     activateOnAssign?: boolean;
     /** Convert only: also pop the screen beneath this one (e.g. QuoteDetail) before pushing LoadDetail. */
     popCallerOnSuccess?: boolean;
-    /** Convert only, volume contract: tonnes left and the planned load size;
-     *  the screen asks this load's tonnes and dates. */
+  };
+  /** Book an accepted quote as a job (one-tap booking, return-load link offered). */
+  BookJob: {
+    quoteId: Id;
+    /** Quote number, shown in the copy. */
+    reference?: string;
+    vehicleType?: string;
+    /** Also pop the screen beneath this one (e.g. QuoteDetail) before opening the job. */
+    popCallerOnSuccess?: boolean;
+    /** Volume contract (tonnage quote): tonnes left and the planned load size;
+     *  the screen asks the tonnes on this load. */
     callOff?: { remaining: number; size: number | null };
   };
   Customers: undefined;

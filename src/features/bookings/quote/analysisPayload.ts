@@ -19,6 +19,10 @@ export interface AnalysisPayloadInput {
   distanceEstimated: boolean;
   distanceConfirmed: boolean;
   useOfficialFuel: boolean;
+  /** Route parts with no border figures (null when all known / old backend). */
+  borderCostsUnknown?: unknown;
+  /** The border figure was typed by the person. */
+  borderCostIsOverride?: boolean;
 }
 
 export function analysisPayload(i: AnalysisPayloadInput): Record<string, unknown> {
@@ -41,5 +45,7 @@ export function analysisPayload(i: AnalysisPayloadInput): Record<string, unknown
     distance_estimated: i.distanceEstimated,
     distance_confirmed: i.distanceConfirmed,
     use_official_fuel: i.useOfficialFuel,
+    ...(i.borderCostsUnknown ? { border_costs_unknown: i.borderCostsUnknown } : {}),
+    border_cost_is_override: !!i.borderCostIsOverride,
   };
 }

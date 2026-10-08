@@ -46,7 +46,7 @@ export interface BuildQuotePayloadInput {
    */
   pricing: CostBreakdown | null;
   /** quote_costing COSTING_INPUT_KEYS: what the quote fields alone don't say. */
-  costingInputs: Record<string, number | boolean> | null;
+  costingInputs: Record<string, number | boolean | object> | null;
   /**
    * The trip leaves South Africa (zero-rated for VAT). Null when neither the
    * route nor a point's country says either way: nothing is sent, so a stored

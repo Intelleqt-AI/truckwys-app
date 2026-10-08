@@ -303,3 +303,31 @@ test('server inputs: the cross-border allowance only for an international trip',
   const c = computeCosting(merged);
   assert.equal(c.lines.find((l) => l.key === 'driver').rate_per_night, 487.05);
 });
+
+test('border costs not on file: from the route response, names not codes', async () => {
+  const { borderCostsUnknownFromRoute, computeCosting } = await import('../rules.ts');
+  const route = {
+    cross_border: true,
+    border_costs_unknown: { countries: ['AO'], crossings: ['NA-AO'] },
+    cross_border_breakdown: [
+      { type: 'border_crossing', description: 'SA → NA border crossing (Ariamsvlei)', amount: 4463.29 },
+      { type: 'sa_permit', description: 'SA C-BRTA permit (R9,041/yr)', amount: 376.71 },
+    ],
+  };
+  const bu = borderCostsUnknownFromRoute(route);
+  assert.deepEqual(bu, {
+    countries: ['Angola'],
+    crossings: ['Namibia→Angola'],
+    known: [
+      { label: 'SA→NA', amount: 4463.29 },
+      { label: 'permit', amount: 376.71 },
+    ],
+  });
+  assert.equal(borderCostsUnknownFromRoute({ cross_border: true }), null); // older backend
+  const golden = JSON.parse((await import('node:fs')).readFileSync(new URL('./quote_golden.json', import.meta.url), 'utf8'));
+  const c = golden.cases.find((x) => x.name === 'international_border_unknown_country');
+  const got = computeCosting({ ...c.inputs, border_costs_unknown: bu });
+  const w = got.warnings.find((x) => x.code === 'border_costs_missing');
+  assert.equal(w.title, 'Border costs for Angola not known');
+  assert.equal(got.floor, null);
+});

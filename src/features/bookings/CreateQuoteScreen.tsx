@@ -1033,11 +1033,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             fuel_price_override: aiFuelPrice ?? null,
             is_international: crossesBorder,
             cargo_description: cargo || null,
+            // The route's own border data: the server works out what's unknown.
+            route: {
+              cross_border: !!pick(routeData ?? {}, ['cross_border']),
+              border_costs_unknown: pick(routeData ?? {}, ['border_costs_unknown']) ?? null,
+              cross_border_breakdown: pick(routeData ?? {}, ['cross_border_breakdown']) ?? null,
+            },
+            ...(parseNum(borderOverride) != null
+              ? { cross_border_cost: parseNum(borderOverride), border_cost_is_override: true }
+              : {}),
             // Echoed back with the answer: which load the suggestion is for.
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1123,6 +1132,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     distanceEstimated: costs.distanceEstimated,
     distanceConfirmed,
     useOfficialFuel: useOfficialDiesel,
+    borderCostsUnknown: costs.costingInputs.border_costs_unknown ?? null,
+    borderCostIsOverride: !!costs.costingInputs.border_cost_is_override,
   });
 
   // The rate the price works out to (the default price's, or the typed one).
@@ -1992,7 +2003,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // What the saved quote's own fields don't say, for the backend's costing and
   // send check (quote_costing COSTING_INPUT_KEYS; nulls are left out).
   const costingInputs = (() => {
-    const out: Record<string, number | boolean> = {
+    const out: Record<string, number | boolean | object> = {
       distance_estimated: costs.distanceEstimated,
       distance_confirmed: distanceConfirmed,
       tolls_unknown: !costs.tollKnown,
@@ -2002,6 +2013,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       driver_cost_is_override: driverEdited,
     };
     if (costs.crossBorderCost > 0) out.border_cost = costs.crossBorderCost;
+    if (costs.costingInputs.border_cost_is_override) out.border_cost_is_override = true;
+    // Saved so the send check knows which border costs aren't on file.
+    if (costs.costingInputs.border_costs_unknown) out.border_costs_unknown = costs.costingInputs.border_costs_unknown;
     if (returnLoadBooked) out.include_empty_return = false;
     const override = costs.costingInputs.diesel?.override_price;
     if (override != null && override > 0) out.fuel_price_override = override;

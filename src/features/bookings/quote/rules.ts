@@ -859,6 +859,63 @@ export function nightsAway(hours: number | null, hoursPerDay = DEFAULT_HOURS_PER
   return Math.max(Math.ceil(hours / hoursPerDay) - 1, 0);
 }
 
+export interface BorderCostsUnknown {
+  countries?: string[];
+  crossings?: string[];
+  known?: { label: string; amount: number | null }[];
+}
+
+// backend cross_border.COUNTRY_NAMES
+export const COUNTRY_NAMES: Record<string, string> = {
+  SA: 'South Africa', ZW: 'Zimbabwe', MZ: 'Mozambique', BW: 'Botswana', NA: 'Namibia',
+  LS: 'Lesotho', SZ: 'Eswatini', ZM: 'Zambia', MW: 'Malawi', TZ: 'Tanzania', KE: 'Kenya',
+  AO: 'Angola', CD: 'the DR Congo', CG: 'the Republic of the Congo', UG: 'Uganda', RW: 'Rwanda',
+  BI: 'Burundi', MG: 'Madagascar',
+};
+
+const crossingName = (code: string) => {
+  const parts = code.split('-');
+  return parts.length === 2 ? parts.map((p) => COUNTRY_NAMES[p] ?? p).join('→') : code;
+};
+
+const knownLabel = (item: Record<string, unknown>) => {
+  const desc = String(item.description ?? '');
+  if (item.type === 'border_crossing') return desc.replace(' border crossing', '').replace(' → ', '→').split(' (')[0]!;
+  if (item.type === 'sa_permit') return 'permit';
+  return desc.split(' (')[0]!;
+};
+
+/**
+ * compute()'s border_costs_unknown from a route-calculate response (backend
+ * border_costs_unknown_input): its border_costs_unknown with codes turned into
+ * names, and the known parts from cross_border_breakdown. Null when the route
+ * knows every border cost, or on an older backend (no field).
+ */
+export function borderCostsUnknownFromRoute(route: Record<string, unknown> | null | undefined): BorderCostsUnknown | null {
+  const raw = route?.border_costs_unknown;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const countries = (Array.isArray(r.countries) ? r.countries : [])
+    .filter(Boolean)
+    .map((c) => COUNTRY_NAMES[String(c).toUpperCase()] ?? String(c))
+    .slice(0, 10);
+  const crossings = (Array.isArray(r.crossings) ? r.crossings : [])
+    .filter(Boolean)
+    .map((c) => (String(c).includes('→') ? String(c) : crossingName(String(c))))
+    .slice(0, 10);
+  if (!countries.length && !crossings.length) return null;
+  const knownRaw = Array.isArray(r.known)
+    ? (r.known as Record<string, unknown>[])
+    : (Array.isArray(route?.cross_border_breakdown) ? (route!.cross_border_breakdown as Record<string, unknown>[]) : []).map(
+        (b) => ({ label: knownLabel(b), amount: toNum(b.amount) }),
+      );
+  const known = knownRaw
+    .slice(0, 12)
+    .filter((k) => k && typeof k === 'object' && toNum(k.amount) !== null)
+    .map((k) => ({ label: String(k.label ?? '').slice(0, 60), amount: toNum(k.amount) }));
+  return { countries, crossings, known };
+}
+
 export interface CostingInputs {
   trip_type?: 'ONE_WAY' | 'ROUND_TRIP' | string;
   distance_km?: number | null;
@@ -881,6 +938,10 @@ export interface CostingInputs {
   border_cost?: number | null;
   /** Cross-border trip: no border cost makes the floor incomplete (block). */
   international?: boolean | null;
+  /** Parts of the route whose border costs aren't on file (names, not codes). */
+  border_costs_unknown?: BorderCostsUnknown | null;
+  /** The border figure is the user's own (covers every crossing). */
+  border_cost_is_override?: boolean | null;
   include_empty_return?: boolean | null;
   settings?: { include_empty_return_default?: boolean | null; empty_return_min_km?: number | null } | null;
   minimum_charge?: number | null;
@@ -1244,7 +1305,26 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
 
   // --- border ---
   const border = toNum(inp.border_cost);
-  if (border !== null && border > 0) add('border', 'loaded', cents(border), 'Border, permit and non-SA toll costs');
+  const bu = inp.border_costs_unknown ?? {};
+  const unknownNames = (bu.countries ?? []).filter(Boolean).map(String);
+  const unknownCrossings = (bu.crossings ?? []).filter(Boolean).map(String);
+  const borderUnknown = (unknownNames.length > 0 || unknownCrossings.length > 0) && !inp.border_cost_is_override;
+  if (borderUnknown) {
+    // Part of the route has no border figures on file (e.g. Namibia→Angola):
+    // the floor is incomplete until the user enters the border costs.
+    const names = unknownNames.length ? unknownNames : unknownCrossings.map((c) => c.split('→').at(-1) ?? c);
+    const known = (bu.known ?? []).filter((k) => k && typeof k === 'object' && toNum(k.amount) !== null);
+    const missing = (unknownCrossings.length ? unknownCrossings : names).join(', ');
+    const detail = known.length
+      ? `Known: ${known.map((k) => `${k.label} ${fmtRand(toNum(k.amount)!, 2)}`).join(' + ')}; missing: ${missing}`
+      : `Missing: ${missing}`;
+    add('border', 'loaded', null, `Not known for ${names.join(' and ')}`, { status: 'needs_input' });
+    warnings.push(
+      warning('border_costs_missing', 'block', `Border costs for ${names.join(' and ')} not known`, detail, null, [
+        'enter_border_costs',
+      ]),
+    );
+  } else if (border !== null && border > 0) add('border', 'loaded', cents(border), 'Border, permit and non-SA toll costs');
   else if (inp.international) {
     // An international trip always has border costs: without them the floor
     // is badly low, so it is incomplete.
@@ -1331,7 +1411,9 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
         ),
       );
     }
-    if (inp.international && border !== null && border > 0) {
+    if (inp.international && borderUnknown) {
+      add('border_return', 'empty_return', null, 'Not known crossing back', { status: 'needs_input' });
+    } else if (inp.international && border !== null && border > 0) {
       // The empty truck crosses the border(s) back: the same costs per crossing.
       add('border_return', 'empty_return', cents(border), 'Border costs crossing back, empty');
     }

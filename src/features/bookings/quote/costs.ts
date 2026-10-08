@@ -8,6 +8,7 @@ import {
   operatingCostPerKm,
   phoneWarning,
   withServerInputs,
+  borderCostsUnknownFromRoute,
   type Costing,
   type CostingInputs,
   type CostingLine,
@@ -286,6 +287,10 @@ export function computeCosts({
     hours_per_day: null,
     border_cost: borderOverride != null && borderOverride >= 0 ? borderOverride : borderTotal,
     international: !!international,
+    // Parts of the route with no border figures on file (newer backends);
+    // a border figure the person typed covers them.
+    border_costs_unknown: borderCostsUnknownFromRoute(routeData),
+    border_cost_is_override: borderOverride != null && borderOverride >= 0,
     include_empty_return: returnLoadBooked ? false : null,
     settings: {
       include_empty_return_default: typeof includeDefault === 'boolean' ? includeDefault : null,

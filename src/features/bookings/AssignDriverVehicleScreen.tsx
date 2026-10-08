@@ -3,7 +3,8 @@ import { View } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { fetchAllRows } from '@/lib/api/fetchAllPages';
-import { SheetScreen, SelectField, Button, Txt, Mono, type Option } from '@/components/ui';
+import { SheetScreen, SelectField, Button, Txt, Mono, TextField, DateField, type Option } from '@/components/ui';
+import { fmtTonnes, parseTonnes } from './quote/tonnage';
 import { str, pick } from '@/lib/api/list';
 import { assignLoadDriver, convertQuoteToLoad, seedLoad, updateLoadStatus } from './api';
 import { invalidateFor } from '@/lib/queryInvalidation';
@@ -54,6 +55,7 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
     initialVehicleId = '',
     activateOnAssign,
     popCallerOnSuccess,
+    callOff,
   } = route.params;
   const reassigning = mode === 'reassign';
   const qc = useQueryClient();
@@ -61,6 +63,19 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
   const [driverId, setDriverId] = useState(initialDriverId);
   const [vehicleId, setVehicleId] = useState(initialVehicleId);
   const [busy, setBusy] = useState(false);
+  // A contract call-off: this load's tonnes and its own dates.
+  const isoDay = (offset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const [tonnesText, setTonnesText] = useState(
+    callOff ? String(Math.min(callOff.size ?? callOff.remaining, callOff.remaining)).replace('.', ',') : '',
+  );
+  const [pickupDate, setPickupDate] = useState(isoDay(1));
+  const [deliveryDate, setDeliveryDate] = useState(isoDay(2));
+  const tonnes = parseTonnes(tonnesText);
+  const tonnesBad = !!callOff && !(tonnes != null && tonnes <= callOff.remaining + 1e-9);
 
   const { data: driversRaw, isLoading: driversLoading } = useQuery({
     queryKey: ['drivers-available-for-assign'],
@@ -108,7 +123,9 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
   // can never be picked without a vehicle. Reassign mode always requires a
   // vehicle (no clear entry for it); convert mode also allows leaving both
   // empty to assign later.
-  const canProceed = reassigning ? !!vehicleId && !busy : (!driverId || !!vehicleId) && !busy;
+  const canProceed = reassigning
+    ? !!vehicleId && !busy
+    : (!driverId || !!vehicleId) && !busy && !tonnesBad && !(callOff && deliveryDate < pickupDate);
 
   const confirmLabel = busy
     ? reassigning
@@ -147,7 +164,11 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
         navigation.goBack();
       } else {
         if (quoteId == null) throw new Error('Missing quote');
-        const created = await convertQuoteToLoad(quoteId, { driver_id: driverId, vehicle_id: vehicleId });
+        const created = await convertQuoteToLoad(quoteId, {
+          driver_id: driverId,
+          vehicle_id: vehicleId,
+          ...(callOff && tonnes != null ? { tonnes, pickup_date: pickupDate, delivery_date: deliveryDate } : {}),
+        });
         const newLoadId = pick((created ?? {}) as Record<string, unknown>, ['id', 'load_id', 'pk']);
         // The response is the complete new load. Seed the detail cache before
         // navigating so LoadDetail opens populated instead of blank until its
@@ -178,7 +199,7 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
   return (
     <SheetScreen
       variant="modal"
-      title={reassigning ? 'Assignment' : 'Convert to booking'}
+      title={reassigning ? 'Assignment' : callOff ? 'Book a load' : 'Convert to booking'}
       onBack={() => navigation.goBack()}
       footer={
         <Button
@@ -193,10 +214,31 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
       <Txt className="mb-5 text-sub text-muted">
         {reassigning
           ? 'Pick a vehicle for this load. Driver is optional.'
-          : `Convert ${reference ? reference : 'this quote'} to an active booking?`}
+          : callOff
+            ? `A load on contract ${reference ?? ''}. ${fmtTonnes(callOff.remaining)} left.`
+            : `Convert ${reference ? reference : 'this quote'} to an active booking?`}
       </Txt>
 
       <View className="gap-4">
+        {callOff && (
+          <>
+            <TextField
+              label="Tonnes on this load"
+              keyboardType="decimal-pad"
+              value={tonnesText}
+              onChangeText={setTonnesText}
+              error={tonnesBad ? `Up to ${fmtTonnes(callOff.remaining)}` : undefined}
+            />
+            <View className="flex-row gap-3">
+              <View className="flex-1">
+                <DateField label="Collection" value={pickupDate} onChange={setPickupDate} />
+              </View>
+              <View className="flex-1">
+                <DateField label="Delivery" value={deliveryDate} onChange={setDeliveryDate} />
+              </View>
+            </View>
+          </>
+        )}
         <SelectField
           label={vehicleType ? `Vehicle (${vehicleType})` : 'Vehicle'}
           placeholder={vehicleClearLabel ?? 'Select vehicle'}

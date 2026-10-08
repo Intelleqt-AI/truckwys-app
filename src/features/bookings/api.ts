@@ -433,7 +433,7 @@ export const recordQuoteOutcome = (id: string | number, data: QuoteOutcome) =>
 // unassigned, to be picked up later from the load detail screen.
 export const convertQuoteToLoad = (
   id: string | number,
-  data: { driver_id?: string; vehicle_id?: string } = {},
+  data: { driver_id?: string; vehicle_id?: string; tonnes?: number; pickup_date?: string; delivery_date?: string } = {},
 ) => postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
@@ -502,3 +502,11 @@ export const uploadLoadPod = (id: string | number, file: { uri: string; name: st
     config: { headers: { 'Content-Type': 'multipart/form-data' } },
   });
 };
+
+// Tonnage (per-tonne) loads: the weighbridge tonnes and slip; the server
+// re-prices the load and its draft invoice (rate x max(tonnes, minimum)).
+export const saveWeighbridge = (id: string | number, tonnes: number, slip: string) =>
+  patchData<Record<string, unknown>>({
+    url: `loads/${id}/`,
+    data: { actual_tonnes: tonnes, weighbridge_slip: slip.trim(), actual_tonnes_source: 'weighbridge' },
+  });

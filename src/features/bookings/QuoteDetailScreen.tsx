@@ -62,6 +62,8 @@ import type { AppStackParamList } from '@/navigation/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { pricedInEarlierPeriod } from './quote/rules';
 import { pct } from './quote/CostBreakdownCard';
+import { TonnageTermsGroup } from './TonnageTermsGroup';
+import type { VolumeContract } from './quote/tonnage';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -285,7 +287,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   // The quote API names the load it was booked as (booked_load); a quote
   // converts to at most one, and the backend refuses a second conversion.
   const bookedLoad = bookedLoadOf(q);
-  const booked = bookedLoad !== null;
+  // A volume contract books call-off loads until its tonnes are used up.
+  const perTonne = str(pick(q, ['pricing_basis'])) === 'per_tonne';
+  const contract = perTonne ? ((q.volume_contract ?? null) as VolumeContract | null) : null;
+  const contractOpen = !!contract && contract.remaining_tonnes > 0;
+  const booked = bookedLoad !== null && !contractOpen;
   // Legacy quotes carrying a load status (In transit, Completed) with no load
   // found: nothing to send or convert, and no booking to open.
   const loadStateOnly = !booked && (status === 'IT' || status === 'COMPLETED');
@@ -297,7 +303,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   // it goes out: Edit is the primary action and Send steps down.
   const needsEdit = !booked && openStatus && (lapsed || (status === 'DRAFT' && !!fuelAlert));
   const shownStatus = booked ? 'BOOKED' : lapsed ? 'EXPIRED' : status;
-  const canConvert = ['ACCEPTED', 'APPROVED'].includes(status) && !booked && !loadStateOnly;
+  const canConvert =
+    (['ACCEPTED', 'APPROVED'].includes(status) || (contractOpen && bookedLoad !== null)) && !booked && !loadStateOnly;
   const bookedLabel = bookedLoad
     ? `${bookedLoad.load_number || 'a booking'}${
         bookedLoad.status ? ` · ${LOAD_STATUS_LABEL(String(bookedLoad.status).toUpperCase())}` : ''
@@ -633,7 +640,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         navigation.navigate('LoadDetail', { id: bookedLoad!.id, title: bookedLoad!.load_number }),
     },
     convert: {
-      label: 'Convert to booking',
+      label: contract ? 'Book a load' : 'Convert to booking',
       icon: 'arrowRight' as IconName,
       disabled: subscription.blocked,
       onPress: () =>
@@ -643,6 +650,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           reference: str(pick(q, ['quote_number'])),
           vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
           popCallerOnSuccess: true,
+          ...(contract ? { callOff: { remaining: contract.remaining_tonnes, size: contract.tonnes_per_load } } : {}),
         }),
     },
     send: {
@@ -846,9 +854,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         </Group>
       )}
 
+      {perTonne && (
+        <TonnageTermsGroup
+          quote={q}
+          onOpenLoad={(loadId, loadNumber) => navigation.navigate('LoadDetail', { id: loadId, title: loadNumber })}
+        />
+      )}
+
       {total > 0 && (
-        <Group label="Cost breakdown">
-          {costRows.map((c) =>
+        <Group label={perTonne ? 'Price' : 'Cost breakdown'}>
+          {!perTonne && costRows.map((c) =>
             c.label === 'Tolls' && tollsUnknown ? (
               // Saved while the toll lookup had failed: unknown, never R 0.
               <DetailRow
@@ -862,7 +877,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
               <DetailRow key={c.label} label={c.label} value={formatCurrency(c.value)} />
             ),
           )}
-          {hasGap && (
+          {!perTonne && hasGap && (
             <DetailRow
               label="Not itemised"
               hint="Set on the quote; its total includes charges not broken down here."
@@ -871,7 +886,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           )}
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
-              {roundTrip ? 'Price, both legs, excl. VAT' : 'Price excl. VAT'}
+              {perTonne ? 'Estimated, excl. VAT' : roundTrip ? 'Price, both legs, excl. VAT' : 'Price excl. VAT'}
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>

@@ -7,7 +7,7 @@ import type { PeriodId } from '@/lib/ledger';
 // fetches fresh data by id via React Query.
 type Id = number | string;
 
-export type BookingsTab = 'quotes' | 'orders' | 'history';
+export type BookingsTab = 'quotes' | 'orders' | 'history' | 'contracts';
 export type FleetTab = 'vehicles' | 'drivers';
 export type FinanceTab = 'invoices' | 'credits' | 'expenses' | 'reports';
 // 'cashflow' no longer has a tab (the web dropped it too); it stays in the type so
@@ -45,6 +45,9 @@ export type AppStackParamList = {
     activateOnAssign?: boolean;
     /** Convert only: also pop the screen beneath this one (e.g. QuoteDetail) before pushing LoadDetail. */
     popCallerOnSuccess?: boolean;
+    /** Convert only, volume contract: tonnes left and the planned load size;
+     *  the screen asks this load's tonnes and dates. */
+    callOff?: { remaining: number; size: number | null };
   };
   Customers: undefined;
   CustomerDetail: { id: Id; preview?: Record<string, unknown> };

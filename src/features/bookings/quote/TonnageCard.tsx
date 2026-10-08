@@ -17,6 +17,7 @@ const pct = (n: number | null | undefined) =>
  */
 function TonnageCardImpl({
   tonnage,
+  held = false,
   contract,
   onContract,
   totalTonnes,
@@ -33,6 +34,8 @@ function TonnageCardImpl({
   choices,
 }: {
   tonnage: Tonnage | null;
+  /** The builder holds the auto truck (tonnageRules.nextAutoBasis). */
+  held?: boolean;
   contract: boolean;
   onContract: (v: boolean) => void;
   totalTonnes: string;
@@ -51,7 +54,7 @@ function TonnageCardImpl({
   choices: TonnageChoice[];
 }) {
   const t = tonnage;
-  const reason = basisReason(t);
+  const reason = basisReason(t, held);
   const minHint = t?.min_tonnes_source === 'basis_load' && t.min_tonnes_per_load ? fmtTonnes(t.min_tonnes_per_load) : 'Planned load';
   return (
     <View className="gap-3">
@@ -93,7 +96,12 @@ function TonnageCardImpl({
             <DateField label="From" value={periodStart} onChange={(v) => onPeriod(v, periodEnd)} />
           </View>
           <View className="flex-1">
-            <DateField label="To" value={periodEnd} onChange={(v) => onPeriod(periodStart, v)} />
+            <DateField
+              label="To"
+              value={periodEnd}
+              onChange={(v) => onPeriod(periodStart, v)}
+              error={periodStart && periodEnd && periodEnd < periodStart ? 'Ends before it starts' : undefined}
+            />
           </View>
         </View>
       )}
@@ -107,7 +115,7 @@ function TonnageCardImpl({
               accessibilityRole="button"
               accessibilityState={{ selected: tr.is_basis }}
               accessibilityLabel={`${truckText(tr)}, ${fmtRatePerTonne(tr.cost_per_tonne, true)}`}
-              onPress={() => onChooseTruck(tr.is_basis && t.basis_reason === 'chosen' ? null : tr.vehicle_type_id)}
+              onPress={() => onChooseTruck(tr.is_basis && t.basis_reason === 'chosen' && !held ? null : tr.vehicle_type_id)}
               className={`min-h-[56px] justify-center rounded-control border px-3 py-2 ${tr.is_basis ? 'border-fg' : 'border-line'}`}
             >
               <View className="flex-row items-center justify-between gap-3">

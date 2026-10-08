@@ -127,6 +127,7 @@ import {
 } from './quote/rules';
 import { QuoteWarnings } from './quote/QuoteWarnings';
 import { TonnageCard } from './quote/TonnageCard';
+import { nextAutoBasis, AUTO_BASIS_START, type AutoBasis } from './quote/tonnageRules';
 import { useTonnageAnalysis } from './quote/useTonnageAnalysis';
 import { CostFloorModal } from './quote/CostFloorModal';
 import { useServerCosting } from './quote/useServerCosting';
@@ -194,6 +195,8 @@ import {
   type QuoteIssue,
 } from './quote/validation';
 import { QuoteFooterActions, type FooterStrip, type FooterOffer } from './quote/QuoteFooterActions';
+import { useFuelAdjustment } from './followupsApi';
+import { DraftClauseLine } from './FollowUps';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
 
@@ -265,6 +268,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     retry: false,
   });
   const [hydrated, setHydrated] = useState(false);
+  // A saved draft: the fuel clause its PDF will carry (null when the company has it off).
+  const existingDraft = editing && str(existing?.status).toUpperCase() === 'DRAFT';
+  const { data: draftFuelAdjustment } = useFuelAdjustment('quotes', editId ?? '', existingDraft);
 
   const { data: customers } = useCustomers();
   const { data: vtypes } = useVehicleTypes();
@@ -305,8 +311,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [contractStart, setContractStart] = useState('');
   const [contractEnd, setContractEnd] = useState('');
   // Truck unknown: priced (and routed) on the safest truck, the tonnage basis.
-  const [autoBasisName, setAutoBasisName] = useState<string | null>(null);
-  const basisHistoryRef = useRef<string[]>([]);
+  const [autoBasis, setAutoBasis] = useState<AutoBasis>(AUTO_BASIS_START);
+  const autoBasisName = autoBasis.name;
   // A new quote collects tomorrow; delivery follows the driving days (below)
   // until the person picks one.
   const [pickupDate, setPickupDate] = useState(editing ? '' : plusDays(1));
@@ -1338,6 +1344,26 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const totalTonnesNum = isContract ? tonnesNum(totalTonnes) : null;
   const minTonnesNum = tonnesNum(minTonnes);
   const chosenTruckId = vehicleType ? ((vtypes ?? []).find((v) => v.name === vehicleType)?.id ?? null) : null;
+  // Priced on by id: the truck chosen, or the auto truck the builder holds
+  // (tonnageRules.nextAutoBasis), else none (the safest).
+  const heldTruckId =
+    !vehicleType && autoBasis.held && autoBasisName
+      ? ((vtypes ?? []).find((v) => v.name === autoBasisName)?.id ?? null)
+      : null;
+  const pricedOnId = chosenTruckId ?? heldTruckId;
+  const tonnageInputKey = JSON.stringify([
+    weightTons,
+    totalTonnesNum,
+    minTonnesNum,
+    pickup?.lat,
+    pickup?.lon,
+    delivery?.lat,
+    delivery?.lon,
+    stops.map((st) => `${st.loc?.lat},${st.loc?.lon}`).join('|'),
+    tripType,
+    returnLoadBooked,
+    cargo,
+  ]);
   const localTonnage = useMemo<TonnageCosting | null>(() => {
     if (!perTonne || !(weightTons && weightTons > 0) || !routeData) return null;
     const lane: TonnageLane = { ...costs.costingInputs };
@@ -1357,10 +1383,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       tonnes_per_load: weightTons,
       total_tonnes: totalTonnesNum,
       min_tonnes_per_load: minTonnesNum,
-      vehicle_type_id: chosenTruckId != null ? Number(chosenTruckId) : null,
+      vehicle_type_id: pricedOnId != null ? Number(pricedOnId) : null,
       rate_per_tonne: rateNum,
     });
-  }, [perTonne, weightTons, routeData, costs.costingInputs, vtypes, company, totalTonnesNum, minTonnesNum, chosenTruckId, rateNum, useConfiguredBurn]);
+  }, [perTonne, weightTons, routeData, costs.costingInputs, vtypes, company, totalTonnesNum, minTonnesNum, pricedOnId, rateNum, useConfiguredBurn]);
   const tonnagePayload = useMemo<Record<string, unknown> | null>(
     () =>
       perTonne && ready && routeData && routeOneWayKm > 0 && weightTons
@@ -1377,7 +1403,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             tonnes_per_load: weightTons,
             total_tonnes: totalTonnesNum,
             min_tonnes_per_load: minTonnesNum,
-            vehicle_type_id: chosenTruckId,
+            vehicle_type_id: pricedOnId,
             rate_per_tonne: rateNum,
             toll_cost_one_way: costs.tollKnown ? (costs.costingInputs.tolls?.one_way ?? null) : null,
             tolls_unknown: !costs.tollKnown,
@@ -1392,7 +1418,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               : {}),
           }
         : null,
-    [perTonne, ready, routeData, routeOneWayKm, routeMinutes, weightTons, customerId, pickup?.label, delivery?.label, cargo, tripType, crossesBorder, totalTonnesNum, minTonnesNum, chosenTruckId, rateNum, costs.tollKnown, costs.costingInputs.tolls?.one_way, tollsConfirmedNone, returnLoadBooked, distanceConfirmed, useOfficialDiesel, borderOverride, driverEdited, driverAllowance, useConfiguredBurn],
+    [perTonne, ready, routeData, routeOneWayKm, routeMinutes, weightTons, customerId, pickup?.label, delivery?.label, cargo, tripType, crossesBorder, totalTonnesNum, minTonnesNum, pricedOnId, rateNum, costs.tollKnown, costs.costingInputs.tolls?.one_way, tollsConfirmedNone, returnLoadBooked, distanceConfirmed, useOfficialDiesel, borderOverride, driverEdited, driverAllowance, useConfiguredBurn],
   );
   const tonnageServer = useTonnageAnalysis(tonnagePayload);
   const tonnageView = perTonne ? (tonnageServer?.costing ?? localTonnage) : null;
@@ -1438,12 +1464,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!perTonne || vehicleType) return;
     const id = tonnage?.basis_vehicle_type_id;
     const name = id != null ? ((vtypes ?? []).find((v) => String(v.id) === String(id))?.name ?? null) : null;
-    if (!name || name === autoBasisName) return;
-    const h = basisHistoryRef.current;
-    if (h.length >= 2 && h[h.length - 2] === name) return; // never flip back and forth
-    basisHistoryRef.current = [...h.slice(-3), name];
-    setAutoBasisName(name);
-  }, [perTonne, vehicleType, tonnage?.basis_vehicle_type_id, vtypes, autoBasisName]);
+    setAutoBasis((st) => nextAutoBasis(st, tonnageInputKey, name, tonnage?.basis_reason));
+  }, [perTonne, vehicleType, tonnage?.basis_vehicle_type_id, tonnage?.basis_reason, vtypes, tonnageInputKey]);
 
   // The quote rules' inputs for the analysis and the market check (§8).
   const costingPayload = analysisPayload({
@@ -2844,6 +2866,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (routeBlockedMessage) return routeBlockedMessage;
     if (weightBlockedMessage) return weightBlockedMessage;
     if (perTonne && isContract && totalTonnesNum == null) return "Enter the contract's total tonnes";
+    if (perTonne && isContract && contractStart && contractEnd && contractEnd < contractStart)
+      return 'The contract ends before it starts';
     if (perTonne && rateToSave == null) return 'The rate per tonne is still being worked out';
     // Unlike weightInvalid (an unparseable weight quietly sends as 0 and only
     // blocks Send), a too-large-but-valid weight WOULD be sent on a draft
@@ -3697,6 +3721,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <>
                   <TonnageCard
                     tonnage={tonnage}
+                    held={!vehicleType && autoBasis.held}
                     contract={isContract}
                     onContract={setIsContract}
                     totalTonnes={totalTonnes}
@@ -3785,6 +3810,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       }
                       onSettingsPress={() => navigation.navigate('Settings', { section: 'company' })}
                     />
+                  )}
+                  {!weightBlockedMessage && costs.total > 0 && existingDraft && (
+                    <DraftClauseLine quote={existing} adjustment={draftFuelAdjustment} className="-mt-1" />
                   )}
                   <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />
                   {!weightBlockedMessage && costs.total > 0 && (

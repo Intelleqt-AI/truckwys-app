@@ -57,6 +57,12 @@ export const toast = {
     announce(m);
     successHaptic();
   },
+  /** A confirmation the person must see (e.g. "Reminder sent to …"): shown, not just announced. */
+  notice: (m: string) => {
+    announce(m);
+    successHaptic();
+    useToastStore.getState().push(m);
+  },
   info: (m?: string) => {
     announce(m);
     successHaptic();

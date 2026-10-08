@@ -25,7 +25,10 @@ export type AppStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
   /** `title` is the load number when the caller knows it, shown while the load loads. */
   LoadDetail: { id: Id; preview?: Record<string, unknown>; title?: string };
-  QuoteDetail: { id: Id; preview?: Record<string, unknown> };
+  /** `followUp` (a quote.expiring / quote.no_answer tap) opens the follow-up card. */
+  QuoteDetail: { id: Id; preview?: Record<string, unknown>; followUp?: boolean };
+  /** A fuel price change alert: the open quotes it affects (quote.fuel_alert). */
+  FuelAlert: { id: Id };
   CreateQuote: { ai?: boolean; prefill?: Record<string, unknown>; quoteId?: Id } | undefined;
   VehicleDetail: { id: Id; preview?: Record<string, unknown> };
   DriverDetail: { id: Id; preview?: Record<string, unknown> };
@@ -56,7 +59,7 @@ export type AppStackParamList = {
     popCallerOnSuccess?: boolean;
     /** Volume contract (tonnage quote): tonnes left and the planned load size;
      *  the screen asks the tonnes on this load. */
-    callOff?: { remaining: number; size: number | null };
+    callOff?: { remaining: number; size: number | null; max?: number | null };
   };
   Customers: undefined;
   CustomerDetail: { id: Id; preview?: Record<string, unknown> };
@@ -67,7 +70,8 @@ export type AppStackParamList = {
   // gated by useOnboardingGate, opened from HomeScreen. Mirrors the web's
   // /onboarding (Onboarding.tsx).
   Onboarding: undefined;
-  Settings: { section?: string } | undefined;
+  /** `focus`: a pricing setup item key to focus (Settings → Pricing). */
+  Settings: { section?: string; focus?: string } | undefined;
   BillingHistory: undefined;
   CreateInvoice: { id?: Id; preview?: Record<string, unknown> } | undefined;
   /** Issue a credit note against an invoice (the invoice is passed for instant render). */

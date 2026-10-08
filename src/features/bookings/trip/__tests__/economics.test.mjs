@@ -326,6 +326,13 @@ test('one label rule: card and quote outcome agree; complete and not complete di
     estimate_basis: 'snapshot', costing_source: 'computed', quoted: {}, missing: [] }] });
   assert.equal(marginCardView(tms).legs[0].basis, 'Estimate · job costing');
   assert.ok(!EMPTY_RETURN_REMOVED.includes('—'));
+  // After Close costs the slips are actual: a name, never the raw key.
+  const closed = parseEconomics({ pair: false, legs: [{ load_id: 2, role: 'single', revenue: 10, cost: 8, cost_basis: 'actual',
+    quoted: {}, missing: [], cost_groups: [
+      { group: 'fuel', estimated: null, actual: 5, used: 5, basis: 'actual' },
+      { group: 'operating_recorded', estimated: null, actual: 3, used: 3, basis: 'actual' },
+    ] }] });
+  assert.equal(marginCardView(closed).legs[0].groups, 'Actual: fuel, maintenance & overheads');
 });
 
 test('booking preview before booking: candidates, invoice, can_book', () => {

@@ -27,6 +27,7 @@ import {
   parseBooking,
   parseEconomics,
   parseWarnings,
+  partnerLeg,
   type BookingResult,
   type Candidate,
   type CandidateDirection,
@@ -171,6 +172,8 @@ export function BookJobScreen({ route, navigation }: Props) {
       const booked = parseBooking(body);
       seedLoad(qc, body, booked.loadId ?? undefined);
       invalidateFor(qc, 'quote', 'load');
+      // The quote is booked now: its preview (candidates, "already booked") is stale.
+      void qc.invalidateQueries({ queryKey: ['booking-preview'] });
       if (booked.loadId == null) throw new Error("Couldn't book this job. Try again.");
       if (preview) {
         // Everything was chosen up front: straight to the job.
@@ -243,6 +246,11 @@ export function BookJobScreen({ route, navigation }: Props) {
       (c) => String(c.loadId) === linkedId,
     );
     const pairView = result.economics?.pair ? marginCardView(result.economics) : null;
+    // Linked in the booking call itself (either direction): name the partner.
+    const oneCallPartner =
+      !linkedCandidate && result.economics?.pair && result.loadId != null
+        ? partnerLeg(result.economics, result.loadId)
+        : null;
     return (
       <SheetScreen
         variant="modal"
@@ -310,6 +318,13 @@ export function BookJobScreen({ route, navigation }: Props) {
         )}
         {linkedCandidate && (
           <Mono className="mb-3 text-caption text-faint">Linked {linkedCandidate.loadNumber}</Mono>
+        )}
+        {oneCallPartner && (
+          <Mono className="mb-3 text-caption text-faint">
+            {result.isReturnOf != null
+              ? `Linked as the return of ${oneCallPartner.loadNumber}`
+              : `Linked ${oneCallPartner.loadNumber} as the return load`}
+          </Mono>
         )}
         {pairView && <TripMarginCard view={pairView} pair />}
 

@@ -357,6 +357,7 @@ const GROUP_NAMES: Record<string, string> = {
   border: 'border',
   other: 'other',
   subcontractor: 'subcontractor',
+  operating_recorded: 'maintenance & overheads',
 };
 
 /** `Actual: fuel, tolls · Estimated: running cost`; null with nothing actual. */

@@ -405,3 +405,12 @@ test('return history: the analysis field (even null) means no fallback call', ()
   assert.equal(analysisHasReturnHistory({ success: true }), false);
   assert.equal(analysisHasReturnHistory(null), false);
 });
+
+test('fuel burn note (fleet actuals): the figure an estimated fuel cost used', async () => {
+  const { fuelBurnNote } = await import('../economics.ts');
+  const g = (basis, rb) => [{ group: 'fuel', basis, estimated: 5000, actual: null, used: 5000, ratedBurn: rb }];
+  assert.equal(fuelBurnNote(g('estimate', { value: 40.2, source: 'measured' })), 'Fuel estimated on 40,2 L/100 km measured by Cartrack');
+  assert.equal(fuelBurnNote(g('estimate', { value: 42, source: 'configured' })), 'Fuel estimated on your figure, 42,0 L/100 km');
+  assert.equal(fuelBurnNote(g('actual', { value: 42, source: 'configured' })), null);
+  assert.equal(fuelBurnNote(g('estimate', null)), null);
+});

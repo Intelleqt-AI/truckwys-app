@@ -331,3 +331,38 @@ test('border costs not on file: from the route response, names not codes', async
   assert.equal(w.title, 'Border costs for Angola not known');
   assert.equal(got.floor, null);
 });
+
+test('way home on its own route: round-trip tolls, empty-return border, estimate note', async () => {
+  const { computeCosting } = await import('../rules.ts');
+  // Scratch backend a182b3e, JHB→DBN round trip on 12 Oct 2026: out R 886,96, back R 907,83.
+  const base = {
+    trip_type: 'ROUND_TRIP',
+    distance_km: 600,
+    duration_minutes: 420,
+    load_kg: 28000,
+    vehicle: { id: 25, name: 'Interlink', capacity: 34, rated_burn_l_per_100km: 48 },
+    diesel: { zone: 'INLAND', mode: 'LIVE', official_price: 32.7989 },
+    operating_cost_per_km: 16,
+    tolls: { one_way: 886.96, return_leg: 907.83 },
+    driver: { allowance_per_night: 450 },
+  };
+  const rt = computeCosting(base).lines.find((l) => l.key === 'tolls');
+  assert.equal(rt.amount, 1794.79);
+  assert.equal(rt.basis, 'R 886,96 out + R 907,83 back');
+  // No return leg (older backend): the same plazas twice.
+  assert.equal(computeCosting({ ...base, tolls: { one_way: 886.96 } }).lines.find((l) => l.key === 'tolls').amount, 1773.92);
+  // JHB→Harare one way, empty return: exit-only border charges home.
+  const zw = computeCosting({
+    ...base,
+    trip_type: 'ONE_WAY',
+    distance_km: 1140,
+    international: true,
+    border_cost: 10950.85,
+    border_cost_empty_return: 4711.19,
+    border_estimate: 10950.85,
+    tolls: { one_way: 1171.32, empty_return: 1171.32 },
+  });
+  const border = zw.lines.find((l) => l.key === 'border');
+  assert.equal(border.basis, 'Border, permit and non-SA toll costs (includes R 10 950,85 estimated)');
+  assert.equal(zw.lines.find((l) => l.key === 'border_return').amount, 4711.19);
+});

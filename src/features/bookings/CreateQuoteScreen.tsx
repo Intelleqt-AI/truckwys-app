@@ -273,6 +273,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [returnLoadBooked, setReturnLoadBooked] = useState(false);
   // Border costs typed on this quote (all legs); '' = the route's figure.
   const [borderOverride, setBorderOverride] = useState('');
+  // The clearing agent's fee typed on this quote; '' = the agent estimate.
+  const [agentFee, setAgentFee] = useState('');
   const [tollsConfirmedNone, setTollsConfirmedNone] = useState(false);
   const [distanceConfirmed, setDistanceConfirmed] = useState(false);
   // "Use official price" on this quote while the company prices on its own.
@@ -917,6 +919,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           vehicle_type: pricedTruckName || 'Flatbed',
           // The id pins the exact type (toll class, fuel) when names repeat.
           ...(pricedTruckId != null ? { vehicle_type_id: pricedTruckId } : {}),
+          // Tariffs in force on the collection date (newer backends warn when
+          // it's past the published year); today when not set.
+          ...(pickupDate ? { pickup_date: pickupDate, trip_date: pickupDate } : {}),
+          // The way home on its own route: round trip, or a one-way trip that
+          // may come back empty. Older backends ignore these.
+          trip_type: tripType,
+          include_return: tripType === 'ONE_WAY' && !returnLoadBooked,
           // No fallback needed: this effect only runs once `ready`, and
           // weight is one of the priceGaps, so weightKg is guaranteed
           // positive here.
@@ -946,7 +955,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce]);
+  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce, pickupDate, tripType, returnLoadBooked]);
 
   // A confirmation ("no tolls", "distance is right") belongs to the route it
   // was given for: a new route asks again.
@@ -1033,6 +1042,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             fuel_price_override: aiFuelPrice ?? null,
             is_international: crossesBorder,
             cargo_description: cargo || null,
+            ...(pickupDate ? { pickup_date: pickupDate } : {}),
             // The route's own border data: the server works out what's unknown.
             route: {
               cross_border: !!pick(routeData ?? {}, ['cross_border']),
@@ -1046,7 +1056,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1085,6 +1095,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         returnLoadBooked,
         international: crossesBorder,
         borderOverride: parseNum(borderOverride),
+        agentFeeOverride: parseNum(agentFee),
         tollsConfirmedNone,
         distanceConfirmed,
         serverInputs: serverCosting?.inputs ?? null,
@@ -1110,6 +1121,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       returnLoadBooked,
       crossesBorder,
       borderOverride,
+      agentFee,
       tollsConfirmedNone,
       distanceConfirmed,
       serverCosting,
@@ -2902,6 +2914,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={borderModal}
             onClose={() => setBorderModal(false)}
             costs={costs}
+            agentEdit={
+              costs.agentEstimate !== null
+                ? {
+                    label: "Your agent's fee",
+                    value: agentFee !== '' ? agentFee : formatPlain(costs.agentEstimate),
+                    onChangeText: setAgentFee,
+                    back: agentFee !== '' ? { label: 'Use the estimate', onPress: () => setAgentFee('') } : null,
+                  }
+                : null
+            }
             edit={{
               label: costs.legs === 2 ? 'Border costs, both legs' : 'Border costs',
               value: borderOverride !== '' ? borderOverride : costs.crossBorderCost > 0 ? formatPlain(costs.crossBorderCost) : '',

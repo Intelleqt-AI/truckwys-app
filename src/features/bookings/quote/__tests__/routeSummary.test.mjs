@@ -15,3 +15,12 @@ test('route chip from toll_summary: head, roads, tolls', () => {
   });
   assert.equal(routeChipText(undefined), null);
 });
+
+test('toll_summary with the option own VAT basis', () => {
+  assert.deepEqual(routeChipText('Alternative 2 · via N1 (Grasmere, Vaal, Verkeerdevlei) · tolls R 636,53 excl. VAT'), {
+    title: 'Alternative 2 · via N1',
+    tolls: 'tolls R 636,53 excl. VAT',
+    plazas: 'Grasmere, Vaal, Verkeerdevlei',
+  });
+  assert.equal(routeChipText('Fastest · no toll plazas · tolls R 0,00 excl. VAT').title, 'Fastest · no toll plazas');
+});

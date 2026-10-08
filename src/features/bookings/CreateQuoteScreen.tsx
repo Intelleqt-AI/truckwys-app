@@ -275,6 +275,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [borderOverride, setBorderOverride] = useState('');
   // The clearing agent's fee typed on this quote; '' = the agent estimate.
   const [agentFee, setAgentFee] = useState('');
+  // Read by the route call without re-routing on every keystroke.
+  const agentFeeRef = useRef('');
+  agentFeeRef.current = agentFee;
   const [tollsConfirmedNone, setTollsConfirmedNone] = useState(false);
   const [distanceConfirmed, setDistanceConfirmed] = useState(false);
   // "Use official price" on this quote while the company prices on its own.
@@ -926,6 +929,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           // may come back empty. Older backends ignore these.
           trip_type: tripType,
           include_return: tripType === 'ONE_WAY' && !returnLoadBooked,
+          // The agent's fee typed on this quote (priced into the border lines).
+          ...(parseNum(agentFeeRef.current) != null ? { clearing_agent_fee_zar: parseNum(agentFeeRef.current) } : {}),
           // No fallback needed: this effect only runs once `ready`, and
           // weight is one of the priceGaps, so weightKg is guaranteed
           // positive here.
@@ -1043,6 +1048,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             is_international: crossesBorder,
             cargo_description: cargo || null,
             ...(pickupDate ? { pickup_date: pickupDate } : {}),
+            ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
             // The route's own border data: the server works out what's unknown.
             route: {
               cross_border: !!pick(routeData ?? {}, ['cross_border']),
@@ -1056,7 +1062,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -2026,6 +2032,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     };
     if (costs.crossBorderCost > 0) out.border_cost = costs.crossBorderCost;
     if (costs.costingInputs.border_cost_is_override) out.border_cost_is_override = true;
+    // The way home and border figures the route gave, so the backend re-prices
+    // the saved quote the same way (newer backends keep them).
+    for (const [k, v] of Object.entries(costs.savedCostingExtras)) if (v != null && v >= 0) out[k] = v;
     // Saved so the send check knows which border costs aren't on file.
     if (costs.costingInputs.border_costs_unknown) out.border_costs_unknown = costs.costingInputs.border_costs_unknown;
     if (returnLoadBooked) out.include_empty_return = false;

@@ -53,6 +53,12 @@ export interface ComputeCostsInput {
   liveFuel?: Record<string, unknown> | null;
   /** A per-quote fuel price applied from the market price check. */
   aiFuelPrice?: number | null;
+  /**
+   * A price per litre the person gave for this quote (said or typed in the
+   * description): the backend's own per-quote override (source 'override'),
+   * not a market figure. The market figure wins when both are set.
+   */
+  quoteFuelPrice?: number | null;
   /** "Use official price" on this quote while the company is on its own price. */
   useOfficialDiesel?: boolean;
   /** A market toll total applied from the price check, per one-way leg. */
@@ -206,6 +212,7 @@ export function computeCosts({
   serviceCharge,
   liveFuel,
   aiFuelPrice,
+  quoteFuelPrice,
   useOfficialDiesel,
   aiTollOneWay,
   returnLoadBooked,
@@ -239,7 +246,11 @@ export function computeCosts({
   const dieselInput: CostingInputs['diesel'] = fuelInputFromApi(company, liveFuel, fuelType, {
     now,
     useOfficial: !!useOfficialDiesel,
-    overridePrice: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
+    overridePrice: fuelFromMarketCheck
+      ? (aiFuelPrice as number)
+      : quoteFuelPrice != null && quoteFuelPrice > 0
+        ? quoteFuelPrice
+        : null,
   });
   // The company's price for this fuel without this quote's choices.
   const companyFuel = resolveDieselInput(fuelInputFromApi(company, liveFuel, fuelType, { now }));

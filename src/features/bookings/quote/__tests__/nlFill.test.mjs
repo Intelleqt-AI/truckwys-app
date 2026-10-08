@@ -234,3 +234,10 @@ test('chips: other lines', () => {
   assert.equal(borderPostShort('Trans-Kalahari: Mamuno / Buitepos'), 'Trans-Kalahari: Mamuno');
   assert.equal(shortDate('2026-10-09', 'af'), '9 Okt');
 });
+
+test('chips: an abnormal load off a Zimbabwe route is only noted', () => {
+  const ab = [{ key: 'abnormal', from: v('no'), to: v('yes'), low: false }];
+  assert.equal(buildChips(ab, 'en', { zimbabwe: false })[0].label, 'Abnormal load noted (affects Zimbabwe border tolls only)');
+  assert.equal(buildChips(ab, 'en', { zimbabwe: true })[0].label, 'Abnormal load');
+  assert.match(buildChips(ab, 'af', { zimbabwe: false })[0].label, /^Abnormale vrag genoteer/);
+});

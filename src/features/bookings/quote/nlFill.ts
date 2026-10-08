@@ -42,6 +42,7 @@ const COPY = {
     undo: 'Undo',
     undone: 'Back to what you had',
     abnormal: 'Abnormal load',
+    abnormal_noted: 'Abnormal load noted (affects Zimbabwe border tolls only)',
     no_speech: "Didn't catch any speech — try again a bit closer to the mic.",
     too_long: 'Stopped at 1 minute',
     mic_denied: 'Microphone permission is needed to record',
@@ -96,6 +97,7 @@ const COPY = {
     undo: 'Ontdoen',
     undone: 'Terug na wat jy gehad het',
     abnormal: 'Abnormale vrag',
+    abnormal_noted: 'Abnormale vrag genoteer (raak net Zimbabwe se grenstolgeld)',
     no_speech: 'Niks gehoor nie — probeer weer, bietjie nader aan die mikrofoon.',
     too_long: 'Gestop by 1 minuut',
     mic_denied: 'Mikrofoontoestemming is nodig om op te neem',
@@ -554,7 +556,14 @@ export interface FillChip {
 export function buildChips(
   changes: FieldChange[],
   lang: UiLang,
-  extra: { stops?: string[]; stopsLow?: boolean; borderPost?: string; international?: boolean } = {},
+  extra: {
+    stops?: string[];
+    stopsLow?: boolean;
+    borderPost?: string;
+    international?: boolean;
+    /** False: the route doesn't touch Zimbabwe, so an abnormal load is only noted. */
+    zimbabwe?: boolean;
+  } = {},
 ): FillChip[] {
   const by = new Map<FillKey, FieldChange>(changes.map((c) => [c.key, c]));
   const get = (k: FillKey) => by.get(k);
@@ -604,7 +613,7 @@ export function buildChips(
 
   const ab = get('abnormal');
   const borderBits = [
-    ab && ab.to.value === 'yes' ? t(lang, 'abnormal') : '',
+    ab && ab.to.value === 'yes' ? t(lang, extra.zimbabwe === false ? 'abnormal_noted' : 'abnormal') : '',
     extra.borderPost ? t(lang, 'via', { post: borderPostShort(extra.borderPost) }) : extra.international ? t(lang, 'cross_border') : '',
   ].filter(Boolean);
   const abOff = ab && ab.to.value !== 'yes' ? `${t(lang, 'abnormal')}: ${lang === 'af' ? 'nee' : 'no'}` : '';

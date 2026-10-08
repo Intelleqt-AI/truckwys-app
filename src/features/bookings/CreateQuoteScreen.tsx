@@ -104,6 +104,7 @@ import {
   pricedInEarlierPeriod,
   changesSincePriced,
   saShortDate,
+  ACTION_LABELS,
   type ChangesSincePriced,
   type QuoteWarning,
 } from './quote/rules';
@@ -374,6 +375,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // company/live price for its fuel type; a toll figure is per one-way leg and
   // belongs to the plazas it was checked for (routeKey).
   const [aiFuel, setAiFuel] = useState<AiInputs['aiFuel']>(null);
+  // A diesel price the person gave for this quote: the per-quote override, not a market figure.
+  const [quoteFuel, setQuoteFuel] = useState<{ pricePerL: number; fuelType: string } | null>(null);
   const [aiToll, setAiToll] = useState<AiInputs['aiToll']>(null);
   // Set while market figures are in use: the check it came from and its win chance.
   const [aiApplied, setAiApplied] = useState<{
@@ -834,6 +837,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             }
           : null,
       );
+      // A diesel price given for this quote (not a market figure) comes back too.
+      const savedOverride = num(pick(ci, ['fuel_price_override']));
+      setQuoteFuel(
+        !fromMarket(snap.fuel_price_source) && savedOverride > 0
+          ? { pricePerL: savedOverride, fuelType: str(snap.fuel_type_used) || 'Diesel' }
+          : null,
+      );
       setTollEdited(
         str(snap.toll_charges_source) === 'manual' && pick(q, ['toll_charges']) != null,
       );
@@ -1086,6 +1096,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const aiTollOneWay = aiToll && aiToll.routeKey === tollRouteKey ? aiToll.oneWay : null;
   const fuelTypeNow = str((vtypes ?? []).find((v) => v.name === pricedTruckName)?.fuel_type, 'Diesel');
   const aiFuelPrice = aiFuel && aiFuel.fuelType === fuelTypeNow ? aiFuel.pricePerL : null;
+  // The person's own price for this quote (backend fuel_price_override, R5–R100).
+  const quoteFuelPrice = quoteFuel && quoteFuel.fuelType === fuelTypeNow ? quoteFuel.pricePerL : null;
+
+  // A border schedule that depends on an abnormal load: Zimbabwe's access toll.
+  const routeCrossesZimbabwe = [
+    ...asArray<string>(pick(routeData ?? {}, ['countries'])),
+    ...asArray<string>(pick(currentRoute, ['countries'])),
+    pickup?.cc,
+    delivery?.cc,
+    ...stops.map((st) => st.loc?.cc),
+  ].some((c) => /^(ZW|ZWE|Zimbabwe)$/i.test(String(c ?? '')));
+  // An abnormal load is kept on the quote, but only prices on a Zimbabwe route.
+  const abnormalApplies = abnormalLoad && routeCrossesZimbabwe;
 
   // The trip leaves South Africa (route flag, a foreign country on the route,
   // or a foreign point): its floor then needs border costs.
@@ -1124,12 +1147,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             vehicle_type: pricedTruck.name,
             include_empty_return: returnLoadBooked ? false : null,
             use_official_fuel: useOfficialDiesel,
-            fuel_price_override: aiFuelPrice ?? null,
+            fuel_price_override: aiFuelPrice ?? quoteFuelPrice ?? null,
             is_international: crossesBorder,
             cargo_description: cargo || null,
             ...(pickupDate ? { pickup_date: pickupDate } : {}),
             ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
-            ...(abnormalLoad ? { abnormal_load: true } : {}),
+            ...(abnormalApplies ? { abnormal_load: true } : {}),
             // The route's own border data: the server works out what's unknown.
             route: {
               cross_border: !!pick(routeData ?? {}, ['cross_border']),
@@ -1143,7 +1166,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalLoad],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, quoteFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalApplies],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1156,14 +1179,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setServerSuggested({ id: nextServerSuggested.slice(0, at), key: nextServerSuggested.slice(at + 1) });
   }, [nextServerSuggested]);
 
-  // A border schedule that depends on an abnormal load: Zimbabwe's access toll.
-  const routeCrossesZimbabwe = [
-    ...asArray<string>(pick(routeData ?? {}, ['countries'])),
-    ...asArray<string>(pick(currentRoute, ['countries'])),
-    pickup?.cc,
-    delivery?.cc,
-    ...stops.map((st) => st.loc?.cc),
-  ].some((c) => /^(ZW|ZWE|Zimbabwe)$/i.test(String(c ?? '')));
 
   // ── Cost breakdown ──────────────────────────────────────────────────────
   // quote/costs.ts: the price lines, and the cost floor, margin and warnings
@@ -1186,6 +1201,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         serviceCharge,
         liveFuel,
         aiFuelPrice,
+        quoteFuelPrice,
         useOfficialDiesel,
         aiTollOneWay,
         returnLoadBooked,
@@ -1212,6 +1228,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       serviceCharge,
       liveFuel,
       aiFuelPrice,
+      quoteFuelPrice,
       useOfficialDiesel,
       aiTollOneWay,
       returnLoadBooked,
@@ -1752,9 +1769,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             stopsLow: fillView.stopsLow,
             borderPost: aiBorder?.borderPost,
             international: aiBorder?.international,
+            zimbabwe: routeCrossesZimbabwe,
           })
         : [],
-    [fillView, nlLang, aiBorder],
+    [fillView, nlLang, aiBorder, routeCrossesZimbabwe],
   );
   // Fields the last Fill was unsure about: "Check this" under each.
   const lowFields = useMemo(
@@ -1782,7 +1800,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       id: 'fuel',
       label: dieselLabel(price, costs.fuelType, nlLang),
       onPress: () => {
-        setAiFuel({ pricePerL: price, fuelType: costs.fuelType });
+        setQuoteFuel({ pricePerL: price, fuelType: costs.fuelType });
         setFillView((v) => (v ? { ...v, fuelPrice: null } : v));
       },
     });
@@ -2152,10 +2170,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       case 'use_official':
         setUseOfficialDiesel(true);
         setAiFuel(null);
+        setQuoteFuel(null);
         break;
       case 'use_own':
         setUseOfficialDiesel(false);
         setAiFuel(null);
+        setQuoteFuel(null);
         break;
       case 'use_target': {
         // The price at the company target margin, as an adjustment the person
@@ -2232,13 +2252,39 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // What the Price section shows: the rules' warnings once there's something
   // to price, plus the reopen notice.
+  // A diesel price given for this quote: named on the fuel line, and the usual
+  // own-vs-official check (rules.ts runs it for the company's own price only).
+  const quoteFuelOn = quoteFuelPrice != null && costs.fuelSource === 'override' && !costs.fuelFromMarketCheck;
+  const quoteFuelLabel = quoteFuelOn
+    ? `Your ${costs.fuelType.toLowerCase()} price for this quote ${formatCurrency(quoteFuelPrice, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/L`
+    : null;
+  const quoteFuelWarning = useMemo<QuoteWarning | null>(() => {
+    if (!quoteFuelOn || quoteFuelPrice == null) return null;
+    const official = costs.diesel.official_price;
+    if (!official || Math.abs(quoteFuelPrice - official) / official <= 0.03) return null;
+    const r2 = (n: number) => formatCurrency(n, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const zone = costs.fuelZone === 'COASTAL' ? 'coastal' : 'inland';
+    return {
+      code: 'diesel_quote_off',
+      severity: 'warn',
+      title: `Your ${costs.fuelType.toLowerCase()} price differs from official`,
+      detail: `Yours ${r2(quoteFuelPrice)}/L, official ${r2(official)}/L (${zone}).`,
+      impact_zar:
+        costs.fuelLitresTotal > 0
+          ? Math.round((quoteFuelPrice - official) * costs.fuelLitresTotal * 100) / 100
+          : null,
+      actions: [{ id: 'use_official', label: ACTION_LABELS.use_official ?? 'Use official price' }],
+    };
+  }, [quoteFuelOn, quoteFuelPrice, costs.diesel.official_price, costs.fuelType, costs.fuelZone, costs.fuelLitresTotal]);
+
   const visibleWarnings = useMemo<QuoteWarning[]>(() => {
     if (!ready || routeBlockedMessage || !vtypes) return [];
     // Stale diesel and a missing allowance rate sit on their own cost lines.
     const onLines = ['diesel_stale', 'driver_allowance_missing'];
     const list = routeBusy && !routeData ? [] : costs.warnings.filter((w) => !onLines.includes(w.code));
+    if (quoteFuelWarning) list.unshift(quoteFuelWarning);
     return reopenWarning ? [reopenWarning, ...list] : list;
-  }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning]);
+  }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning, quoteFuelWarning]);
   const firstBlock = visibleWarnings.find((w) => w.severity === 'block') ?? null;
 
   // ── Jump bar (Phase 2) ───────────────────────────────────────────────────
@@ -3323,9 +3369,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       fuelNote={
                         costs.warnings.some((w) => w.code === 'diesel_stale')
                           ? `Price from ${saShortDate(costs.diesel.official_effective_from) ?? 'last period'}`
-                          : null
+                          : quoteFuelLabel
                       }
-                      onFuelRetry={retryFuel}
+                      onFuelRetry={costs.warnings.some((w) => w.code === 'diesel_stale') ? retryFuel : undefined}
                       borderHint={
                         aiBorder?.borderPost ? t(nlLang, 'via', { post: borderPostShort(aiBorder.borderPost) }) : null
                       }

@@ -607,6 +607,10 @@ export const linkReturnLoad = (outboundId: string | number, returnId: string | n
     data: { return_load_id: returnId },
   });
 
+/** POST loads/{id}/close-costs/ {closed}: every cost recorded (or reopen). */
+export const closeLoadCosts = (id: string | number, closed: boolean) =>
+  postData<Record<string, unknown>>({ url: `loads/${id}/close-costs/`, data: { closed } });
+
 /** POST loads/{id}/unlink-return/ (either leg). */
 export const unlinkReturnLoad = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `loads/${id}/unlink-return/`, data: {} });

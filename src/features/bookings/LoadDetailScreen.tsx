@@ -251,7 +251,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     }
     // Cancelling a load that's already moving is destructive — confirm first.
     if (next === 'CANCELLED' && !['PENDING', 'LOADING'].includes(status)) {
-      Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it.', [
+      Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it. If it is in a return pair, the pair is unlinked.', [
         { text: 'Keep', style: 'cancel' },
         { text: 'Cancel load', style: 'destructive', onPress: () => doStatus('CANCELLED') },
       ]);

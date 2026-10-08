@@ -7,7 +7,7 @@ import { Group, Icon, Txt, Mono } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { toast } from '@/lib/toast';
-import { linkReturnLoad, unlinkReturnLoad, useLoadEconomics, useReturnCandidates } from '../api';
+import { closeLoadCosts, linkReturnLoad, unlinkReturnLoad, useLoadEconomics, useReturnCandidates } from '../api';
 import {
   candidateTitle,
   marginCardView,
@@ -42,7 +42,18 @@ export function TripSection({
   const { data: outbounds } = useReturnCandidates(loadId, 'outbound', linkable);
 
   if (!economics) return null;
+  // A cancelled job has no margin to show.
+  if (status === 'CANCELLED') {
+    return (
+      <Group label="Job margin">
+        <View className="px-3.5 py-3">
+          <Txt className="text-callout text-muted">Cancelled. No margin for this job.</Txt>
+        </View>
+      </Group>
+    );
+  }
   const view = marginCardView(economics);
+  const thisLeg = view.legs.find((l) => String(l.loadId) === String(loadId));
   const partner = partnerLeg(economics, loadId);
   const thisIsReturn = economics.pair && String(economics.returnId) === String(loadId);
 
@@ -103,6 +114,29 @@ export function TripSection({
       },
     ]);
 
+  const setClosed = (closed: boolean) => {
+    const go = async () => {
+      if (busyRef.current) return;
+      busyRef.current = true;
+      setBusyId('close');
+      try {
+        await closeLoadCosts(loadId, closed);
+        refresh();
+        toast.success(closed ? 'Costs closed' : 'Costs reopened');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Couldn't update the costs");
+      } finally {
+        busyRef.current = false;
+        setBusyId(null);
+      }
+    };
+    if (!closed) return void go();
+    Alert.alert('Close costs', 'Every cost of this job is recorded. The expenses become the whole cost.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Close costs', onPress: () => void go() },
+    ]);
+  };
+
   const returnRows = (returns ?? []).slice(0, 3);
   const outboundRows = (outbounds ?? []).slice(0, 3);
 
@@ -115,6 +149,19 @@ export function TripSection({
         onRefresh={() => void refetchEconomics()}
         refreshing={isFetching}
       />
+      {thisLeg && (thisLeg.costsClosed || thisLeg.canClose) && (
+        <TouchableOpacity
+          onPress={() => setClosed(!thisLeg.costsClosed)}
+          disabled={!!busyId}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+          className="-mt-2 mb-5 min-h-[44px] justify-center px-3.5"
+        >
+          <Txt className="text-callout text-accent">
+            {busyId === 'close' ? 'Saving…' : thisLeg.costsClosed ? 'Reopen costs' : 'Close costs'}
+          </Txt>
+        </TouchableOpacity>
+      )}
 
       {economics.pair && partner && (
         <Group label="Return load" action={busyId === 'unlink' ? undefined : 'Unlink'} onAction={unlink}>

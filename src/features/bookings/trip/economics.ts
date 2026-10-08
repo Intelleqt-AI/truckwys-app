@@ -166,6 +166,16 @@ export interface MissingInput {
   pending: boolean;
 }
 
+/** One cost group of a leg (fuel, tolls, driver, running cost ...). */
+export interface CostGroup {
+  group: string;
+  estimated: number | null;
+  actual: number | null;
+  used: number | null;
+  /** `actual` / `estimate` / `none` / `recorded_in_operating_estimate`. */
+  basis: string;
+}
+
 export interface Leg {
   loadId: number | string | null;
   loadNumber: string;
@@ -182,6 +192,13 @@ export interface Leg {
   marginVsQuotedPts: number | null;
   emptyReturnRemoved: number;
   missing: MissingInput[];
+  estimateBasis: string;
+  costingSource: string;
+  costGroups: CostGroup[];
+  /** Delivered and the key costs recorded (or closed): the cost is final. */
+  costComplete: boolean;
+  costsClosed: boolean;
+  actualCost: number | null;
 }
 
 export interface Combined {
@@ -193,6 +210,7 @@ export interface Combined {
   quotedMarginPct: number | null;
   marginVsQuotedPts: number | null;
   emptyReturnRemoved: number;
+  costComplete: boolean;
 }
 
 export interface Economics {
@@ -247,6 +265,20 @@ function parseLeg(raw: unknown): Leg {
     marginVsQuotedPts: numOrNull(l.margin_vs_quoted_pts),
     emptyReturnRemoved: numOrNull(l.empty_return_removed) ?? 0,
     missing: parseMissing(l.missing),
+    estimateBasis: text(l.estimate_basis),
+    costingSource: text(l.costing_source),
+    costGroups: arr(l.cost_groups)
+      .map((g) => obj(g))
+      .map((g) => ({
+        group: text(g.group),
+        estimated: numOrNull(g.estimated),
+        actual: numOrNull(g.actual),
+        used: numOrNull(g.used),
+        basis: text(g.basis),
+      })),
+    costComplete: l.cost_complete === true,
+    costsClosed: l.costs_closed === true,
+    actualCost: numOrNull(l.actual_cost),
   };
 }
 
@@ -271,6 +303,7 @@ export function parseEconomics(raw: unknown): Economics | null {
           quotedMarginPct: numOrNull(obj(c.quoted).margin_pct),
           marginVsQuotedPts: numOrNull(c.margin_vs_quoted_pts),
           emptyReturnRemoved: numOrNull(c.empty_return_removed) ?? 0,
+          costComplete: c.cost_complete === true,
         }
       : null,
     expectingReturn: e.expecting_return === true,
@@ -285,10 +318,68 @@ export function basisLabel(basis: Basis): string | null {
   return null;
 }
 
-/** `R 4 200 · 18,2%`; `—` when the cost isn't known. */
+/**
+ * THE cost label (job card and quote outcome alike): what the cost rests on
+ * and whether it is final. A complete and an incomplete leg never share it;
+ * the running cost still estimated means "Part actual", unless costs are closed.
+ */
+export function costLabelFor(basis: Basis, complete: boolean): string {
+  if (basis === 'actual') return complete ? 'Actual costs' : 'Actual so far · not final';
+  if (basis === 'mixed') return complete ? 'Part actual · running cost estimated' : 'Part actual · not final';
+  if (basis === 'estimate') return 'Estimate';
+  return 'No estimate';
+}
+
+const ESTIMATE_SHORT: Record<string, string> = {
+  snapshot: 'quote costing',
+  snapshot_return_linked: 'no empty return',
+  legacy_deadhead: 'standard, empty return',
+  legacy_paired: 'standard, no empty return',
+};
+const ESTIMATE_SHORT_COMPUTED: Record<string, string> = {
+  snapshot: 'job costing',
+  snapshot_return_linked: 'job costing, no empty return',
+};
+
+/** `Estimate · quote costing` (a never-quoted job: `job costing`). */
+export function estimateText(l: Pick<Leg, 'estimateBasis' | 'costingSource'>): string {
+  const short =
+    (l.costingSource === 'computed' ? ESTIMATE_SHORT_COMPUTED[l.estimateBasis] : undefined) ??
+    ESTIMATE_SHORT[l.estimateBasis];
+  return short ? `Estimate · ${short}` : 'Estimate';
+}
+
+const GROUP_NAMES: Record<string, string> = {
+  fuel: 'fuel',
+  tolls: 'tolls',
+  driver: 'driver',
+  operating: 'running cost',
+  border: 'border',
+  other: 'other',
+  subcontractor: 'subcontractor',
+};
+
+/** `Actual: fuel, tolls · Estimated: running cost`; null with nothing actual. */
+export function costGroupsLine(groups: CostGroup[]): string | null {
+  const name = (g: CostGroup) => GROUP_NAMES[g.group] ?? g.group;
+  const actual = groups.filter((g) => g.basis === 'actual').map(name);
+  const est = groups.filter((g) => g.basis === 'estimate').map(name);
+  if (!actual.length) return null;
+  return [`Actual: ${actual.join(', ')}`, est.length ? `Estimated: ${est.join(', ')}` : '']
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** Maintenance / overhead slips already inside the running-cost estimate. */
+export function recordedNote(groups: CostGroup[]): string | null {
+  const g = groups.find((x) => x.basis === 'recorded_in_operating_estimate');
+  return g && g.actual ? `Maintenance and overheads recorded ${randCents(g.actual)}: inside the running cost` : null;
+}
+
+/** `R 4 200,50 · 18,2%` (to the cent, so it adds up); `—` when unknown. */
 export function marginText(margin: number | null, pct: number | null): string {
   if (margin == null) return '—';
-  return pct == null ? rand(margin) : `${rand(margin)} · ${percent(pct)}`;
+  return pct == null ? randCents(margin) : `${randCents(margin)} · ${percent(pct)}`;
 }
 
 /** `2,1 pts below quoted` / `As quoted`; null when either side is unknown. */
@@ -301,7 +392,7 @@ export function vsQuotedText(pts: number | null): string | null {
   return `${n} pts ${pts > 0 ? 'above' : 'below'} quoted`;
 }
 
-export const EMPTY_RETURN_REMOVED = 'Empty return removed — return load linked';
+export const EMPTY_RETURN_REMOVED = 'Empty return removed: return load linked';
 
 export interface LegView {
   key: string;
@@ -319,6 +410,12 @@ export interface LegView {
   quoted: string | null;
   vsQuoted: string | null;
   below: boolean;
+  /** `Actual: fuel · Estimated: running cost`. */
+  groups: string | null;
+  recorded: string | null;
+  costsClosed: boolean;
+  /** Something actual is recorded, so "Close costs" makes sense. */
+  canClose: boolean;
 }
 
 export interface MarginCardView {
@@ -341,18 +438,22 @@ export interface MarginCardView {
 const LEG_TITLE: Record<LegRole, string> = { single: 'This job', outbound: 'Outbound', return: 'Return' };
 
 function legView(l: Leg, i: number): LegView {
-  const basis = basisLabel(l.costBasis);
+  const basis = l.costBasis === 'estimate' ? estimateText(l) : l.costBasis ? costLabelFor(l.costBasis, l.costComplete) : null;
   return {
     key: `${l.role}-${l.loadId ?? i}`,
     title: LEG_TITLE[l.role],
     lane: l.lane,
     loadId: l.loadId,
-    revenue: rand(l.revenue),
+    revenue: randCents(l.revenue),
     revenueBasis: revenueBasisLabel(l.revenueBasis),
-    costLabel: l.costBasis === 'actual' ? 'Actual cost' : 'Estimated cost',
-    cost: l.cost == null ? '—' : rand(l.cost),
+    costLabel: l.costBasis === 'actual' ? 'Actual cost' : l.costBasis === 'mixed' ? 'Part actual cost' : 'Estimated cost',
+    cost: l.cost == null ? '—' : randCents(l.cost),
     margin: marginText(l.margin, l.marginPct),
     negative: (l.margin ?? 0) < 0,
+    groups: costGroupsLine(l.costGroups),
+    recorded: recordedNote(l.costGroups),
+    costsClosed: l.costsClosed,
+    canClose: !l.costsClosed && (l.actualCost ?? 0) > 0,
     basis,
     quoted: l.quotedMarginPct == null ? null : `Quoted ${percent(l.quotedMarginPct)}`,
     vsQuoted: vsQuotedText(l.marginVsQuotedPts),
@@ -385,7 +486,7 @@ export function marginCardView(e: Economics): MarginCardView {
       ? {
           margin: marginText(c.margin, c.marginPct),
           negative: (c.margin ?? 0) < 0,
-          basis: basisLabel(c.costBasis),
+          basis: c.costBasis ? costLabelFor(c.costBasis, c.costComplete) : null,
           quoted: c.quotedMarginPct == null ? null : `Quoted ${percent(c.quotedMarginPct)}`,
           vsQuoted: vsQuotedText(c.marginVsQuotedPts),
           below: (c.marginVsQuotedPts ?? 0) <= -0.05,
@@ -418,7 +519,7 @@ export interface InvoicePreviewView {
   note: string | null;
 }
 
-const randCents = (n: number | null): string => {
+export const randCents = (n: number | null): string => {
   if (n == null || !Number.isFinite(n)) return '—';
   const body = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR' }).format(Math.abs(n));
   return n < 0 ? `${MINUS}${body}` : body;
@@ -620,11 +721,16 @@ export function returnHistoryText(analysis: unknown): string | null {
 
 // ── Quote detail: what the job really earned ────────────────────────────────
 export interface ActualsView {
-  /** `Actual margin` / `Estimated margin` / `Part actual margin`. */
+  /** `Actual margin` once costs are final, else `Margin so far`. */
   marginLabel: string;
+  /** `18,2%`, or `~22,5% · costs not final`. */
   margin: string;
   negative: boolean;
+  final: boolean;
+  /** The job card's cost label (costLabelFor). */
   basis: string | null;
+  /** `Actual cost` / `Part actual cost` / `Estimated cost`. */
+  costRowLabel: string;
   revenue: string | null;
   cost: string | null;
   backhaul: string | null;
@@ -636,16 +742,36 @@ export function actualsView(raw: unknown): ActualsView | null {
   const pct = numOrNull(a.actual_margin_pct);
   const revenue = numOrNull(a.actual_revenue);
   const cost = numOrNull(a.actual_cost);
-  if (pct == null && revenue == null) return null;
-  const basis = basisOf(a.actual_cost_basis);
+  const complete = typeof a.complete === 'boolean' ? a.complete : cost != null && revenue != null;
+  const basis = basisOf(a.actual_cost_basis) ?? (complete ? 'actual' : 'estimate');
+  const backhaul =
+    a.backhaul_found === true ? 'Came back loaded' : a.backhaul_found === false ? 'Came back empty' : null;
+  const rowLabel = basis === 'actual' ? 'Actual cost' : basis === 'mixed' ? 'Part actual cost' : 'Estimated cost';
+  if (complete && (pct != null || revenue != null)) {
+    return {
+      marginLabel: 'Actual margin',
+      margin: pct == null ? '—' : percent(pct),
+      negative: (pct ?? 0) < 0,
+      final: true,
+      basis: costLabelFor(basis, true),
+      costRowLabel: rowLabel,
+      revenue: revenue == null ? null : randCents(revenue),
+      cost: cost == null ? null : randCents(cost),
+      backhaul,
+    };
+  }
+  const est = numOrNull(a.estimated_margin_pct);
+  if (est == null) return null;
+  const estCost = numOrNull(a.estimated_cost);
   return {
-    marginLabel:
-      basis === 'estimate' ? 'Estimated margin' : basis === 'mixed' ? 'Part actual margin' : 'Actual margin',
-    margin: pct == null ? '—' : percent(pct),
-    negative: (pct ?? 0) < 0,
-    basis: basisLabel(basis),
-    revenue: revenue == null ? null : rand(revenue),
-    cost: cost == null ? null : rand(cost),
-    backhaul: a.backhaul_found === true ? 'Came back loaded' : a.backhaul_found === false ? 'Came back empty' : null,
+    marginLabel: 'Margin so far',
+    margin: `~${percent(est)} · costs not final`,
+    negative: est < 0,
+    final: false,
+    basis: costLabelFor(basis, false),
+    costRowLabel: rowLabel,
+    revenue: null,
+    cost: estCost == null ? null : randCents(estCost),
+    backhaul,
   };
 }

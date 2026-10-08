@@ -943,14 +943,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           {actuals.revenue && <DetailRow label="Revenue excl. VAT" value={actuals.revenue} />}
           {actuals.cost && (
             <DetailRow
-              label={
-                actuals.basis === 'Actual'
-                  ? 'Actual cost excl. VAT'
-                  : actuals.basis === 'Estimate'
-                    ? 'Estimated cost excl. VAT'
-                    : 'Cost excl. VAT'
-              }
-              hint={actuals.basis === 'Part actual' ? 'Part actual, part estimate' : undefined}
+              label={`${actuals.costRowLabel} excl. VAT`}
+              hint={actuals.basis ?? undefined}
               value={actuals.cost}
               last={!actuals.backhaul}
             />

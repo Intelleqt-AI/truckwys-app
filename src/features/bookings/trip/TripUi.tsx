@@ -126,7 +126,12 @@ export function TripMarginCard({
             </TouchableOpacity>
           )}
           <DetailRow label="Revenue excl. VAT" hint={leg.revenueBasis ?? undefined} value={leg.revenue} />
-          <DetailRow label={`${leg.costLabel} excl. VAT`} value={leg.cost} />
+          <DetailRow label={`${leg.costLabel} excl. VAT`} hint={leg.groups ?? undefined} value={leg.cost} />
+          {leg.recorded ? (
+            <View className="px-3.5 pb-2">
+              <Txt className="text-caption text-muted">{leg.recorded}</Txt>
+            </View>
+          ) : null}
           <DetailRow
             label="Margin"
             hint={[leg.basis, leg.quoted].filter(Boolean).join(' · ') || undefined}

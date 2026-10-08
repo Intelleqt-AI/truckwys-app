@@ -28,6 +28,7 @@ import {
   bookingBodyFor,
   economicsPending,
   analysisHasReturnHistory,
+  costLabelFor,
 } from '../economics.ts';
 
 // Intl puts non-breaking spaces in `R 1 020`; compare with plain ones.
@@ -134,16 +135,17 @@ test('pair margin card: per leg, combined, empty return removed, missing prompts
   assert.equal(v.legs[0].costLabel, 'Actual cost');
   assert.equal(v.legs[0].revenueBasis, 'Invoiced');
   assert.equal(v.legs[1].revenueBasis, 'Job price');
-  assert.equal(v.legs[0].basis, 'Actual');
-  assert.equal(sp(v.legs[0].margin), 'R 9 000 · 30,0%');
+  // Not marked complete: actual so far, never the final label.
+  assert.equal(v.legs[0].basis, 'Actual so far · not final');
+  assert.equal(sp(v.legs[0].margin), 'R 9 000,00 · 30,0%');
   assert.equal(v.legs[0].quoted, 'Quoted 20,0%');
   assert.equal(v.legs[0].vsQuoted, '10,0 pts above quoted');
   assert.equal(v.legs[1].costLabel, 'Estimated cost');
   assert.equal(v.legs[1].basis, 'Estimate');
   assert.equal(v.legs[1].vsQuoted, '2,7 pts below quoted');
   assert.equal(v.legs[1].below, true);
-  assert.equal(v.combined.basis, 'Part actual');
-  assert.equal(sp(v.combined.margin), 'R 11 500 · 23,7%');
+  assert.equal(v.combined.basis, 'Part actual · not final');
+  assert.equal(sp(v.combined.margin), 'R 11 500,00 · 23,7%');
   assert.equal(v.combined.quoted, 'Quoted 18,6%');
   assert.equal(v.emptyReturnNote, EMPTY_RETURN_REMOVED);
   assert.deepEqual(v.missing, ['Add the tolls to cost this job']);
@@ -182,7 +184,7 @@ test('single job without an estimate: no margin, prompts instead, no combined', 
 test('margin helpers', () => {
   assert.equal(vsQuotedText(0.01), 'As quoted');
   assert.equal(vsQuotedText(null), null);
-  assert.equal(sp(marginText(-1500, -12.5)), '−R 1 500 · −12,5%');
+  assert.equal(sp(marginText(-1500, -12.5)), '−R 1 500,00 · −12,5%');
   assert.equal(basisLabel('mixed'), 'Part actual');
   assert.equal(basisLabel(null), null);
 });
@@ -278,23 +280,52 @@ test('return-load history text from the pricing analysis', () => {
 test('quote actuals once delivered', () => {
   const v = actualsView({
     actual_margin_pct: 17.25, backhaul_found: true, actual_revenue: 30000, actual_cost: 24825,
-    actual_cost_basis: 'actual', recorded_at: '2026-10-08T10:00:00Z',
+    actual_cost_basis: 'actual', complete: true, recorded_at: '2026-10-08T10:00:00Z',
   });
   assert.equal(v.margin, '17,3%');
   assert.equal(v.marginLabel, 'Actual margin');
-  assert.equal(v.basis, 'Actual');
+  assert.equal(v.basis, 'Actual costs');
   assert.equal(v.backhaul, 'Came back loaded');
-  assert.equal(sp(v.cost), 'R 24 825');
+  assert.equal(sp(v.cost), 'R 24 825,00');
   assert.equal(actualsView(null), null);
   assert.equal(actualsView({ actual_margin_pct: null, actual_revenue: null }), null);
-  const est = actualsView({ actual_margin_pct: -4, backhaul_found: false, actual_cost_basis: 'estimate' });
-  assert.equal(est.backhaul, 'Came back empty');
-  assert.equal(est.marginLabel, 'Estimated margin');
-  for (const b of ['part actual', 'part_actual', 'mixed']) {
-    const part = actualsView({ actual_margin_pct: 12, actual_cost_basis: b });
-    assert.equal(part.marginLabel, 'Part actual margin');
-    assert.equal(part.basis, 'Part actual');
-  }
+  // Delivered, costs not final: the estimate so far, never "Actual".
+  const sofar = actualsView({
+    actual_margin_pct: null, actual_revenue: null, actual_cost: null, actual_cost_basis: 'part_actual',
+    backhaul_found: false, complete: false, estimated_cost: 24000, estimated_margin_pct: 22.46,
+  });
+  assert.equal(sofar.marginLabel, 'Margin so far');
+  assert.equal(sofar.margin, '~22,5% · costs not final');
+  assert.equal(sofar.basis, 'Part actual · not final');
+  assert.equal(sofar.costRowLabel, 'Part actual cost');
+  assert.equal(sofar.backhaul, 'Came back empty');
+  // Complete but the running cost still estimated: part actual, final.
+  const part = actualsView({ actual_margin_pct: 12, actual_revenue: 100, actual_cost: 88, actual_cost_basis: 'part_actual', complete: true });
+  assert.equal(part.basis, 'Part actual · running cost estimated');
+});
+
+test('one label rule: card and quote outcome agree; complete and not complete differ', () => {
+  const e = parseEconomics({
+    pair: false,
+    legs: [{ load_id: 9, role: 'single', revenue: 100, revenue_basis: 'actual', cost: 88, cost_basis: 'part_actual',
+      cost_complete: true, margin: 12, margin_pct: 12, quoted: {}, missing: [], costing_source: 'quote',
+      cost_groups: [
+        { group: 'fuel', estimated: 50, actual: 48, used: 48, basis: 'actual' },
+        { group: 'operating', estimated: 40, actual: null, used: 40, basis: 'estimate' },
+        { group: 'operating_recorded', estimated: null, actual: 7, used: 0, basis: 'recorded_in_operating_estimate' },
+      ] }],
+  });
+  const leg = marginCardView(e).legs[0];
+  assert.equal(leg.basis, actualsView({ actual_margin_pct: 12, actual_revenue: 100, actual_cost: 88, actual_cost_basis: 'part_actual', complete: true }).basis);
+  assert.equal(leg.costLabel, 'Part actual cost');
+  assert.equal(leg.groups, 'Actual: fuel · Estimated: running cost');
+  assert.equal(sp(leg.recorded), 'Maintenance and overheads recorded R 7,00: inside the running cost');
+  assert.notEqual(costLabelFor('mixed', true), costLabelFor('mixed', false));
+  // A never-quoted (TMS) job is costed from its own data.
+  const tms = parseEconomics({ pair: false, legs: [{ load_id: 1, role: 'single', revenue: 1, cost: 1, cost_basis: 'estimate',
+    estimate_basis: 'snapshot', costing_source: 'computed', quoted: {}, missing: [] }] });
+  assert.equal(marginCardView(tms).legs[0].basis, 'Estimate · job costing');
+  assert.ok(!EMPTY_RETURN_REMOVED.includes('—'));
 });
 
 test('booking preview before booking: candidates, invoice, can_book', () => {

@@ -1,5 +1,7 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
+import { AccessibilityInfo, View } from 'react-native';
 import { VoiceQuoteBar } from '../VoiceQuoteBar';
+import type { UiLang } from './nlFill';
 
 export interface NaturalLanguageBarHandle {
   /** Pushes text into the bar without going through a keystroke — used to
@@ -10,6 +12,8 @@ export interface NaturalLanguageBarHandle {
       (Phase 4) so a typed-but-unsubmitted description still counts as
       real work. */
   getText: () => string;
+  /** Moves the screen reader back to the bar (after the Replace / Keep confirm). */
+  focusA11y: () => void;
 }
 
 /**
@@ -31,26 +35,46 @@ export const NaturalLanguageBar = forwardRef<
     note?: string;
     /** Fires on every keystroke — lets the parent clear a stale nlReply. */
     onTyped?: () => void;
+    heard?: string | null;
+    lang?: UiLang;
+    children?: ReactNode;
   }
->(function NaturalLanguageBar({ busy, onRecord, onSubmit, note, onTyped }, ref) {
+>(function NaturalLanguageBar({ busy, onRecord, onSubmit, note, onTyped, heard, lang, children }, ref) {
   const [text, setText] = useState('');
   // Mirrors `text` so getText() below can read the latest value without the
   // handle's own identity changing on every keystroke.
   const textRef = useRef(text);
   textRef.current = text;
-  useImperativeHandle(ref, () => ({ setText, getText: () => textRef.current }), []);
+  const boxRef = useRef<View>(null);
+  useImperativeHandle(
+    ref,
+    () => ({
+      setText,
+      getText: () => textRef.current,
+      focusA11y: () => {
+        if (boxRef.current) AccessibilityInfo.sendAccessibilityEvent(boxRef.current, 'focus');
+      },
+    }),
+    [],
+  );
 
   return (
-    <VoiceQuoteBar
-      value={text}
-      onChangeText={(t) => {
-        setText(t);
-        onTyped?.();
-      }}
-      onSubmit={() => onSubmit(text)}
-      busy={busy}
-      onRecord={onRecord}
-      note={note}
-    />
+    <View ref={boxRef}>
+      <VoiceQuoteBar
+        value={text}
+        onChangeText={(t) => {
+          setText(t);
+          onTyped?.();
+        }}
+        onSubmit={() => onSubmit(text)}
+        busy={busy}
+        onRecord={onRecord}
+        note={note}
+        heard={heard}
+        lang={lang}
+      >
+        {children}
+      </VoiceQuoteBar>
+    </View>
   );
 });

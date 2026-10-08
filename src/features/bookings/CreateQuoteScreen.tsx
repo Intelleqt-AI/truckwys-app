@@ -14,7 +14,9 @@ import {
   Keyboard,
   useWindowDimensions,
   InteractionManager,
+  AccessibilityInfo,
   Alert,
+  type TextInput,
   ActivityIndicator,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
@@ -104,6 +106,7 @@ import {
   pricedInEarlierPeriod,
   changesSincePriced,
   saShortDate,
+  ACTION_LABELS,
   type ChangesSincePriced,
   type QuoteWarning,
 } from './quote/rules';
@@ -117,6 +120,36 @@ import { compactStoredSnapshot } from './quote/routeSnapshot';
 import { LocationField } from './quote/LocationField';
 import { StopLocationRow } from './quote/StopLocationRow';
 import { NaturalLanguageBar, type NaturalLanguageBarHandle } from './quote/NaturalLanguageBar';
+import { FillSummary, CheckHint, type FillSuggestion } from './quote/FillSummary';
+import {
+  UNDO_MS,
+  buildChips,
+  borderPostShort,
+  conflictSummary,
+  didntCatchLine,
+  dieselLabel,
+  heardBadge,
+  isLow,
+  nightsLabel,
+  placeShort,
+  planFill,
+  plainNumber,
+  readChatResult,
+  readVoiceResult,
+  shortDate,
+  t,
+  tonsLabel,
+  uiLangOf,
+  vehicleHintLabel,
+  voiceErrorText,
+  type FieldChange,
+  type FieldVal,
+  type FillChip,
+  type FillKey,
+  type FillPlan,
+  type UiLang,
+  type VoiceLangPref,
+} from './quote/nlFill';
 import { QuoteSection } from './quote/QuoteSection';
 import {
   QuoteJumpBar,
@@ -265,6 +298,46 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // follows, and without this flag there's a visible gap between the sheet
   // closing and that starting.
   const [voiceBusy, setVoiceBusy] = useState(false);
+  // "Describe the load" — what the last Fill did (see submitNL / nlFill.ts).
+  // Afrikaans UI after an Afrikaans voice/chat response, else English.
+  const [nlLang, setNlLang] = useState<UiLang>('en');
+  const [heard, setHeard] = useState<string | null>(null);
+  const [fillView, setFillView] = useState<{
+    applied: FieldChange[];
+    stops: string[];
+    stopsLow: boolean;
+    notUnderstood: string[];
+    vehicleHint: string | null;
+    vehicleHintLabel: string | null;
+    driverNights: number | null;
+    fuelPrice: number | null;
+    // Cross-border as this Fill stated it (not a sticky earlier one).
+    borderPost: string | null;
+    international: boolean | null;
+    stated: FieldChange[];
+  } | null>(null);
+  // The fields a Fill would overwrite that the person typed: asked about first.
+  const [pendingFill, setPendingFill] = useState<{
+    plan: FillPlan;
+    locs: Partial<Record<FillKey, Loc>>;
+  } | null>(null);
+  // What each earlier Fill wrote, per field: a field still holding it is the
+  // Fill's, so a follow-up ("make it 30 ton") replaces it without asking.
+  const aiWrittenRef = useRef<Partial<Record<FillKey, string>>>({});
+  // Undo for 8 s after a Fill: the exact earlier values of what it changed.
+  const undoRef = useRef<{ restores: (() => void)[]; aiPrev: Partial<Record<FillKey, string | undefined>> } | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [canUndo, setCanUndo] = useState(false);
+  // international / border_post from the description: used only while the
+  // route's own countries are unknown, and as the border line's hint.
+  const [aiBorder, setAiBorder] = useState<{ international?: boolean; borderPost?: string } | null>(null);
+  const [truckPickerReq, setTruckPickerReq] = useState(0);
+  const weightInputRef = useRef<TextInput>(null);
+  // Each filled field's box, so a chip can move the screen reader to it.
+  const fieldRefs = useRef<Partial<Record<FillKey, View | null>>>({});
+  const cargoInputRef = useRef<TextInput>(null);
+  // The form's starting values are not "typed": a Fill replaces them freely.
+  const fillDefaultsRef = useRef({ pickupDate: editing ? '' : plusDays(1), validUntil: plusDays(7) });
   const [benchmark, setBenchmark] = useState<Record<string, unknown> | null>(null);
   const [tollOverride, setTollOverride] = useState('');
   const [tollEdited, setTollEdited] = useState(false);
@@ -311,6 +384,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // company/live price for its fuel type; a toll figure is per one-way leg and
   // belongs to the plazas it was checked for (routeKey).
   const [aiFuel, setAiFuel] = useState<AiInputs['aiFuel']>(null);
+  // A diesel price the person gave for this quote: the per-quote override, not a market figure.
+  // Driver nights said in the description and applied: saved as
+  // costing_inputs.driver_nights (a typed driver amount still wins).
+  const [spokenNights, setSpokenNights] = useState<number | null>(null);
+  const [quoteFuel, setQuoteFuel] = useState<{ pricePerL: number; fuelType: string } | null>(null);
   const [aiToll, setAiToll] = useState<AiInputs['aiToll']>(null);
   // Set while market figures are in use: the check it came from and its win chance.
   const [aiApplied, setAiApplied] = useState<{
@@ -771,6 +849,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             }
           : null,
       );
+      const savedNights = num(pick(ci, ['driver_nights']));
+      setSpokenNights(savedNights > 0 ? Math.round(savedNights) : null);
+      // A diesel price given for this quote (not a market figure) comes back too.
+      const savedOverride = num(pick(ci, ['fuel_price_override']));
+      setQuoteFuel(
+        !fromMarket(snap.fuel_price_source) && savedOverride > 0
+          ? { pricePerL: savedOverride, fuelType: str(snap.fuel_type_used) || 'Diesel' }
+          : null,
+      );
       setTollEdited(
         str(snap.toll_charges_source) === 'manual' && pick(q, ['toll_charges']) != null,
       );
@@ -1023,13 +1110,31 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const aiTollOneWay = aiToll && aiToll.routeKey === tollRouteKey ? aiToll.oneWay : null;
   const fuelTypeNow = str((vtypes ?? []).find((v) => v.name === pricedTruckName)?.fuel_type, 'Diesel');
   const aiFuelPrice = aiFuel && aiFuel.fuelType === fuelTypeNow ? aiFuel.pricePerL : null;
+  // The person's own price for this quote (backend fuel_price_override, R5–R100).
+  const quoteFuelPrice = quoteFuel && quoteFuel.fuelType === fuelTypeNow ? quoteFuel.pricePerL : null;
+
+  // A border schedule that depends on an abnormal load: Zimbabwe's access toll.
+  const routeCrossesZimbabwe = [
+    ...asArray<string>(pick(routeData ?? {}, ['countries'])),
+    ...asArray<string>(pick(currentRoute, ['countries'])),
+    pickup?.cc,
+    delivery?.cc,
+    ...stops.map((st) => st.loc?.cc),
+  ].some((c) => /^(ZW|ZWE|Zimbabwe)$/i.test(String(c ?? '')));
+  // An abnormal load is kept on the quote, but only prices on a Zimbabwe route.
+  const abnormalApplies = abnormalLoad && routeCrossesZimbabwe;
 
   // The trip leaves South Africa (route flag, a foreign country on the route,
   // or a foreign point): its floor then needs border costs.
+  const routeCountriesKnown =
+    asArray<string>(pick(routeData ?? {}, ['countries'])).length > 0 ||
+    [pickup?.cc, delivery?.cc, ...stops.map((st) => st.loc?.cc)].some((c) => !!c);
   const crossesBorder =
     !!pick(routeData ?? {}, ['cross_border']) ||
     asArray<string>(pick(routeData ?? {}, ['countries'])).some((c) => isForeignCc(c)) ||
-    [pickup?.cc, delivery?.cc, ...stops.map((st) => st.loc?.cc)].some((c) => isForeignCc(c));
+    [pickup?.cc, delivery?.cc, ...stops.map((st) => st.loc?.cc)].some((c) => isForeignCc(c)) ||
+    // The description said cross-border, and no country is known yet to say otherwise.
+    (!routeCountriesKnown && aiBorder?.international === true);
 
   // The backend's costing for these inputs (newer backends only): supplies
   // the approved driver allowance, the fleet's operating cost and the diesel
@@ -1056,12 +1161,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             vehicle_type: pricedTruck.name,
             include_empty_return: returnLoadBooked ? false : null,
             use_official_fuel: useOfficialDiesel,
-            fuel_price_override: aiFuelPrice ?? null,
+            fuel_price_override: aiFuelPrice ?? quoteFuelPrice ?? null,
             is_international: crossesBorder,
             cargo_description: cargo || null,
             ...(pickupDate ? { pickup_date: pickupDate } : {}),
             ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
-            ...(abnormalLoad ? { abnormal_load: true } : {}),
+            ...(abnormalApplies ? { abnormal_load: true } : {}),
+            // Nights said for this trip; a typed driver amount still wins.
+            ...(spokenNights != null && !driverEdited ? { driver_nights: spokenNights } : {}),
             // The route's own border data: the server works out what's unknown.
             route: {
               cross_border: !!pick(routeData ?? {}, ['cross_border']),
@@ -1075,7 +1182,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalLoad],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, quoteFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalApplies, spokenNights, driverEdited],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1088,14 +1195,6 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setServerSuggested({ id: nextServerSuggested.slice(0, at), key: nextServerSuggested.slice(at + 1) });
   }, [nextServerSuggested]);
 
-  // A border schedule that depends on an abnormal load: Zimbabwe's access toll.
-  const routeCrossesZimbabwe = [
-    ...asArray<string>(pick(routeData ?? {}, ['countries'])),
-    ...asArray<string>(pick(currentRoute, ['countries'])),
-    pickup?.cc,
-    delivery?.cc,
-    ...stops.map((st) => st.loc?.cc),
-  ].some((c) => /^(ZW|ZWE|Zimbabwe)$/i.test(String(c ?? '')));
 
   // ── Cost breakdown ──────────────────────────────────────────────────────
   // quote/costs.ts: the price lines, and the cost floor, margin and warnings
@@ -1118,6 +1217,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         serviceCharge,
         liveFuel,
         aiFuelPrice,
+        quoteFuelPrice,
+        // Applied nights out; a typed driver amount still wins.
+        driverNights: spokenNights,
         useOfficialDiesel,
         aiTollOneWay,
         returnLoadBooked,
@@ -1144,6 +1246,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       serviceCharge,
       liveFuel,
       aiFuelPrice,
+      quoteFuelPrice,
+      spokenNights,
       useOfficialDiesel,
       aiTollOneWay,
       returnLoadBooked,
@@ -1343,7 +1447,199 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     !!analysis && !analysisHasReturnHistory(analysis),
   );
   const returnHistory = analysisReturnHistory ?? fetchedReturnHistory ?? null;
-  const submitNL = async (text: string) => {
+
+  // ── Describe the load (typed or voice) ────────────────────────────────────
+  // The form as the Fill rule compares it (nlFill.planFill): value '' = empty.
+  const fillCurrent = (lang: UiLang): Partial<Record<FillKey, FieldVal>> => {
+    const loc = (l: Loc | null): FieldVal =>
+      l ? { value: l.label, display: placeShort(l.label), lat: l.lat, lon: l.lon } : { value: '', display: '' };
+    const yesNo = (b: boolean) => (b ? (lang === 'af' ? 'Ja' : 'Yes') : lang === 'af' ? 'Nee' : 'No');
+    return {
+      pickup: loc(pickup),
+      delivery: loc(delivery),
+      weight:
+        weightTons != null
+          ? { value: plainNumber(weightTons), display: tonsLabel(weightTons) }
+          : { value: weight.trim(), display: weight.trim() },
+      cargo: { value: cargo.trim(), display: cargo.trim() },
+      vehicle: { value: vehicleType, display: vehicleType },
+      client: {
+        value: customerId,
+        display: customerOptions.find((o) => o.value === customerId)?.label ?? '',
+      },
+      pickupDate: { value: pickupDate, display: shortDate(pickupDate, lang) },
+      deliveryDate: { value: deliveryDate, display: shortDate(deliveryDate, lang) },
+      validUntil: { value: validUntil, display: shortDate(validUntil, lang) },
+      tripType: {
+        value: tripType,
+        display: tripType === 'ROUND_TRIP' ? t(lang, 'round_trip') : t(lang, 'one_way'),
+      },
+      returnLoad: { value: returnLoadBooked ? 'yes' : 'no', display: yesNo(returnLoadBooked) },
+      abnormal: { value: abnormalLoad ? 'yes' : 'no', display: yesNo(abnormalLoad) },
+    };
+  };
+
+  const geocodeFirst = async (q: string): Promise<Loc | null> => {
+    try {
+      const first = asArray(await suggestLocations(q))[0] as Record<string, unknown> | undefined;
+      if (!first) return null;
+      return {
+        label: str(pick(first, ['label', 'name', 'description'])),
+        lat: num(pick(first, ['lat', 'latitude'])),
+        lon: num(pick(first, ['lon', 'lng', 'longitude'])),
+        cc: str(pick(first, ['country_code'])) || undefined,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  // Writes one change into the form and returns how to put the old value back.
+  const applyFillChange = (c: FieldChange, locs: Partial<Record<FillKey, Loc>>): (() => void) => {
+    switch (c.key) {
+      case 'pickup': {
+        const prev = pickup;
+        const l = locs.pickup;
+        if (l) setPickup(l);
+        return () => setPickup(prev);
+      }
+      case 'delivery': {
+        const prev = delivery;
+        const l = locs.delivery;
+        if (l) setDelivery(l);
+        return () => setDelivery(prev);
+      }
+      case 'weight': {
+        const prev = weight;
+        setWeight(c.to.value);
+        return () => setWeight(prev);
+      }
+      case 'cargo': {
+        const prev = cargo;
+        setCargo(c.to.display);
+        return () => setCargo(prev);
+      }
+      case 'vehicle': {
+        const prev = vehicleType;
+        const prevRate = baseRatePerKm;
+        const resolved = resolveVehicleTypeName(c.to.value);
+        // Through the dropdown's own handler, so a resolved type gets its rate
+        // exactly like a manual pick. An unresolved type is shown as-is for the
+        // person to correct, rate untouched.
+        if (resolved) handleVehicleTypeSelect(resolved);
+        else setVehicleType(c.to.value);
+        return () => {
+          setVehicleType(prev);
+          setBaseRatePerKm(prevRate);
+        };
+      }
+      case 'client': {
+        const prev = customerId;
+        // The backend already matched the spoken name to a real customer.
+        setCustomerId(c.to.value);
+        // A client created mid-conversation isn't in the cached picker yet.
+        invalidateFor(qc, 'customer');
+        return () => setCustomerId(prev);
+      }
+      case 'pickupDate': {
+        const prev = pickupDate;
+        setPickupDate(c.to.value);
+        return () => setPickupDate(prev);
+      }
+      case 'deliveryDate': {
+        const prev = deliveryDate;
+        const prevTouched = deliveryTouchedRef.current;
+        deliveryTouchedRef.current = true;
+        setDeliveryDate(c.to.value);
+        return () => {
+          deliveryTouchedRef.current = prevTouched;
+          setDeliveryDate(prev);
+        };
+      }
+      case 'validUntil': {
+        const prev = validUntil;
+        setValidUntil(c.to.value);
+        return () => setValidUntil(prev);
+      }
+      case 'tripType': {
+        const prev = tripType;
+        setTripType(c.to.value as 'ONE_WAY' | 'ROUND_TRIP');
+        return () => setTripType(prev);
+      }
+      case 'returnLoad': {
+        const prev = returnLoadBooked;
+        setReturnLoadBooked(c.to.value === 'yes');
+        return () => setReturnLoadBooked(prev);
+      }
+      case 'abnormal': {
+        const prev = abnormalLoad;
+        setAbnormalLoad(c.to.value === 'yes');
+        return () => setAbnormalLoad(prev);
+      }
+    }
+  };
+
+  // Applies changes, records them as the Fill's own, and opens (or extends) the
+  // 8 s Undo window.
+  const commitFill = (
+    changes: FieldChange[],
+    locs: Partial<Record<FillKey, Loc>>,
+    extraRestores: (() => void)[] = [],
+    extend = false,
+  ) => {
+    const restores = changes.map((c) => applyFillChange(c, locs));
+    const aiPrev: Partial<Record<FillKey, string | undefined>> = {};
+    for (const c of changes) {
+      aiPrev[c.key] = aiWrittenRef.current[c.key];
+      aiWrittenRef.current[c.key] = c.to.value;
+    }
+    const all = [...restores, ...extraRestores];
+    // A new Fill closes the previous one's Undo, even when it applied nothing
+    // itself (only conflicts): Undo never reaches back past the latest Fill.
+    if (!extend) {
+      undoRef.current = null;
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      setCanUndo(false);
+    }
+    if (!all.length) return;
+    const prev = extend ? undoRef.current : null;
+    undoRef.current = {
+      restores: [...(prev?.restores ?? []), ...all],
+      aiPrev: { ...aiPrev, ...(prev?.aiPrev ?? {}) },
+    };
+    setCanUndo(true);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => {
+      undoRef.current = null;
+      setCanUndo(false);
+    }, UNDO_MS);
+  };
+  useEffect(() => () => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+  }, []);
+
+  const undoFill = () => {
+    const snap = undoRef.current;
+    if (!snap) return;
+    // Latest first, so a field changed twice ends on its earliest value.
+    [...snap.restores].reverse().forEach((r) => r());
+    for (const [k, v] of Object.entries(snap.aiPrev) as [FillKey, string | undefined][]) {
+      if (v === undefined) delete aiWrittenRef.current[k];
+      else aiWrittenRef.current[k] = v;
+    }
+    undoRef.current = null;
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setCanUndo(false);
+    setPendingFill(null);
+    setFillView(null);
+    setNlReply('');
+    toast.info(t(nlLang, 'undone'));
+  };
+
+  const submitNL = async (
+    text: string,
+    voice: { detectedLanguage?: string | null; alternateText?: string | null } = {},
+  ) => {
     const message = text.trim();
     if (!message || nlBusy) return;
     setNlBusy(true);
@@ -1369,12 +1665,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         currentFields,
         pendingEntity,
         declinedEntities,
+        voice,
       );
 
       // Carry the entity conversation forward: without this the backend's
       // "that client doesn't exist — create it?" question can never be
       // answered, and replying just sends a fresh contextless message.
-      setPendingEntity(pick(res, ['pending_entity']) ?? null);
+      const nextPending = pick(res, ['pending_entity']) ?? null;
+      setPendingEntity(nextPending);
       const declined = str(pick(res, ['declined_entity']));
       if (declined) setDeclinedEntities((prev) => [...prev, declined.toLowerCase()]);
       setNlHistory((prev) => [
@@ -1383,59 +1681,128 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         { role: 'assistant' as const, content: str(pick(res, ['reply'])) },
       ]);
 
-      const ex = (pick(res, ['extracted_fields']) ?? {}) as Record<string, unknown>;
-      // The backend already fuzzy-matches a spoken name to a real customer and
-      // returns its id, so this is a straight assignment. Omitting this line
-      // was the bug: every other field filled and the client stayed empty.
-      if (pick(ex, ['customer_id'])) {
-        setCustomerId(String(pick(ex, ['customer_id'])));
-        // A client created mid-conversation isn't in the cached picker yet.
-        invalidateFor(qc, 'customer');
+      const r = readChatResult(res);
+      const ex = r.extracted;
+      const lang = r.language ? uiLangOf(r.language) : voice.detectedLanguage ? uiLangOf(voice.detectedLanguage) : nlLang;
+      setNlLang(lang);
+
+      // Places first: two spellings of one place compare by where they land.
+      const [pickLoc, delLoc, stopLocs] = await Promise.all([
+        ex.pickupLocation ? geocodeFirst(ex.pickupLocation) : Promise.resolve(null),
+        ex.deliveryLocation ? geocodeFirst(ex.deliveryLocation) : Promise.resolve(null),
+        Promise.all((ex.stops ?? []).map((q) => geocodeFirst(q))),
+      ]);
+      const locs: Partial<Record<FillKey, Loc>> = {};
+      const proposed: Partial<Record<FillKey, FieldVal>> = {};
+      // The field gets the geocodable name (Cape Town); the chip says what was said (Kaapstad).
+      const locVal = (l: Loc, said?: string): FieldVal => ({
+        value: l.label,
+        display: said || placeShort(l.label),
+        lat: l.lat,
+        lon: l.lon,
+      });
+      if (pickLoc) {
+        locs.pickup = pickLoc;
+        proposed.pickup = locVal(pickLoc, r.spokenPlaces.pickup);
       }
-      if (pick(ex, ['cargo_description'])) setCargo(str(pick(ex, ['cargo_description'])));
-      // Backend weight is in kg → the UI field is tons.
-      if (pick(ex, ['weight'])) {
-        const kg = num(pick(ex, ['weight']));
-        if (kg > 0) setWeight(formatPlain(Math.round((kg / 1000) * 100) / 100));
+      if (delLoc) {
+        locs.delivery = delLoc;
+        proposed.delivery = locVal(delLoc, r.spokenPlaces.delivery);
       }
-      if (pick(ex, ['vehicle_type'])) {
-        const spoken = str(pick(ex, ['vehicle_type']));
-        const resolved = resolveVehicleTypeName(spoken);
-        // Route through the dropdown's own handler so a resolved type gets
-        // its rate exactly like a manual selection would — same precedence
-        // (vehicle type's own rate, else the company default). An
-        // unresolved type is left as-is: shown so the user can correct it,
-        // rate untouched.
-        if (resolved) handleVehicleTypeSelect(resolved);
-        else setVehicleType(spoken);
+      if (ex.weightTons != null)
+        proposed.weight = { value: plainNumber(ex.weightTons), display: tonsLabel(ex.weightTons) };
+      if (ex.cargo) proposed.cargo = { value: ex.cargo, display: ex.cargo };
+      if (ex.vehicleType) {
+        const name = resolveVehicleTypeName(ex.vehicleType) ?? ex.vehicleType;
+        proposed.vehicle = { value: name, display: name };
       }
-      if (pick(ex, ['pickup_date'])) setPickupDate(str(pick(ex, ['pickup_date'])));
-      if (pick(ex, ['delivery_date'])) {
-        deliveryTouchedRef.current = true;
-        setDeliveryDate(str(pick(ex, ['delivery_date'])));
+      if (ex.customerId)
+        proposed.client = {
+          value: ex.customerId,
+          display:
+            customerOptions.find((o) => o.value === ex.customerId)?.label ?? ex.customerName ?? '',
+        };
+      if (ex.pickupDate) proposed.pickupDate = { value: ex.pickupDate, display: shortDate(ex.pickupDate, lang) };
+      if (ex.deliveryDate)
+        proposed.deliveryDate = { value: ex.deliveryDate, display: shortDate(ex.deliveryDate, lang) };
+      if (ex.validUntil) proposed.validUntil = { value: ex.validUntil, display: shortDate(ex.validUntil, lang) };
+      if (ex.tripType)
+        proposed.tripType = {
+          value: ex.tripType,
+          display: ex.tripType === 'ROUND_TRIP' ? t(lang, 'round_trip') : t(lang, 'one_way'),
+        };
+      // A booked return load only means something on a one-way trip.
+      if (ex.returnLoadBooked != null && (ex.tripType ?? tripType) === 'ONE_WAY')
+        proposed.returnLoad = {
+          value: ex.returnLoadBooked ? 'yes' : 'no',
+          display: ex.returnLoadBooked ? (lang === 'af' ? 'Gelaai' : 'Loaded') : lang === 'af' ? 'Leeg' : 'Empty',
+        };
+      if (ex.abnormalLoad != null)
+        proposed.abnormal = {
+          value: ex.abnormalLoad ? 'yes' : 'no',
+          display: ex.abnormalLoad ? (lang === 'af' ? 'Ja' : 'Yes') : lang === 'af' ? 'Nee' : 'No',
+        };
+
+      const plan = planFill({
+        proposed,
+        current: fillCurrent(lang),
+        aiWritten: aiWrittenRef.current,
+        defaults: {
+          pickupDate: fillDefaultsRef.current.pickupDate || undefined,
+          validUntil: fillDefaultsRef.current.validUntil,
+          // Delivery follows the driving days until someone sets it.
+          ...(deliveryTouchedRef.current ? {} : { deliveryDate }),
+          tripType: 'ONE_WAY',
+          returnLoad: 'no',
+          abnormal: 'no',
+        },
+        confidence: r.confidence,
+      });
+
+      // Stops are only ever added, never replace what the person entered.
+      const have = [pickup, delivery, pickLoc, delLoc, ...stops.map((st) => st.loc)].filter(
+        (l): l is Loc => !!l,
+      );
+      const near = (a: Loc, b: Loc) => Math.abs(a.lat - b.lat) < 0.01 && Math.abs(a.lon - b.lon) < 0.01;
+      const newStops: StopEntry[] = [];
+      for (const l of stopLocs) {
+        if (!l || have.some((h) => near(h, l))) continue;
+        have.push(l);
+        newStops.push({ id: `stop-${++stopSeq.current}`, loc: l });
       }
-      if (pick(ex, ['valid_until'])) setValidUntil(str(pick(ex, ['valid_until'])));
-      const tt = str(pick(ex, ['trip_type'])).toUpperCase();
-      if (tt === 'ONE_WAY' || tt === 'ROUND_TRIP') setTripType(tt);
-      const geocode = async (q: string, set: (l: Loc) => void) => {
-        const raw = await suggestLocations(q);
-        const first = asArray(raw)[0] as Record<string, unknown> | undefined;
-        if (first)
-          set({
-            label: str(pick(first, ['label', 'name', 'description'])),
-            lat: num(pick(first, ['lat', 'latitude'])),
-            lon: num(pick(first, ['lon', 'lng', 'longitude'])),
-            cc: str(pick(first, ['country_code'])) || undefined,
-          });
-      };
-      if (pick(ex, ['pickup_location']))
-        await geocode(str(pick(ex, ['pickup_location'])), setPickup);
-      if (pick(ex, ['delivery_location']))
-        await geocode(str(pick(ex, ['delivery_location'])), setDelivery);
+      const extraRestores: (() => void)[] = [];
+      if (newStops.length) {
+        const ids = new Set(newStops.map((st) => st.id));
+        setStops((prev) => [...prev, ...newStops]);
+        extraRestores.push(() => setStops((prev) => prev.filter((st) => !ids.has(st.id))));
+      }
+      if (ex.international != null || ex.borderPost) {
+        const prevBorder = aiBorder;
+        setAiBorder({ international: ex.international, borderPost: ex.borderPost });
+        extraRestores.push(() => setAiBorder(prevBorder));
+      }
+
+      commitFill(plan.apply, locs, extraRestores);
+      setPendingFill(plan.conflicts.length ? { plan, locs } : null);
+      setFillView({
+        applied: plan.apply,
+        stops: newStops.map((st) => st.loc!.label),
+        stopsLow: isLow('stops', r.confidence),
+        notUnderstood: r.notUnderstood,
+        vehicleHint: r.vehicleHint && !ex.vehicleType && !nextPending ? r.vehicleHint : null,
+        vehicleHintLabel: r.vehicleHintLabel,
+        driverNights: ex.driverNights ?? null,
+        fuelPrice: ex.fuelPriceOverride ?? null,
+        borderPost: ex.borderPost ?? null,
+        international: ex.international ?? null,
+        stated: plan.unchanged,
+      });
+
       nlBarRef.current?.setText('');
-      const reply = str(pick(res, ['reply']));
-      setNlReply(reply || 'Filled from your description.');
-      toast.success();
+      const reply = r.reply || t(lang, 'filled_default');
+      setNlReply(reply);
+      // Said once, for a screen reader; the bar's note is a polite live region too.
+      AccessibilityInfo.announceForAccessibility(reply);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not parse');
     } finally {
@@ -1443,22 +1810,108 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   };
 
-  // The voice sheet only records. Transcription and extraction happen here,
-  // behind the overlay, so the sheet can close the moment the user submits.
-  const onVoiceCaptured = async (uri: string) => {
+  // Replace / Keep mine on the fields the person had typed.
+  const resolvePendingFill = (choice: 'replace' | 'keep') => {
+    const p = pendingFill;
+    setPendingFill(null);
+    if (p && choice === 'replace') {
+      commitFill(p.plan.conflicts, p.locs, [], true);
+      setFillView((v) => (v ? { ...v, applied: [...v.applied, ...p.plan.conflicts] } : v));
+    }
+    setTimeout(() => nlBarRef.current?.focusA11y(), 100);
+  };
+
+  const fillChips = useMemo<FillChip[]>(
+    () =>
+      fillView
+        ? buildChips(fillView.applied, nlLang, {
+            stops: fillView.stops,
+            stopsLow: fillView.stopsLow,
+            borderPost: fillView.borderPost ?? undefined,
+            international: fillView.international ?? undefined,
+            zimbabwe: routeCrossesZimbabwe,
+            stated: fillView.stated,
+          })
+        : [],
+    [fillView, nlLang, routeCrossesZimbabwe],
+  );
+  // Fields the last Fill was unsure about: "Check this" under each.
+  const lowFields = useMemo(
+    () => new Set<FillKey>((fillView?.applied ?? []).filter((c) => c.low).map((c) => c.key)),
+    [fillView],
+  );
+
+  // Driver nights and a diesel price change the price basis: offered, never applied silently.
+  const fillSuggestions: FillSuggestion[] = [];
+  if (fillView?.driverNights && fillView.driverNights !== spokenNights) {
+    const nights = fillView.driverNights;
+    fillSuggestions.push({
+      id: 'nights',
+      label: nightsLabel(nights, nlLang),
+      onPress: () => {
+        // Nights, not an amount: the driver line becomes allowance × nights.
+        setSpokenNights(nights);
+        setFillView((v) => (v ? { ...v, driverNights: null } : v));
+      },
+    });
+  }
+  if (fillView?.fuelPrice) {
+    const price = fillView.fuelPrice;
+    fillSuggestions.push({
+      id: 'fuel',
+      label: dieselLabel(price, costs.fuelType, nlLang),
+      onPress: () => {
+        setQuoteFuel({ pricePerL: price, fuelType: costs.fuelType });
+        setFillView((v) => (v ? { ...v, fuelPrice: null } : v));
+      },
+    });
+  }
+
+  const onFillChipPress = (chip: FillChip) => {
+    const section: SectionId =
+      chip.group === 'load' || chip.group === 'truck'
+        ? 'load'
+        : chip.group === 'client'
+          ? 'client'
+          : chip.group === 'dates'
+            ? 'schedule'
+            : 'route';
+    jumpTo(section);
+    // Text fields take keyboard focus; the rest take the screen reader's.
+    const first: FillKey | undefined =
+      chip.group === 'trip' || chip.group === 'border'
+        ? 'tripType'
+        : (chip.keys[0] ?? (chip.group === 'route' ? 'pickup' : undefined));
+    setTimeout(() => {
+      if (first === 'weight') return weightInputRef.current?.focus();
+      if (first === 'cargo') return cargoInputRef.current?.focus();
+      const box = first ? fieldRefs.current[first] : null;
+      if (box) AccessibilityInfo.sendAccessibilityEvent(box, 'focus');
+    }, 350);
+  };
+
+  const onVoiceCaptured = async (uri: string, language: VoiceLangPref = 'auto') => {
     setVoiceOpen(false);
     setVoiceBusy(true);
+    AccessibilityInfo.announceForAccessibility(t(nlLang, 'reading'));
     try {
-      const res = await aiVoiceQuote({ uri, name: 'quote.m4a', type: 'audio/m4a' });
-      const text = str(pick(res, ['text', 'transcription'])).trim();
-      if (!text) {
-        toast.error("Didn't catch that. Try again");
+      const res = await aiVoiceQuote(
+        { uri, name: 'quote.m4a', type: 'audio/m4a' },
+        language === 'auto' ? undefined : language,
+      );
+      const v = readVoiceResult(res);
+      const lang = v.detectedLanguage ? uiLangOf(v.detectedLanguage) : nlLang;
+      if (!v.text) {
+        toast.error(t(lang, 'no_speech'));
         return;
       }
-      nlBarRef.current?.setText(text);
-      await submitNL(text);
+      setNlLang(lang);
+      nlBarRef.current?.setText(v.text);
+      setHeard(heardBadge(v, lang));
+      await submitNL(v.text, { detectedLanguage: v.detectedLanguage, alternateText: v.alternateText });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not transcribe audio');
+      const status = (e as { status?: number }).status;
+      toast.error(voiceErrorText(status, e instanceof Error ? e.message : '', nlLang));
     } finally {
       setVoiceBusy(false);
     }
@@ -1785,10 +2238,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       case 'use_official':
         setUseOfficialDiesel(true);
         setAiFuel(null);
+        setQuoteFuel(null);
         break;
       case 'use_own':
         setUseOfficialDiesel(false);
         setAiFuel(null);
+        setQuoteFuel(null);
         break;
       case 'use_target': {
         // The price at the company target margin, as an adjustment the person
@@ -1865,13 +2320,39 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
   // What the Price section shows: the rules' warnings once there's something
   // to price, plus the reopen notice.
+  // A diesel price given for this quote: named on the fuel line, and the usual
+  // own-vs-official check (rules.ts runs it for the company's own price only).
+  const quoteFuelOn = quoteFuelPrice != null && costs.fuelSource === 'override' && !costs.fuelFromMarketCheck;
+  const quoteFuelLabel = quoteFuelOn
+    ? `Your ${costs.fuelType.toLowerCase()} price for this quote ${formatCurrency(quoteFuelPrice, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/L`
+    : null;
+  const quoteFuelWarning = useMemo<QuoteWarning | null>(() => {
+    if (!quoteFuelOn || quoteFuelPrice == null) return null;
+    const official = costs.diesel.official_price;
+    if (!official || Math.abs(quoteFuelPrice - official) / official <= 0.03) return null;
+    const r2 = (n: number) => formatCurrency(n, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const zone = costs.fuelZone === 'COASTAL' ? 'coastal' : 'inland';
+    return {
+      code: 'diesel_quote_off',
+      severity: 'warn',
+      title: `Your ${costs.fuelType.toLowerCase()} price differs from official`,
+      detail: `Yours ${r2(quoteFuelPrice)}/L, official ${r2(official)}/L (${zone}).`,
+      impact_zar:
+        costs.fuelLitresTotal > 0
+          ? Math.round((quoteFuelPrice - official) * costs.fuelLitresTotal * 100) / 100
+          : null,
+      actions: [{ id: 'use_official', label: ACTION_LABELS.use_official ?? 'Use official price' }],
+    };
+  }, [quoteFuelOn, quoteFuelPrice, costs.diesel.official_price, costs.fuelType, costs.fuelZone, costs.fuelLitresTotal]);
+
   const visibleWarnings = useMemo<QuoteWarning[]>(() => {
     if (!ready || routeBlockedMessage || !vtypes) return [];
     // Stale diesel and a missing allowance rate sit on their own cost lines.
     const onLines = ['diesel_stale', 'driver_allowance_missing'];
     const list = routeBusy && !routeData ? [] : costs.warnings.filter((w) => !onLines.includes(w.code));
+    if (quoteFuelWarning) list.unshift(quoteFuelWarning);
     return reopenWarning ? [reopenWarning, ...list] : list;
-  }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning]);
+  }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning, quoteFuelWarning]);
   const firstBlock = visibleWarnings.find((w) => w.severity === 'block') ?? null;
 
   // ── Jump bar (Phase 2) ───────────────────────────────────────────────────
@@ -2082,6 +2563,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // the saved quote the same way (newer backends keep them).
     for (const [k, v] of Object.entries(costs.savedCostingExtras)) if (v != null && v >= 0) out[k] = v;
     if (abnormalLoad) out.abnormal_load = true;
+    if (spokenNights != null) out.driver_nights = spokenNights;
     // Saved so the send check knows which border costs aren't on file.
     if (costs.costingInputs.border_costs_unknown) out.border_costs_unknown = costs.costingInputs.border_costs_unknown;
     if (returnLoadBooked) out.include_empty_return = false;
@@ -2663,17 +3145,48 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               ref={nlBarRef}
               busy={nlBusy}
               onRecord={() => setVoiceOpen(true)}
-              onSubmit={submitNL}
+              onSubmit={(text) => {
+                setHeard(null);
+                void submitNL(text);
+              }}
               note={nlReply || undefined}
+              heard={heard}
+              lang={nlLang}
               onTyped={() => {
                 if (nlReply) setNlReply('');
+                if (heard) setHeard(null);
               }}
-            />
+            >
+              <FillSummary
+                lang={nlLang}
+                chips={fillChips}
+                onChipPress={onFillChipPress}
+                didntCatch={didntCatchLine(fillView?.notUnderstood ?? [], nlLang)}
+                vehicleHint={
+                  fillView?.vehicleHint && !vehicleType ? vehicleHintLabel(fillView.vehicleHint, nlLang, fillView.vehicleHintLabel) : null
+                }
+                onVehicleHint={() => {
+                  jumpTo('load');
+                  setTruckPickerReq((n) => n + 1);
+                }}
+                suggestions={fillSuggestions}
+                conflict={pendingFill ? conflictSummary(pendingFill.plan.conflicts, nlLang) : null}
+                onReplace={() => resolvePendingFill('replace')}
+                onKeep={() => resolvePendingFill('keep')}
+                canUndo={canUndo}
+                onUndo={undoFill}
+              />
+            </NaturalLanguageBar>
 
             {/* Five visible groupings (Phase 2) — still one continuous scroll, no
             accordion, no wizard. QuoteJumpBar above scrolls to each; the
             fields themselves keep the exact props/handlers they had before. */}
             <QuoteSection id="client" label="" onLayout={registerSectionY}>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.client = r;
+                }}
+              >
               <SelectField
                 label="Client"
                 icon="user"
@@ -2683,9 +3196,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onSelect={setCustomerId}
                 error={showIssue('client', false)}
               />
+              {lowFields.has('client') && <CheckHint lang={nlLang} />}
+              </View>
             </QuoteSection>
 
             <QuoteSection id="route" label="Route" onLayout={registerSectionY}>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.pickup = r;
+                }}
+              >
               <LocationField
                 label="Collection"
                 value={pickup}
@@ -2694,6 +3214,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onPickOnMap={() => beginPick('pickup')}
                 error={showIssue('pickup', false)}
               />
+              {lowFields.has('pickup') && <CheckHint lang={nlLang} />}
+              </View>
 
               {/* Stops between Collection and Delivery, in visit order — mirrors the
               physical route rather than sitting off to the side of it. */}
@@ -2719,6 +3241,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 />
               )}
 
+              <View
+                ref={(r) => {
+                  fieldRefs.current.delivery = r;
+                }}
+              >
               <LocationField
                 label="Delivery"
                 value={delivery}
@@ -2727,6 +3254,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onPickOnMap={() => beginPick('dropoff')}
                 error={showIssue('dropoff', false)}
               />
+              {lowFields.has('delivery') && <CheckHint lang={nlLang} />}
+              </View>
 
               {/* Early heads-up the moment a picked location is outside SA, before the
               rest of the form is filled in. The real enforcement happens once
@@ -2735,7 +3264,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 <Banner tone="warning" message="Outside SA. Cross-border is off in Settings." />
               )}
 
-              <View>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.tripType = r;
+                }}
+              >
                 <Label className="mb-2 text-muted">Trip</Label>
                 <SegmentedControl
                   options={[
@@ -2830,6 +3363,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
 
             <QuoteSection id="load" label="Load" onLayout={registerSectionY}>
               <TextField
+                ref={weightInputRef}
                 label="Weight (t)"
                 required
                 placeholder="e.g. 20"
@@ -2840,8 +3374,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onBlur={() => setWeightTouched(true)}
                 bottomSheet
               />
+              {lowFields.has('weight') && <CheckHint lang={nlLang} />}
               {/* Every quote is priced on a real truck (§3): the suggested one
                   for the load until the person picks another. */}
+              <View
+                ref={(r) => {
+                  fieldRefs.current.vehicle = r;
+                }}
+              >
               <SelectField
                 label={!vehicleType && suggestedTruck ? 'Truck · suggested' : 'Truck'}
                 icon="truck"
@@ -2849,17 +3389,27 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 options={vtypeOptions}
                 value={pricedTruckName}
                 onSelect={handleVehicleTypeSelect}
+                openRequest={truckPickerReq}
               />
+              {lowFields.has('vehicle') && <CheckHint lang={nlLang} />}
+              </View>
               <TextField
+                ref={cargoInputRef}
                 label="Cargo"
                 placeholder="e.g. Steel coils"
                 value={cargo}
                 onChangeText={setCargo}
                 bottomSheet
               />
+              {lowFields.has('cargo') && <CheckHint lang={nlLang} />}
             </QuoteSection>
 
             <QuoteSection id="schedule" label="Schedule" onLayout={registerSectionY}>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.pickupDate = r;
+                }}
+              >
               <DateField
                 label="Pickup date"
                 required
@@ -2868,6 +3418,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 minimumDate={startOfToday()}
                 error={showIssue('pickupDate', false)}
               />
+              {lowFields.has('pickupDate') && <CheckHint lang={nlLang} />}
+              </View>
+              <View
+                ref={(r) => {
+                  fieldRefs.current.deliveryDate = r;
+                }}
+              >
               <DateField
                 label="Delivery date"
                 required
@@ -2879,6 +3436,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
                 error={showIssue('deliveryDate', false)}
               />
+              {lowFields.has('deliveryDate') && <CheckHint lang={nlLang} />}
+              </View>
               <DateField
                 label="Valid until"
                 value={validUntil}
@@ -2922,9 +3481,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       fuelNote={
                         costs.warnings.some((w) => w.code === 'diesel_stale')
                           ? `Price from ${saShortDate(costs.diesel.official_effective_from) ?? 'last period'}`
+                          : quoteFuelLabel
+                      }
+                      onFuelRetry={costs.warnings.some((w) => w.code === 'diesel_stale') ? retryFuel : undefined}
+                      driverNote={
+                        spokenNights != null && !driverEdited
+                          ? `${spokenNights} night${spokenNights === 1 ? '' : 's'}${
+                              costs.allowancePerNight
+                                ? ` × ${formatCurrency(costs.allowancePerNight, { maximumFractionDigits: 0 })}`
+                                : ''
+                            }`
                           : null
                       }
-                      onFuelRetry={retryFuel}
+                      borderHint={
+                        aiBorder?.borderPost ? t(nlLang, 'via', { post: borderPostShort(aiBorder.borderPost) }) : null
+                      }
                       onSettingsPress={() => navigation.navigate('Settings', { section: 'company' })}
                     />
                   )}
@@ -3056,7 +3627,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           {/* Stays open through the AI step, so the user sees "Building your
           quote" rather than being dropped back on a form that's mid-change. */}
           {voiceOpen && (
-            <VoiceQuoteSheet onCaptured={onVoiceCaptured} onClose={() => setVoiceOpen(false)} />
+            <VoiceQuoteSheet
+              onCaptured={(uri, language) => void onVoiceCaptured(uri, language)}
+              onClose={() => setVoiceOpen(false)}
+              lang={nlLang}
+            />
           )}
 
           {/* Both entry points get this — the voice sheet and the typed

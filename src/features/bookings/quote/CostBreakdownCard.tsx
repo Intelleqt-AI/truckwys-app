@@ -31,6 +31,7 @@ function CostBreakdownCardImpl({
   onCostPress,
   onAdjustmentPress,
   fuelNote,
+  borderHint,
   onFuelRetry,
   onSettingsPress,
 }: {
@@ -47,6 +48,8 @@ function CostBreakdownCardImpl({
   onAdjustmentPress: () => void;
   /** The fuel line's warning, e.g. "Price from 2 Sep". */
   fuelNote?: string | null;
+  /** "Via Beitbridge": the border post the person described. */
+  borderHint?: string | null;
   onFuelRetry?: (() => void) | null;
   /** Opens Settings (the target margin). */
   onSettingsPress?: () => void;
@@ -109,6 +112,8 @@ function CostBreakdownCardImpl({
               value={costs.borderMissing ? '—' : randWhole(costs.crossBorderCost)}
               warn={costs.borderMissing}
               onPress={onCrossBorderPress}
+              note={borderHint ?? null}
+              noteTone="muted"
             />
           )}
           <TotalRow label="Cost floor" value={costs.floor === null ? '—' : randWhole(costs.floor)} warn={costs.floor === null} onPress={onCostPress} />

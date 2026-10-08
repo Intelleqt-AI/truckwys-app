@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Modal, TouchableOpacity, Platform } from 'react-native';
+import { View, Modal, TouchableOpacity, Platform, AccessibilityInfo } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -11,6 +12,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Txt, Mono, Button, Icon } from '@/components/ui';
 import { toast } from '@/lib/toast';
 import { useTheme } from '@/theme/ThemeProvider';
+import {
+  MAX_RECORD_MS,
+  VOICE_LANG_KEY,
+  asLangPref,
+  langPrefLabel,
+  listeningLine,
+  nextLangPref,
+  remainingLabel,
+  t,
+  type UiLang,
+  type VoiceLangPref,
+} from './quote/nlFill';
 
 // Voice capture, and nothing else: record, Submit, gone.
 //
@@ -41,6 +54,24 @@ function Bar({ heights, index }: { heights: SharedValue<number[]>; index: number
   );
 }
 
+/** Reduce Motion: one dot whose shade follows the level, nothing moves. */
+function LevelDot({ level }: { level: number }) {
+  const { colors } = useTheme();
+  return (
+    <View className="items-center justify-center" style={{ height: 64 }}>
+      <View
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 14,
+          backgroundColor: colors.fg,
+          opacity: 0.25 + 0.75 * level,
+        }}
+      />
+    </View>
+  );
+}
+
 /** Scrolling loudness trace. Amplitude, not a spectrum — one level per poll. */
 function LiveWaveform({ heights }: { heights: SharedValue<number[]> }) {
   return (
@@ -60,10 +91,16 @@ const mmss = (ms: number) => {
 export function VoiceQuoteSheet({
   onCaptured,
   onClose,
+  lang = 'en',
 }: {
-  /** Fires with the recorded file's URI. The caller owns transcription. */
-  onCaptured: (uri: string) => void;
+  /**
+   * Fires with the recorded file's URI and the language control's setting
+   * (send `language` only when it isn't Auto). The caller owns transcription.
+   */
+  onCaptured: (uri: string, language: VoiceLangPref) => void;
   onClose: () => void;
+  /** UI copy language: Afrikaans after an Afrikaans reply. */
+  lang?: UiLang;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -73,6 +110,37 @@ export function VoiceQuoteSheet({
   const [elapsed, setElapsed] = useState(0);
   const [stopping, setStopping] = useState(false);
   const startedAt = useRef(Date.now());
+  const [level, setLevel] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  // Auto / English / Afrikaans, remembered on this device.
+  const [pref, setPref] = useState<VoiceLangPref>('auto');
+  const prefRef = useRef<VoiceLangPref>('auto');
+  prefRef.current = pref;
+
+  useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((v) => alive && setReduceMotion(v))
+      .catch(() => {});
+    (async () => {
+      try {
+        const saved = await AsyncStorage.getItem(VOICE_LANG_KEY);
+        if (alive) setPref(asLangPref(saved));
+      } catch {
+        /* no stored choice: Auto */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const cyclePref = () => {
+    const next = nextLangPref(pref);
+    setPref(next);
+    AccessibilityInfo.announceForAccessibility(listeningLine(next, lang));
+    AsyncStorage.setItem(VOICE_LANG_KEY, next).catch(() => {});
+  };
 
   const heights = useSharedValue<number[]>(new Array(BAR_COUNT).fill(0));
 
@@ -88,7 +156,7 @@ export function VoiceQuoteSheet({
       try {
         const perm = await AudioModule.requestRecordingPermissionsAsync();
         if (!perm.granted) {
-          toast.error('Microphone permission is needed to record');
+          toast.error(t(lang, 'mic_denied'));
           onClose();
           return;
         }
@@ -98,6 +166,9 @@ export function VoiceQuoteSheet({
         recorder.record();
         startedAt.current = Date.now();
         haptic(Haptics.ImpactFeedbackStyle.Medium);
+        AccessibilityInfo.announceForAccessibility(
+          `${t(lang, 'listening')} ${listeningLine(prefRef.current, lang)}`,
+        );
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Could not start recording');
         onClose();
@@ -121,22 +192,29 @@ export function VoiceQuoteSheet({
       // and should hold its value — the motion is the shift, not a morph. (And
       // withTiming only animates numbers, not arrays.)
       heights.value = [...heights.value.slice(1), level];
-      setElapsed(Date.now() - startedAt.current);
+      setLevel(level);
+      const ms = Date.now() - startedAt.current;
+      setElapsed(ms);
+      // One minute is the limit: stop and send what was said.
+      if (ms >= MAX_RECORD_MS) void submit(true);
     }, METER_MS);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stopping, recorder]);
 
-  const submit = async () => {
-    if (stopping) return;
+  const stoppingRef = useRef(false);
+  const submit = async (atLimit = false) => {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
     setStopping(true);
+    if (atLimit) toast.info(t(lang, 'too_long'));
     haptic(Haptics.ImpactFeedbackStyle.Light);
     try {
       await recorder.stop();
       const uri = recorder.uri;
       if (!uri) throw new Error('No audio captured');
       // Hand off and get out of the way — the form takes it from here.
-      onCaptured(uri);
+      onCaptured(uri, prefRef.current);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not finish recording');
       onClose();
@@ -144,6 +222,7 @@ export function VoiceQuoteSheet({
   };
 
   const cancel = async () => {
+    stoppingRef.current = true;
     setStopping(true);
     try {
       // Discard the audio — a cancelled recording is never uploaded.
@@ -154,38 +233,67 @@ export function VoiceQuoteSheet({
     onClose();
   };
 
+  const remaining = remainingLabel(elapsed, lang);
+
   return (
     <Modal visible transparent={false} animationType="slide" onRequestClose={cancel}>
       <View
         className="flex-1 bg-bg-deep px-6"
         style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}
       >
-        <View className="flex-row justify-end">
+        <View className="flex-row items-center justify-between">
+          {/* Auto → English → Afrikaans. Auto lets the backend choose. */}
+          <TouchableOpacity
+            onPress={cyclePref}
+            disabled={stopping}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={t(lang, 'voice_language', { lang: langPrefLabel(pref, lang) })}
+            className="min-h-[44px] min-w-[64px] items-center justify-center rounded-control border border-line-active px-3"
+          >
+            <Txt className="text-callout font-medium text-fg">{langPrefLabel(pref, lang)}</Txt>
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={cancel}
             activeOpacity={0.6}
-            hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Cancel"
+            accessibilityLabel={t(lang, 'cancel')}
+            className="h-11 w-11 items-center justify-center"
           >
             <Icon name="x" size={26} color={colors.muted} />
           </TouchableOpacity>
         </View>
 
         <View className="flex-1 items-center justify-center">
-          <LiveWaveform heights={heights} />
-          <Mono className="mt-6 text-callout text-muted" style={{ fontVariant: ['tabular-nums'] }}>
-            {mmss(elapsed)}
-          </Mono>
+          {reduceMotion ? <LevelDot level={level} /> : <LiveWaveform heights={heights} />}
+          <View className="mt-6 flex-row items-center gap-2">
+            <Mono className="text-callout text-muted" style={{ fontVariant: ['tabular-nums'] }}>
+              {mmss(elapsed)}
+            </Mono>
+            {remaining ? (
+              <Mono className="text-callout text-fg" style={{ fontVariant: ['tabular-nums'] }}>
+                · {remaining}
+              </Mono>
+            ) : null}
+          </View>
 
-          <Txt className="mt-8 text-heading font-semibold text-fg">Listening</Txt>
-          <Txt className="mt-2 text-center text-sub text-muted">
-            Describe the job: route, load, when
-          </Txt>
+          <View accessibilityLiveRegion="polite" className="items-center">
+            <Txt className="mt-8 text-heading font-semibold text-fg">{t(lang, 'listening')}</Txt>
+            <Txt className="mt-1 text-center text-callout text-fg">{listeningLine(pref, lang)}</Txt>
+          </View>
+          <Txt className="mt-2 text-center text-sub text-muted">{t(lang, 'hint')}</Txt>
         </View>
 
         {/* Says what it does: ends the recording and sends it. */}
-        <Button label="Submit" icon="check" loading={stopping} onPress={submit} fullWidth />
+        <Button
+          label={lang === 'af' ? 'Klaar' : 'Submit'}
+          icon="check"
+          loading={stopping}
+          onPress={() => void submit()}
+          fullWidth
+          accessibilityLabel={t(lang, 'stop')}
+          selected={!stopping}
+        />
       </View>
     </Modal>
   );

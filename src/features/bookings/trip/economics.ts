@@ -174,6 +174,8 @@ export interface CostGroup {
   used: number | null;
   /** `actual` / `estimate` / `none` / `recorded_in_operating_estimate`. */
   basis: string;
+  /** fuel group only: the truck fuel figure the estimate was costed on. */
+  ratedBurn?: { value: number | null; source: string | null } | null;
 }
 
 export interface Leg {
@@ -275,6 +277,10 @@ function parseLeg(raw: unknown): Leg {
         actual: numOrNull(g.actual),
         used: numOrNull(g.used),
         basis: text(g.basis),
+        ratedBurn:
+          g.rated_burn && typeof g.rated_burn === 'object'
+            ? { value: numOrNull(obj(g.rated_burn).value), source: text(obj(g.rated_burn).source) || null }
+            : null,
       })),
     costComplete: l.cost_complete === true,
     costsClosed: l.costs_closed === true,
@@ -371,6 +377,24 @@ export function costGroupsLine(groups: CostGroup[]): string | null {
     .join(' · ');
 }
 
+/** "40,2 L/100 km" (one decimal, comma; same as quote/fleetFuel.ts l100). */
+function l100(v: number | null): string | null {
+  if (v == null || !Number.isFinite(v)) return null;
+  return `${(Math.round(v * 10 + 1e-9) / 10).toFixed(1).replace('.', ',')} L/100 km`;
+}
+
+/** While fuel is still an estimate: the figure it used (= web fuelBurnNote). */
+export function fuelBurnNote(groups: CostGroup[]): string | null {
+  const f = groups.find((x) => x.group === 'fuel');
+  const rb = f?.ratedBurn;
+  if (!f || f.basis !== 'estimate' || !rb) return null;
+  const v = l100(rb.value);
+  if (!v) return null;
+  if (rb.source === 'measured') return `Fuel estimated on ${v} measured by Cartrack`;
+  if (rb.source === 'standard') return `Fuel estimated on the standard ${v}`;
+  return `Fuel estimated on your figure, ${v}`;
+}
+
 /** Maintenance / overhead slips already inside the running-cost estimate. */
 export function recordedNote(groups: CostGroup[]): string | null {
   const g = groups.find((x) => x.basis === 'recorded_in_operating_estimate');
@@ -414,6 +438,8 @@ export interface LegView {
   /** `Actual: fuel · Estimated: running cost`. */
   groups: string | null;
   recorded: string | null;
+  /** "Fuel estimated on 40,2 L/100 km measured by Cartrack". */
+  fuelBurn: string | null;
   costsClosed: boolean;
   /** Something actual is recorded, so "Close costs" makes sense. */
   canClose: boolean;
@@ -453,6 +479,7 @@ function legView(l: Leg, i: number): LegView {
     negative: (l.margin ?? 0) < 0,
     groups: costGroupsLine(l.costGroups),
     recorded: recordedNote(l.costGroups),
+    fuelBurn: fuelBurnNote(l.costGroups),
     costsClosed: l.costsClosed,
     canClose: !l.costsClosed && (l.actualCost ?? 0) > 0,
     basis,

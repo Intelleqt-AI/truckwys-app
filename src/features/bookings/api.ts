@@ -1,3 +1,4 @@
+import type { FuelUseInUse } from './quote/fleetFuel';
 import { useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import type { AllPages } from '@/lib/api/fetchAllPages';
@@ -237,6 +238,9 @@ export interface VehicleType {
       instead of "Delete" for these. Absent/undefined on a pre-shared-catalogue
       backend, same reasoning as `company` above. */
   overrides_shared_default?: boolean;
+  /** Read-only: the litres per 100 km quotes use now (measured by Cartrack
+      when there is enough data, else the typed figure). */
+  fuel_use_in_use?: FuelUseInUse | null;
 }
 
 // The backend serializes every decimal field as a JSON string ("38.00", not
@@ -246,6 +250,20 @@ export interface VehicleType {
 // ['vehicle-types'] query key, so all three must normalize identically —
 // whichever queryFn actually runs wins the shared cache entry for the other
 // two. Import this into both rather than re-parsing locally.
+function normalizeFuelUse(v: unknown): FuelUseInUse | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const n = (x: unknown) => (x == null || x === '' || !Number.isFinite(Number(x)) ? null : Number(x));
+  return {
+    value: n(o.value),
+    source: str(o.source, 'missing'),
+    label: typeof o.label === 'string' ? o.label : null,
+    configured: n(o.configured),
+    burn_mode: typeof o.burn_mode === 'string' ? o.burn_mode : undefined,
+    measured: o.measured && typeof o.measured === 'object' ? (o.measured as FuelUseInUse['measured']) : null,
+  };
+}
+
 export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
   return {
     id: (pick(r, ['id', 'pk']) as string | number) ?? '',
@@ -272,6 +290,7 @@ export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
     // distinction survives.
     company: 'company' in r ? (r.company as number | null) : undefined,
     overrides_shared_default: r.overrides_shared_default === true,
+    fuel_use_in_use: normalizeFuelUse(r.fuel_use_in_use),
   };
 }
 

@@ -132,6 +132,11 @@ export function TripMarginCard({
               <Txt className="text-caption text-muted">{leg.recorded}</Txt>
             </View>
           ) : null}
+          {leg.fuelBurn ? (
+            <View className="px-3.5 pb-2">
+              <Txt className="text-caption text-muted">{leg.fuelBurn}</Txt>
+            </View>
+          ) : null}
           <DetailRow
             label="Margin"
             hint={[leg.basis, leg.quoted].filter(Boolean).join(' · ') || undefined}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { postData } from '@/lib/api/client';
 import type { CostingInputs, QuoteWarning } from './rules';
+import type { RatedBurn } from './fleetFuel';
 
 // POST quotes/cost-breakdown/ (QUOTE-RULES §10): the backend's own costing for
 // the builder's inputs. The builder prices locally (instantly) with the same
@@ -22,6 +23,8 @@ export interface ServerCosting {
   suggestedVehicleTypeId: number | string | null;
   /** The payload's _suggest_key this answer was for. */
   forKey: string | null;
+  /** The truck fuel figure priced on (resolution.rated_burn): measured by Cartrack, your figure or the standard estimate. */
+  ratedBurn: RatedBurn | null;
 }
 
 /**
@@ -50,6 +53,9 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
             floor: typeof res.floor === 'number' ? res.floor : null,
             warnings: Array.isArray(res.warnings) ? (res.warnings as QuoteWarning[]) : [],
             forKey: typeof forKey === 'string' ? forKey : null,
+            ratedBurn:
+              ((res.resolution as Record<string, unknown> | undefined)?.rated_burn as RatedBurn | null | undefined) ??
+              null,
             suggestedVehicleTypeId:
               ((res.resolution as Record<string, unknown> | undefined)?.suggested_vehicle_type_id as
                 | number

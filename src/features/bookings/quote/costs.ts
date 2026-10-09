@@ -1,177 +1,172 @@
 import { num, str, pick, asArray } from '@/lib/api/list';
 import type { VehicleType } from '../api';
-import { FUEL_FALLBACK, FUEL_PRICE_FIELD_BY_TYPE, capacityTons } from './types';
-import { resolveDieselPrice, dieselBasisNote, liveDieselHint } from '@/lib/dieselPrice';
+import {
+  computeCosting,
+  fuelFamily,
+  fuelInputFromApi,
+  resolveDieselInput,
+  operatingCostPerKm,
+  phoneWarning,
+  withServerInputs,
+  borderCostsUnknownFromRoute,
+  type Costing,
+  type CostingInputs,
+  type CostingLine,
+  type DieselResolution,
+  type DieselSource,
+  type QuoteWarning,
+} from './rules';
 
-/**
- * With no vehicle type picked there is no reference tonnage to scale fuel
- * from, and a flat figure would price a 5t load and a 30t load identically.
- * So infer the truck the load will run on from the load itself: of the types
- * that can legally carry this weight, the one that burns LEAST at it
- * (mirrors web's QuoteBuilder.tsx inferredVT).
- *
- * Picking the smallest type that fits (the obvious rule) is wrong: base
- * consumption isn't ordered by capacity — a 17t reefer can burn more than a
- * 20t flatbed (it runs a fridge), so a lighter load would come out pricier
- * than a heavier one. Choosing the minimum burn can't reverse: as weight
- * rises each candidate burns more and the candidate set only shrinks, so the
- * result is non-decreasing by construction.
- *
- * Nothing big enough (an abnormal load) extrapolates the largest type rather
- * than dropping to the flat rate, so heavier still means dearer.
- *
- * Exported standalone (rather than inlined in computeCosts) so it's
- * unit-testable on its own.
- */
-export function inferFuelBasis(types: VehicleType[], tonnes: number): VehicleType | null {
-  if (!(tonnes > 0)) return null;
-  // Matches web's allVehicleTypes: de-duplicated by name, first occurrence
-  // wins. The backend's visible_vehicle_types_queryset already guarantees one
-  // row per name per company, so this is currently a no-op — kept anyway for
-  // the same reason as the fuel-price/capacity choices above: parity with web
-  // shouldn't depend on a backend guarantee holding forever.
-  const seen = new Set<string>();
-  const deduped = types.filter((v) => (seen.has(v.name) ? false : (seen.add(v.name), true)));
-  const rated = deduped
-    .map((vt) => ({ vt, cap: capacityTons(vt.capacity) }))
-    .filter((x): x is { vt: VehicleType; cap: number } => x.cap != null);
-  if (!rated.length) return null;
-  const burn = (x: { vt: VehicleType; cap: number }) =>
-    (Number(x.vt.fuel_consumption_l_per_100km) || 32) *
-    Math.pow(1 + (Number(x.vt.fuel_consumption_sensitivity_pct) || 2) / 100, tonnes - x.cap);
-  const canCarry = rated.filter((x) => x.cap >= tonnes);
-  if (!canCarry.length) {
-    // Biggest truck, extrapolated up rather than falling back to the flat rate.
-    return rated.sort((a, b) => b.cap - a.cap)[0]!.vt;
-  }
-  return canCarry.sort((a, b) => burn(a) - burn(b))[0]!.vt;
-}
-
-// ── Cost breakdown ───────────────────────────────────────────────────────
-// Hoisted out of CreateQuoteScreen.tsx's `costs` useMemo (Phase 0 extraction)
-// into a pure function — same computation, same comments, no behaviour
-// change. The screen still wraps this in useMemo with the same dep list.
+// ── Cost breakdown for the quote builder ────────────────────────────────────
+// A thin adapter between the screen's state and the rules in ./rules.ts
+// (QUOTE-RULES.md, a port of the backend's quote_costing.compute()).
+//
+// The PRICE is what the client is charged: haulage (rate/km × loaded km) plus
+// the pass-through lines (fuel, tolls, border, driver nights) and any price
+// adjustment. The COST FLOOR is the rules' sum of cost lines (fuel, operating
+// cost, tolls, driver nights, border and, for a long one-way trip, the empty
+// return). Margin = (price − floor) / price.
 
 export interface ComputeCostsInput {
   currentRoute: Record<string, unknown>;
   routeData: Record<string, unknown> | null;
   tripType: 'ONE_WAY' | 'ROUND_TRIP';
   vtypes: VehicleType[] | undefined;
+  /** The truck the quote is priced on (chosen, else the suggested one). */
   vehicleType: string;
   company: Record<string, unknown> | undefined;
   weightKg: number;
   baseRateNum: number;
+  /**
+   * Price at the rules' default (ceil of max(rate price, target price)) until
+   * the person sets a rate, a price or a market figure; the base rate is then
+   * whatever the default leaves after the costs passed on.
+   */
+  useDefaultPrice?: boolean;
   tollEdited: boolean;
   tollOverrideNum: number;
-  driverNum: number;
+  /** User-typed driver cost; null = the suggested nights × allowance. */
+  driverOverride: number | null;
   serviceCharge: number;
-  /** Response of GET fuel-prices/current/, for pricing diesel off the live zone price. */
+  /** Response of GET fuel-prices/current/. */
   liveFuel?: Record<string, unknown> | null;
-  /**
-   * A market fuel price applied from the price check (R/L). It replaces the
-   * company/live price for this fuel type, and the fuel line is then
-   * litres × price rounded once, which is how the backend rounds it.
-   */
+  /** A per-quote fuel price applied from the market price check. */
   aiFuelPrice?: number | null;
-  /**
-   * A market toll total applied from the price check, per ONE-WAY leg. Only
-   * passed while it still belongs to this route; ignored once the person types
-   * their own toll figure.
-   */
+  /** "Use official price" on this quote while the company is on its own price. */
+  useOfficialDiesel?: boolean;
+  /** A market toll total applied from the price check, per one-way leg. */
   aiTollOneWay?: number | null;
+  returnLoadBooked: boolean;
+  /** The trip crosses a border: with no border cost the floor is incomplete. */
+  international?: boolean;
+  /** Border, permit and non-SA toll costs typed for all legs. */
+  borderOverride?: number | null;
+  tollsConfirmedNone: boolean;
+  distanceConfirmed: boolean;
+  /**
+   * The backend's resolved inputs from POST quotes/cost-breakdown/ (newer
+   * backends): the approved driver allowance, the fleet's operating cost for
+   * this truck class, the diesel resolution and the company settings. Null on
+   * an older backend: everything is resolved here instead.
+   */
+  serverInputs?: CostingInputs | null;
+  now?: Date;
 }
 
 export interface CostBreakdown {
+  /** One-way km. */
   distance: number;
   legs: number;
+  /** Loaded km charged (one way × legs). */
   chargeDistance: number;
+  duration: number;
+  distanceEstimated: boolean;
+
+  truckName: string | null;
+  truckId: number | string | null;
+  /** Loaded burn for this load, L/100km (unrounded); 0 when unknown. */
   consumption: number;
+  /** Unrounded litres on the loaded legs. */
+  fuelLitres: number;
+  /** Unrounded litres incl. an empty return. */
+  fuelLitresTotal: number;
+  /** Whole litres on the loaded legs, display and analysis only. */
+  fuelUsage: number;
+  /** R/L this quote is priced on; 0 when unknown. */
+  fuelPrice: number;
+  fuelSource: DieselSource;
   fuelCost: number;
+  fuelKnown: boolean;
+  fuelType: string;
+  fuelZone: 'INLAND' | 'COASTAL' | null;
+  diesel: DieselResolution;
+  fuelFromMarketCheck: boolean;
+  /** The price without a market override (own / official). */
+  fuelCompanyPrice: number;
+
   tollCost: number;
-  /** What the toll would be from the route, ignoring any override — kept
-      alongside tollCost (which does apply the override) so the UI can offer
-      a way back to it (Phase 5). */
+  tollKnown: boolean;
+  /** The route's own toll figure for the loaded legs (0 when unknown). */
   tollCalculated: number;
   tollBreakdownOneWay: number;
   tollBreakdown: Record<string, unknown>[];
-  /** The selected route reported an itemised toll of exactly zero — it
-      genuinely has no plazas, as opposed to no route data having arrived
-      yet (in which case there's nothing to report either way). False whenever
-      the backend says it could not calculate tolls at all. */
   tollFree: boolean;
-  /** The backend could not calculate tolls (routing down, no plaza data, no
-      known toll corridor...). toll_cost_zar is then 0 but does NOT mean
-      toll-free: the user has to enter tolls by hand. */
   tollsUnavailable: boolean;
-  /** The backend's own sentence for why, e.g. "Tolls are NOT included; add them
-      manually." Null when tolls are available. */
-  tollWarning: string | null;
-  /** The figure is an estimate rather than a toll-plaza geofence match. */
   tollsEstimated: boolean;
+  tollFromMarketCheck: boolean;
+
   crossBorderCost: number;
-  /** The three server bucket totals, one way — used as the breakdown modal's
-      fallback rows on a route response cached before cross_border_breakdown
-      shipped. */
   borderFees: number;
   weighbridgeFees: number;
   nonSaTolls: number;
-  /** cross_border_breakdown, one way, as the server sent it — each border
-      crossing, the amortised SA permit, each country's weighbridge and tolls.
-      Empty (not missing) when the route has no cross-border cost or predates
-      the field; the modal falls back to the three buckets above in that case. */
   crossBorderBreakdown: Record<string, unknown>[];
+
   baseCost: number;
   driver: number;
+  driverKnown: boolean;
+  /** Nights away but no allowance rate anywhere: priced at R 0, shown as unknown. */
+  driverMissing: boolean;
+  /** International trip with no border cost worked out (blocks). */
+  borderMissing: boolean;
+  /** Operating cost line flagged for a check (e.g. overlapping costs). */
+  operatingCheck: boolean;
+  /** Target-margin price with the other empty-return answer (one-way, 300 km+). */
+  altReturnTargetPrice: number | null;
+  /** The price is the rules' default price (nobody set a rate or price). */
+  priceIsDefault: boolean;
+  defaultPrice: number | null;
+  /** The base rate per km the price works out to. */
+  ratePerKmShown: number;
+  driverSuggested: number | null;
+  nights: number | null;
+  allowancePerNight: number | null;
+
+  emptyReturnEligible: boolean;
+  emptyReturnIncluded: boolean;
+  emptyReturnTotal: number | null;
+
+  /** What the client is charged, excl. VAT. */
   total: number;
+  /** Price lines without the price adjustment. */
   directCost: number;
-  marginPct: number;
-  duration: number;
-  fuelUsage: number;
-  fuelPrice: number;
-  /** Name of the vehicle type the fuel figure is actually based on — the
-      selected type, or (with none picked) the one inferFuelBasis chose from
-      the fleet. null when neither applies. */
-  fuelBasisName: string | null;
-  /** True when fuelBasisName came from inferFuelBasis rather than an actual
-      selection, so the UI can caption the fuel figure as an estimate. */
-  fuelBasisInferred: boolean;
-  /** fuelBasisVt's own configured L/100km, before the weight adjustment below
-      is applied — the "Its rated burn" row in FuelBreakdownModal. */
-  fuelBasisConsumption: number;
-  /** capacityTons(fuelBasisVt?.capacity) — 0 when the basis type (selected or
-      inferred) has no usable rated capacity, which is the ONLY thing that
-      licenses showing a weight-adjusted fuel figure (mirrors web's
-      fuelRefCapacityTons). Distinct from fuelBasisName: a type can be picked
-      or inferred yet still have nothing to scale from, in which case the
-      modal must show its "no rated capacity" copy rather than a weight-effect
-      row for an adjustment that never actually ran (consumption falls back to
-      the flat consumptionRef below in that case). */
-  fuelBasisCapacityTons: number;
-  /** fuelBasisVt's fuel_consumption_sensitivity_pct as a fraction (e.g. 0.02
-      for 2%), or the same 2% default `consumption` itself falls back to —
-      the "Weight effect" row in FuelBreakdownModal. */
-  fuelSensitivity: number;
-  /** ` · coastal` / ` · inland` when the price being charged is diesel (the
-      only fuel gazetted per zone), else ''. Computed once here rather than in
-      each display site so the fuel row and the modal can't disagree. */
-  fuelZoneNote: string;
-  /** "Live diesel: R29,56/L (effective 2 Sep)" when the fleet's own price is in
-      use and a live price exists to compare it with; else null. */
-  fuelLiveHint: string | null;
-  /** Unrounded litres behind fuelCost (the price check sends the exact figure). */
-  fuelLitres: number;
-  /** The fuel type this quote is priced in (the selected truck's, else Diesel). */
-  fuelType: string;
-  /** Diesel's pricing zone; null for every other fuel type (only diesel is split). */
-  fuelZone: 'INLAND' | 'COASTAL' | null;
-  /** A market fuel price from the price check is what is being charged. */
-  fuelFromMarketCheck: boolean;
-  /** The price this quote would use without a market figure applied (live zone
-      price, the fleet's own, or the per-type default). */
-  fuelCompanyPrice: number;
-  /** A market toll figure from the price check is what is being charged. */
-  tollFromMarketCheck: boolean;
+  /** Cost floor; null when a cost line is unknown. */
+  floor: number | null;
+  /** Whole-percent margin on the floor; null when the floor is unknown. */
+  marginPct: number | null;
+  /** floor / (1 − company target); null without a target. */
+  targetPrice: number | null;
+  costLines: CostingLine[];
+  costing: Costing;
+  costingInputs: CostingInputs;
+  warnings: QuoteWarning[];
+  /** At least one warning blocks sending. */
+  blocked: boolean;
 }
+
+const nullIfNotPositive = (v: unknown) => {
+  const n = num(v);
+  return n > 0 ? n : null;
+};
 
 export function computeCosts({
   currentRoute,
@@ -182,166 +177,220 @@ export function computeCosts({
   company,
   weightKg,
   baseRateNum,
+  useDefaultPrice,
   tollEdited,
   tollOverrideNum,
-  driverNum,
+  driverOverride,
   serviceCharge,
   liveFuel,
   aiFuelPrice,
+  useOfficialDiesel,
   aiTollOneWay,
+  returnLoadBooked,
+  international,
+  borderOverride,
+  tollsConfirmedNone,
+  distanceConfirmed,
+  serverInputs,
+  now,
 }: ComputeCostsInput): CostBreakdown {
-  const distance =
-    num(pick(currentRoute, ['distance_km'])) || num(pick(routeData ?? {}, ['distance_km']));
+  const rd = routeData ?? {};
+  const hasRoute = !!routeData;
+  const distance = num(pick(currentRoute, ['distance_km'])) || num(pick(rd, ['distance_km']));
   const legs = tripType === 'ROUND_TRIP' ? 2 : 1;
-  const chargeDistance = distance * legs;
+  const duration =
+    num(pick(currentRoute, ['duration_minutes'])) ||
+    num(pick(currentRoute, ['duration_min'])) ||
+    num(pick(rd, ['duration_minutes']));
+  const distanceEstimated = rd.distance_estimated === true || str(pick(rd, ['source'])) === 'estimated';
 
-  const selectedVt = (vtypes ?? []).find((v) => v.name === vehicleType);
-  // An explicit choice always wins; with none, infer a reference truck from
-  // the load itself (see inferFuelBasis above) rather than pricing every
-  // weight identically.
-  const inferredVt = selectedVt ? null : inferFuelBasis(vtypes ?? [], weightKg / 1000);
-  const fuelBasisVt = selectedVt ?? inferredVt;
+  const truck = (vtypes ?? []).find((v) => v.name === vehicleType) ?? null;
 
-  // A heavier load genuinely burns more fuel — consumptionRef (the basis
-  // type's configured L/100km) is scaled by how far this quote's own weight
-  // sits from the type's reference tonnage (its "capacity"), compounding at
-  // `sensitivity`%/tonne (mirrors web's QuoteBuilder.tsx). Skipped entirely
-  // (falls back to the flat rate) when there is no reference tonnage to scale
-  // from — guessing one would be worse than no adjustment at all.
-  const consumptionRef =
-    Number(fuelBasisVt?.fuel_consumption_l_per_100km) || FUEL_FALLBACK[vehicleType] || 32;
-  const refCapacityTons = capacityTons(fuelBasisVt?.capacity) ?? 0;
-  const sensitivity = (Number(fuelBasisVt?.fuel_consumption_sensitivity_pct) || 2) / 100;
-  const consumption =
-    refCapacityTons > 0
-      ? consumptionRef * Math.pow(1 + sensitivity, weightKg / 1000 - refCapacityTons)
-      : consumptionRef;
-  // Price the fuel this vehicle type actually burns, at the company's default
-  // for that fuel — it used to always use the live national DIESEL price no
-  // matter what was selected. Falls back to the diesel default when the
-  // company hasn't set a price for that fuel, then to a literal.
-  //
-  // Deliberately keyed off selectedVt, NOT fuelBasisVt — web computes
-  // consumption off fuelBasisVt (selected-or-inferred) but still prices it at
-  // whatever fuel type is actually SELECTED, so an inferred (not chosen)
-  // truck's fuel type never affects which company price applies; with no
-  // type picked this always falls through to 'Diesel'. That's an
-  // inconsistency in web's own logic (consumption and price use different
-  // bases), but bit-for-bit parity with web is the point here — web is the
-  // pricing source of truth, so this app must land on the exact same number.
-  // If this gets fixed, it must happen on web first.
-  const fuelType = str(selectedVt?.fuel_type, 'Diesel');
-  const fuelField = FUEL_PRICE_FIELD_BY_TYPE[fuelType] ?? 'fuel_price_per_litre';
-  // Diesel is priced off the live price for the company's zone, unless the fleet
-  // set its own (anything but the untouched 23.50 default): see lib/dieselPrice.
-  // Every other fuel type keeps the company's per-type default.
-  const isDieselPricing = fuelField === 'fuel_price_per_litre';
-  const diesel = resolveDieselPrice({ company, live: liveFuel });
-  const companyFuelPrice =
-    (isDieselPricing ? diesel.price : null) ||
-    num(pick(company ?? {}, [fuelField])) ||
-    num(pick(company ?? {}, ['fuel_price_per_litre'])) ||
-    21.7;
+  // Fuel price (§1), by the truck's fuel: diesel and petrol (petrol and
+  // hybrid trucks) are Official / My own price by one rule; electric is the
+  // company's own price per kWh. Missing blocks (never a literal fallback).
+  // On an older backend petrol is the company's own price only.
+  const fuelType = str(truck?.fuel_type, 'Diesel');
+  const family = fuelFamily(fuelType);
   const fuelFromMarketCheck = aiFuelPrice != null && aiFuelPrice > 0;
-  const fuelPrice = fuelFromMarketCheck ? (aiFuelPrice as number) : companyFuelPrice;
-  const fuelLitres = (chargeDistance * consumption) / 100;
-  const fuelCost = fuelFromMarketCheck
-    ? Math.round(fuelLitres * fuelPrice)
-    : Math.round((chargeDistance * consumption * fuelPrice) / 100);
-  // Diesel is gazetted at two prices, coastal and inland, ~R0.87/L apart —
-  // say which one this figure is so it can be checked against a real
-  // fuel-card statement. Only diesel has that split, so the note is omitted
-  // for every other fuel type.
-  const fuelZoneNote = fuelFromMarketCheck
-    ? ' · official price'
-    : isDieselPricing
-      ? dieselBasisNote(diesel)
-      : '';
-  const fuelLiveHint = isDieselPricing && !fuelFromMarketCheck ? liveDieselHint(diesel) : null;
+  const dieselInput: CostingInputs['diesel'] = fuelInputFromApi(company, liveFuel, fuelType, {
+    now,
+    useOfficial: !!useOfficialDiesel,
+    overridePrice: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
+  });
+  // The company's price for this fuel without this quote's choices.
+  const companyFuel = resolveDieselInput(fuelInputFromApi(company, liveFuel, fuelType, { now }));
 
-  // A route that matched no plazas reports toll_cost_zar: 0 and means it —
-  // the backend has deliberately no "found 0 → estimate" fallback (e.g.
-  // Pretoria↔Johannesburg = R0). So take the first *defined* value rather
-  // than the first truthy one; `||` used to read an authoritative zero as
-  // "missing" and invent a distance × rate toll that doesn't exist.
-  //
-  // When the route has no toll_cost_zar field at all (genuinely missing, not
-  // an authoritative zero), estimate it the same way web does: distance ×
-  // the company's default toll rate per km, falling back to a literal.
-  //
-  // Both toll_cost_zar and toll_breakdown[].tariff are VAT-exclusive (backend
-  // docs/backend-changes/2026-09-toll-class-vat.md), the same basis the quote is
-  // priced on. The exception to "0 means it" is tolls_unavailable: the backend
-  // then returns 0 with a warning that tolls are NOT included, so that zero is
-  // a gap to fill by hand, never a claim that the route is toll-free.
-  const rawToll =
-    pick(currentRoute, ['toll_cost_zar']) ?? pick(routeData ?? {}, ['toll_cost_zar']);
-  const tollsUnavailable =
-    (pick(currentRoute, ['tolls_unavailable']) ?? pick(routeData ?? {}, ['tolls_unavailable'])) === true;
-  const tollWarningRaw = str(
-    pick(currentRoute, ['toll_warning']) ?? pick(routeData ?? {}, ['toll_warning']),
-  );
-  const tollWarning = tollsUnavailable
-    ? tollWarningRaw || 'Tolls could not be calculated for this route. Add them manually.'
-    : null;
+  // Tolls (§6): the route's figure per direction; a failed lookup is unknown,
+  // never R 0. A typed total wins, then a market figure from the price check.
+  // The selected route's own flags first: an alternative can fail its lookup
+  // while the best route's didn't (and vice versa).
+  const routeHasToll = 'toll_cost_zar' in currentRoute;
+  const rawToll = routeHasToll ? currentRoute.toll_cost_zar : pick(rd, ['toll_cost_zar']);
+  const flag = (k: string) => (k in currentRoute ? currentRoute[k] : rd[k]) === true;
+  const lookupFailed =
+    hasRoute && (flag('tolls_unknown') || flag('tolls_unavailable') || rawToll == null);
   const tollsEstimated =
-    (pick(currentRoute, ['tolls_estimated']) ?? pick(routeData ?? {}, ['tolls_estimated'])) === true;
-  const tollFree = rawToll != null && num(rawToll) === 0 && !tollsUnavailable;
-  const tollRate = num(pick(company ?? {}, ['default_toll_rate_per_km'])) || 0.95;
-  const routeTollOneWay = rawToll != null ? num(rawToll) : distance * tollRate;
-  // What the person typed always wins; then a market figure applied from the
-  // price check (kept to the cent, as the backend states it); then the route's.
+    (pick(currentRoute, ['tolls_estimated']) ?? pick(rd, ['tolls_estimated'])) === true;
+  const routeTollOneWay = hasRoute && !lookupFailed ? num(rawToll) : null;
   const tollFromMarketCheck = !tollEdited && aiTollOneWay != null && aiTollOneWay >= 0;
-  const tollCost = tollEdited
-    ? tollOverrideNum
+  const tollOneWay = tollEdited
+    ? tollOverrideNum / legs
     : tollFromMarketCheck
-      ? Math.round((aiTollOneWay as number) * legs * 100) / 100
-      : Math.round(routeTollOneWay * legs);
+      ? (aiTollOneWay as number)
+      : routeTollOneWay;
   const tollBreakdown = (
     asArray(pick(currentRoute, ['toll_breakdown'])).length
       ? asArray(pick(currentRoute, ['toll_breakdown']))
-      : asArray(pick(routeData ?? {}, ['toll_breakdown']))
+      : asArray(pick(rd, ['toll_breakdown']))
   ) as Record<string, unknown>[];
 
-  const add = (pick(routeData ?? {}, ['additional_costs']) ?? {}) as Record<string, unknown>;
+  const add = (pick(rd, ['additional_costs']) ?? {}) as Record<string, unknown>;
   const borderFees = num(pick(add, ['border_fees']));
   const weighbridgeFees = num(pick(add, ['weighbridge_fees']));
   const nonSaTolls = num(pick(add, ['non_sa_tolls']));
-  // The server's own sum stays the source of truth for the total — it's the
-  // same three buckets the breakdown itemises, not derived from the item
-  // list, so a bucket the server doesn't itemise yet can never desync the
-  // price shown from the price charged.
-  const crossBorderCost = Math.round((borderFees + weighbridgeFees + nonSaTolls) * legs);
-  // cross_border_breakdown is a sibling of additional_costs, not a key inside
-  // it — that dict is summed server-side, so a list in there breaks the whole
-  // route calculation. Absent on route responses cached before this shipped.
-  const crossBorderBreakdown = asArray(
-    pick(routeData ?? {}, ['cross_border_breakdown']),
-  ) as Record<string, unknown>[];
+  const crossBorderBreakdown = asArray(pick(rd, ['cross_border_breakdown'])) as Record<string, unknown>[];
+  const borderTotal = (borderFees + weighbridgeFees + nonSaTolls) * legs;
 
-  const baseCost = Math.round(chargeDistance * baseRateNum);
-  const driver = driverNum;
+  const op = operatingCostPerKm(company, truck, vtypes);
+  const c = company ?? {};
+  const includeDefault = pick(c, ['include_empty_return_default']);
+  const localInputs: CostingInputs = {
+    trip_type: tripType,
+    distance_km: hasRoute && distance > 0 ? distance : null,
+    distance_estimated: distanceEstimated,
+    distance_confirmed: distanceConfirmed,
+    duration_minutes: duration > 0 ? duration : null,
+    load_kg: weightKg > 0 ? weightKg : null,
+    vehicle: truck
+      ? {
+          id: truck.id,
+          name: truck.name,
+          capacity: truck.capacity,
+          rated_burn_l_per_100km: truck.fuel_consumption_l_per_100km,
+        }
+      : null,
+    diesel: dieselInput,
+    operating_cost_per_km: op.perKm,
+    operating_cost_source: op.source,
+    tolls: {
+      one_way: tollOneWay,
+      empty_return: null,
+      lookup_failed: !tollEdited && !tollFromMarketCheck && lookupFailed,
+      confirmed_none: tollsConfirmedNone,
+    },
+    driver: {
+      allowance_per_night: nullIfNotPositive(pick(c, ['driver_allowance_per_night'])),
+      nights: null,
+      amount: driverOverride,
+    },
+    hours_per_day: null,
+    border_cost: borderOverride != null && borderOverride >= 0 ? borderOverride : borderTotal,
+    international: !!international,
+    // Parts of the route with no border figures on file (newer backends);
+    // a border figure the person typed covers them.
+    border_costs_unknown: borderCostsUnknownFromRoute(routeData),
+    border_cost_is_override: borderOverride != null && borderOverride >= 0,
+    include_empty_return: returnLoadBooked ? false : null,
+    settings: {
+      include_empty_return_default: typeof includeDefault === 'boolean' ? includeDefault : null,
+      // 0 means 0 (always include); only an unset value takes the default.
+      empty_return_min_km: c.empty_return_min_km != null && c.empty_return_min_km !== '' ? num(c.empty_return_min_km) : null,
+    },
+    minimum_charge: nullIfNotPositive(pick(c, ['minimum_charge'])),
+    default_price_per_km: nullIfNotPositive(pick(c, ['default_base_rate_per_km'])),
+    // Backend target_margin(): the company target (default 10), clamped 1–40.
+    target_margin_pct: Math.min(Math.max(nullIfNotPositive(pick(c, ['margin_target_pct'])) ?? 10, 1), 40),
+    price: null,
+  };
+  const inputsBase = withServerInputs(localInputs, serverInputs ?? null, truck?.id ?? null, family);
 
-  const total = baseCost + fuelCost + tollCost + crossBorderCost + driver + serviceCharge;
-  const directCost = total - serviceCharge;
-  const marginPct = total > 0 ? Math.round(((total - directCost) / total) * 100) : 0;
-  const duration =
-    num(pick(currentRoute, ['duration_minutes'])) || num(pick(currentRoute, ['duration_min']));
+  // The price lines come from the same rule outputs, so the fuel, tolls and
+  // driver figures on the price are exactly the cost lines' figures.
+  const pre = computeCosting(inputsBase);
+  const line = (k: string) => pre.lines.find((l) => l.key === k && l.leg === 'loaded');
+  const fuelCost = line('fuel')?.amount ?? 0;
+  const tollCost = line('tolls')?.amount ?? 0;
+  const driverLine = line('driver');
+  const driver = driverLine?.amount ?? 0;
+  const crossBorderCost = line('border')?.amount ?? 0;
+  const loadedKm = pre.trip.km_loaded ?? 0;
+  const passedOn = fuelCost + tollCost + crossBorderCost + driver;
+  // Already rounded up like the choices by the rules.
+  const defaultPrice = pre.default_price;
+  const priceIsDefault = !!useDefaultPrice && defaultPrice !== null && loadedKm > 0;
+  const baseCost = priceIsDefault
+    ? Math.round((defaultPrice - passedOn) * 100) / 100
+    : Math.round(loadedKm * baseRateNum * 100) / 100;
+  const directCost = baseCost + passedOn;
+  const total = Math.round((directCost + serviceCharge) * 100) / 100;
+
+  const costingInputs: CostingInputs = { ...inputsBase, price: total > 0 ? total : null };
+  const costing = computeCosting(costingInputs);
+  // Before there's a route nothing is priced yet: route gaps are not warnings.
+  const target = costing.target_margin_pct;
+  // A known R 0 toll is "No toll plazas on this route" on the Tolls line, not
+  // a warning: only tolls_unknown warns.
+  const warnings = (
+    hasRoute
+      ? costing.warnings
+      : costing.warnings.filter((w) => !['distance_missing', 'tolls_unknown', 'driver_nights_unknown'].includes(w.code))
+  ).map((w) => phoneWarning(w, costing, target));
+  const emptyLines = costing.lines.filter((l) => l.leg === 'empty_return');
+  const emptyReturnTotal = emptyLines.length
+    ? emptyLines.every((l) => l.amount !== null)
+      ? Math.round(emptyLines.reduce((s, l) => s + (l.amount ?? 0), 0) * 100) / 100
+      : null
+    : null;
+
+  // The other answer to "does the truck come back empty?", priced at the
+  // target margin, for the Empty | Loaded toggle.
+  // The other answer to "does the truck come back empty?" at its default
+  // price: the rules' alternative_with_return_load, or (with a return load
+  // booked) the empty-return price.
+  const altReturnPrice = costing.alternative_with_return_load
+    ? costing.alternative_with_return_load.default_price
+    : tripType === 'ONE_WAY' && returnLoadBooked
+      ? computeCosting({ ...costingInputs, include_empty_return: null }).default_price
+      : null;
 
   return {
+    altReturnTargetPrice: altReturnPrice,
+    priceIsDefault,
+    defaultPrice,
+    ratePerKmShown: loadedKm > 0 ? baseCost / loadedKm : baseRateNum,
+    driverMissing: driverLine?.source === 'missing',
+    borderMissing: costing.lines.some((l) => l.key === 'border' && l.amount === null),
+    operatingCheck: costing.lines.some((l) => l.key === 'operating' && l.status === 'check'),
     distance,
     legs,
-    chargeDistance,
-    consumption,
+    chargeDistance: loadedKm,
+    duration,
+    distanceEstimated,
+    truckName: truck?.name ?? null,
+    truckId: truck?.id ?? null,
+    consumption: costing.vehicle?.burn_loaded_l_per_100km ?? 0,
+    fuelLitres: costing.litres.loaded ?? 0,
+    fuelLitresTotal: costing.litres.total ?? 0,
+    fuelUsage: Math.round(costing.litres.loaded ?? 0),
+    fuelPrice: costing.diesel.price ?? 0,
+    fuelSource: costing.diesel.source,
     fuelCost,
+    fuelKnown: line('fuel')?.amount != null,
+    fuelType,
+    fuelZone: family === 'electric' ? null : costing.diesel.zone,
+    diesel: costing.diesel,
+    fuelFromMarketCheck,
+    fuelCompanyPrice: companyFuel.price ?? 0,
     tollCost,
-    tollCalculated: Math.round(routeTollOneWay * legs),
-    tollBreakdownOneWay: Math.round(routeTollOneWay),
+    tollKnown: line('tolls')?.amount != null,
+    tollCalculated: routeTollOneWay !== null ? Math.round(routeTollOneWay * legs * 100) / 100 : 0,
+    tollBreakdownOneWay: routeTollOneWay ?? 0,
     tollBreakdown,
-    tollFree,
-    tollsUnavailable,
-    tollWarning,
+    tollFree: routeTollOneWay === 0,
+    tollsUnavailable: lookupFailed,
     tollsEstimated,
+    tollFromMarketCheck,
     crossBorderCost,
     borderFees,
     weighbridgeFees,
@@ -349,24 +398,22 @@ export function computeCosts({
     crossBorderBreakdown,
     baseCost,
     driver,
+    driverKnown: driverLine?.amount != null,
+    driverSuggested: (driverLine?.suggested as number | null | undefined) ?? null,
+    nights: (driverLine?.nights as number | null | undefined) ?? null,
+    allowancePerNight: (driverLine?.rate_per_night as number | null | undefined) ?? null,
+    emptyReturnEligible: costing.trip.empty_return_default || costing.trip.empty_return_included || (returnLoadBooked && tripType === 'ONE_WAY'),
+    emptyReturnIncluded: costing.trip.empty_return_included,
+    emptyReturnTotal,
     total,
     directCost,
-    marginPct,
-    duration,
-    fuelUsage: Math.round((chargeDistance * consumption) / 100),
-    fuelPrice,
-    fuelBasisName: fuelBasisVt?.name ?? null,
-    fuelBasisInferred: !selectedVt && !!inferredVt,
-    fuelBasisConsumption: consumptionRef,
-    fuelBasisCapacityTons: refCapacityTons,
-    fuelSensitivity: sensitivity,
-    fuelZoneNote,
-    fuelLiveHint,
-    fuelLitres,
-    fuelType,
-    fuelZone: isDieselPricing ? diesel.zone : null,
-    fuelFromMarketCheck,
-    fuelCompanyPrice: companyFuelPrice,
-    tollFromMarketCheck,
+    floor: costing.floor,
+    marginPct: costing.margin_pct === null ? null : Math.round(costing.margin_pct),
+    targetPrice: costing.target_price,
+    costLines: costing.lines,
+    costing,
+    costingInputs,
+    warnings,
+    blocked: warnings.some((w) => w.severity === 'block'),
   };
 }

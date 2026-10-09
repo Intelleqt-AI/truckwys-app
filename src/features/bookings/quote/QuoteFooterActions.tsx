@@ -94,9 +94,10 @@ function QuoteFooterActionsImpl({
       // and this row is overflow-hidden — 2px of slack meant the OS text-size
       // setting sliced the digits horizontally through the middle. Paired with
       // maxFontSizeMultiplier below, which bounds how far that can go.
-      height: withTiming(hidden ? 0 : 26, { duration: animatedKeyboardState.value.duration }),
+      // 44: the strip's links are tap targets (≥ 44 pt).
+      height: withTiming(hidden ? 0 : 44, { duration: animatedKeyboardState.value.duration }),
       opacity: withTiming(hidden ? 0 : 1, { duration: animatedKeyboardState.value.duration }),
-      marginBottom: withTiming(hidden ? 0 : 8, { duration: animatedKeyboardState.value.duration }),
+      marginBottom: withTiming(hidden ? 0 : 4, { duration: animatedKeyboardState.value.duration }),
     };
   }, [hasRow]);
 
@@ -132,11 +133,11 @@ function QuoteFooterActionsImpl({
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.2}
               >
-                {formatCurrency(total)}
+                {formatCurrency(total, { maximumFractionDigits: 0 })}
               </Mono>
               {/* The one price: what the client is sent, excluding VAT. */}
               <Mono className="shrink-0 text-caption text-muted" maxFontSizeMultiplier={1.2}>
-                · excl. VAT
+                excl. VAT
               </Mono>
               {calculating && <ActivityIndicator size="small" color={colors.faint} />}
             </>
@@ -150,7 +151,7 @@ function QuoteFooterActionsImpl({
               activeOpacity={0.6}
               accessibilityRole={onPriceHintPress ? 'button' : undefined}
               accessibilityLabel={priceHint}
-              className="flex-1 flex-row items-center gap-1"
+              className="min-h-[44px] flex-1 flex-row items-center gap-1"
             >
               <Mono
                 className="flex-shrink text-caption text-faint"
@@ -171,7 +172,7 @@ function QuoteFooterActionsImpl({
             activeOpacity={0.6}
             accessibilityRole={strip.onPress ? 'button' : undefined}
             accessibilityLabel={strip.message}
-            className="min-w-0 flex-shrink flex-row items-center justify-end gap-1"
+            className="min-h-[44px] min-w-0 flex-shrink flex-row items-center justify-end gap-1"
           >
             {/* This strip carries the longest messages in the footer (e.g. the
                 overload warning); they truncate to a single 26px line next to
@@ -191,7 +192,7 @@ function QuoteFooterActionsImpl({
       <View className="flex-row gap-2.5">
         <View className="flex-1">
           <Button
-            label="Save as draft"
+            label="Save draft"
             variant="secondary"
             loading={busy === 'draft'}
             disabled={saveDisabled}
@@ -201,7 +202,7 @@ function QuoteFooterActionsImpl({
         </View>
         <View className="flex-1">
           <Button
-            label="Send quote"
+            label="Send"
             icon="send"
             loading={busy === 'send'}
             disabled={sendDisabled}
@@ -224,24 +225,24 @@ function OfferAction({ offer }: { offer: FooterOffer }) {
         numberOfLines={1}
         maxFontSizeMultiplier={1.2}
       >
-        Market check: nothing to change
+        At market
       </Mono>
     );
   }
   const text =
     offer.kind === 'prompt'
-      ? 'Check market price'
+      ? 'Check market'
       : offer.kind === 'apply'
         ? offer.label
-        : 'Market figures in use · Undo';
+        : 'Undo market';
   return (
     <TouchableOpacity
       onPress={offer.onPress}
       activeOpacity={0.6}
       accessibilityRole="button"
       accessibilityLabel={text}
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
-      className="min-w-0 shrink flex-row items-center justify-end gap-1"
+      hitSlop={{ left: 8, right: 4 }}
+      className="min-h-[44px] min-w-0 shrink flex-row items-center justify-end gap-1"
     >
       <Mono className="shrink text-caption text-link" numberOfLines={1} maxFontSizeMultiplier={1.2}>
         {text}

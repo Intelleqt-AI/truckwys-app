@@ -13,7 +13,7 @@
 
 import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
 import { saDaysBetween } from '@/lib/dates';
-import { resolveDieselPrice } from '@/lib/dieselPrice';
+import { resolveDiesel } from '@/lib/dieselPrice';
 import {
   expenseNet,
   isDraft,
@@ -503,9 +503,11 @@ export function computeFindings(input: FindingInputs, now: Date = new Date()): F
   }
 
   // 7. Quotes priced on old diesel -----------------------------------------------
+  // Like-for-like (QUOTE-RULES §9): each quote's own snapshot (price used, zone,
+  // litres) against the price a quote made today would use, same zone only.
   if (input.fuel) {
-    const diesel = resolveDieselPrice({ company: input.company, live: input.fuel });
-    const official = diesel.livePrice ?? 0;
+    const diesel = resolveDiesel(input.company, input.fuel);
+    const official = diesel.price ?? 0;
     const zone = diesel.zone;
     const loadByQuote = new Map(
       loads.filter((l) => l.quote != null).map((l) => [l.quote as number, l]),
@@ -515,9 +517,11 @@ export function computeFindings(input: FindingInputs, now: Date = new Date()): F
     if (official > 0) {
       for (const q of quotes) {
         const st = up(q.status);
-        const price = num(q.fuel_price_at_creation);
+        const price = num(q.fuel_price_used) || num(q.fuel_price_at_creation);
         const fuel = num(q.fuel_surcharge);
         if (price <= 0 || fuel <= 0) continue;
+        // A quote priced in the other zone is not comparable.
+        if (q.fuel_zone && up(q.fuel_zone) !== zone) continue;
         const loadStatus = up(loadByQuote.get(q.id)?.status ?? bookedLoadOf(q as unknown as Record<string, unknown>)?.status);
         const done = loadStatus !== '' && DONE.includes(loadStatus);
         const live =
@@ -525,17 +529,18 @@ export function computeFindings(input: FindingInputs, now: Date = new Date()): F
           (st === 'SENT' && !!q.valid_until && !quoteLapsed(q as unknown as Record<string, unknown>, now) && q.outcome !== 'rejected');
         const delta = official - price;
         if (!live || delta < 0.2) continue;
-        const litres = fuel / price;
+        const litres = num(q.fuel_litres) || fuel / price;
         rows.push({ q, price, litres, short: litres * delta });
       }
     }
     const total = rows.reduce((s, r) => s + r.short, 0);
     if (rows.length && total >= THRESHOLD) {
       const lo = Math.min(...rows.map((r) => r.price));
-      // Only a diesel price the company chose is "your setting": the 23,50
-      // factory default is not (resolveDieselPrice marks that case).
-      const setting = diesel.source === 'own' && diesel.price ? diesel.price : 0;
-      const source = typeof input.fuel.source === 'string' && input.fuel.source ? `, ${input.fuel.source}` : '';
+      const ownNow = diesel.source === 'own';
+      const officialNote =
+        ownNow && diesel.official_price && Math.abs(diesel.official_price - official) > 0.5
+          ? ` Official: ${rand2(diesel.official_price)}.`
+          : '';
       out.push({
         id: 'diesel',
         kind: 'diesel',
@@ -545,9 +550,9 @@ export function computeFindings(input: FindingInputs, now: Date = new Date()): F
         severity: 'medium',
         amount: total,
         headline: 'Quotes short on diesel',
-        line: `Diesel is ${rand2(official)}/L; ${rows.length === 1 ? `this quote used ${rand2(lo)}` : `these quotes used from ${rand2(lo)}`}.${setting > 0 && Math.abs(setting - official) > 0.5 ? ` Your setting: ${rand2(setting)}.` : ''}`,
-        action: { label: 'Update your diesel price', target: { kind: 'company-settings' } },
-        method: `Accepted quotes not yet delivered, and sent quotes still valid. Litres = the quote's fuel line divided by the diesel price it used. Shortfall = litres times (today's ${zone === 'COASTAL' ? 'coastal' : 'inland'} 50ppm price ${rand2(official)}${source} less the quote's price). An estimate.`,
+        line: `${ownNow ? 'Your diesel' : 'Diesel'} is ${rand2(official)}/L; ${rows.length === 1 ? `this quote used ${rand2(lo)}` : `these quotes used from ${rand2(lo)}`}.${officialNote}`,
+        action: { label: 'Check diesel price', target: { kind: 'company-settings' } },
+        method: `Accepted quotes not yet delivered, and sent quotes still valid, priced in the ${zone === 'COASTAL' ? 'coastal' : 'inland'} zone. Litres = the quote's saved litres, else its fuel line divided by the price it used. Shortfall = litres times (today's price ${rand2(official)} less the quote's price). An estimate.`,
         evidence: [...rows]
           .sort((a, b) => b.short - a.short)
           .map((r) => ({

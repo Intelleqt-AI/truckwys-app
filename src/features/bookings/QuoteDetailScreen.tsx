@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, Share, Alert, Modal, TouchableOpacity } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -28,6 +28,8 @@ import { RouteMap } from '@/components/RouteMap';
 import {
   useQuote,
   useQuoteFuelAlert,
+  useQuoteCosting,
+  useCompanyProfileData,
   sendQuote,
   recordQuoteOutcome,
   deleteQuote,
@@ -35,6 +37,7 @@ import {
   patchQuote,
 } from './api';
 import { num, str, pick, asArray } from '@/lib/api/list';
+import { postData } from '@/lib/api/client';
 import { bookedLoadOf, quoteLapsed } from '@/lib/quoteStage';
 import { STATUS_LABEL as LOAD_STATUS_LABEL } from './constants';
 import { QuoteSendPreview, type QuotePreviewData } from './QuoteSendPreview';
@@ -45,7 +48,6 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
-  formatPercent,
   parseNum,
   round2,
   decimalMax,
@@ -58,6 +60,8 @@ import { DEMO_EMAIL_SIMULATED } from '@/lib/demoStatus';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import type { AppStackParamList } from '@/navigation/types';
 import { useTheme } from '@/theme/ThemeProvider';
+import { pricedInEarlierPeriod } from './quote/rules';
+import { pct } from './quote/CostBreakdownCard';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -85,8 +89,6 @@ const REJECTION_REASONS = [
   'Other',
 ] as const;
 
-const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
-
 export function QuoteDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const subscription = useSubscription();
@@ -97,9 +99,15 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
   // Diesel moving since a quote was priced matters while it can still change.
   const { data: fuelAlert } = useQuoteFuelAlert(id, !!data && ['DRAFT', 'SENT'].includes(status));
+  const { data: costing } = useQuoteCosting(id, !!data);
+  const { data: company } = useCompanyProfileData();
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
+  // The pre-send check (§11) is a network call: one at a time, with the Send
+  // control showing progress while it runs.
+  const [sendChecking, setSendChecking] = useState(false);
+  const checkingRef = useRef(false);
   const [sendOpen, setSendOpen] = useState(false);
   // Which channel the preview is for; the send itself runs on confirm.
   const [sendPreview, setSendPreview] = useState<'email' | 'whatsapp' | null>(null);
@@ -148,8 +156,33 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     rawPrice && typeof rawPrice === 'object' && !Array.isArray(rawPrice)
       ? (rawPrice as CustomerPrice)
       : undefined;
-  const marginPct = num(pick(q, ['margin_percentage', 'margin_percent', 'margin']));
-  const confidence = str(pick(q, ['confidence']));
+  // Margin on the cost floor, the same figure the builder shows: today's
+  // floor from the backend's costing (newer backends), else the quote's stored
+  // floor (column, else the copy in route_snapshot). Never the stored
+  // margin_percentage, which older builds wrote on a different basis.
+  const routeSnap = (pick(q, ['route_snapshot']) ?? {}) as Record<string, unknown>;
+  const serverFloor = typeof costing?.floor === 'number' ? (costing.floor as number) : null;
+  const storedFloor =
+    pick(q, ['cost_floor']) != null
+      ? num(pick(q, ['cost_floor']))
+      : routeSnap.cost_floor != null
+        ? num(routeSnap.cost_floor)
+        : null;
+  // Tolls that were unknown when saved (costing_inputs), or that the backend's
+  // costing for the quote can't work out: the floor is incomplete.
+  const costingInputs = (pick(q, ['costing_inputs']) ?? {}) as Record<string, unknown>;
+  const serverTollLine = asArray<Record<string, unknown>>(costing?.lines).find(
+    (l) => l.key === 'tolls',
+  );
+  const tollsUnknown =
+    costingInputs.tolls_unknown === true ||
+    (serverTollLine != null && serverTollLine.amount === null);
+  const costFloor = tollsUnknown && serverFloor === null ? null : (serverFloor ?? storedFloor);
+  const marginPct = costFloor !== null && total > 0 ? ((total - costFloor) / total) * 100 : null;
+  const targetMargin = Math.min(
+    Math.max(num(pick(company ?? {}, ['margin_target_pct'])) || 10, 1),
+    40,
+  );
   const roundTrip = str(pick(q, ['trip_type'])).toUpperCase() === 'ROUND_TRIP';
   const token = str(pick(q, ['token', 'view_token']));
   const shareUrl = token ? quoteShareUrl(id, token) : undefined;
@@ -206,7 +239,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     { label: 'Weight', value: weightKg > 0 ? `${formatNumber(weightKg)} kg` : '' },
     {
       label: 'Distance',
-      value: distanceKm > 0 ? `${formatNumber(Math.round(distanceKm))} km` : '',
+      value: distanceKm > 0 ? `${formatNumber(distanceKm, { maximumFractionDigits: 1 })} km` : '',
     },
     { label: 'Assigned vehicle', value: str(pick(q, ['vehicle_display'])) },
     { label: 'Assigned driver', value: str(pick(q, ['driver_display'])) },
@@ -221,23 +254,29 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const driver = num(pick(q, ['driver_allowance']));
   const additional = num(pick(q, ['additional_charges']));
   const returnBaseRate = num(pick(q, ['return_base_rate']));
+  // One vocabulary with the builder and web: Base rate, Fuel, Tolls, Driver
+  // allowance, Adjustment.
   const costRows: { label: string; value: number }[] = [
     { label: 'Base rate', value: baseRate },
-    { label: 'Fuel surcharge', value: fuel },
-    { label: 'Toll charges', value: toll },
+    { label: 'Fuel', value: fuel },
+    { label: 'Tolls', value: toll },
     { label: 'Driver allowance', value: driver },
   ];
-  if (additional > 0) costRows.push({ label: 'Additional charges', value: additional });
+  if (additional !== 0)
+    costRows.push({
+      label: pick(q, ['is_international']) === true ? 'Border and adjustment' : 'Adjustment',
+      value: additional,
+    });
   if (roundTrip && returnBaseRate > 0)
-    costRows.push({ label: `Return leg (${str(pick(q, ['return_cargo'])) ? 'with cargo' : 'empty'})`, value: returnBaseRate });
+    costRows.push({
+      label: `Return leg (${str(pick(q, ['return_cargo'])) ? 'with cargo' : 'empty'})`,
+      value: returnBaseRate,
+    });
   // A stored total that carries charges not broken down here gets its own line
   // rather than an unexplained gap.
   const linesSum = costRows.reduce((a, r) => a + r.value, 0);
   const notItemised = round2(total - linesSum);
   const hasGap = Math.abs(notItemised) > 0.5;
-  // Margin only when the costs behind it are itemised: no unexplained gap and
-  // more than a bare base rate. Otherwise a stored 0 reads as "0% margin".
-  const costsItemised = !hasGap && costRows.some((r) => r.label !== 'Base rate' && r.value > 0);
 
   const validUntil = str(pick(q, ['valid_until']));
   const createdAt = str(pick(q, ['created_at']));
@@ -264,21 +303,95 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         bookedLoad.status ? ` · ${LOAD_STATUS_LABEL(String(bookedLoad.status).toUpperCase())}` : ''
       }`
     : '';
-  // Diesel note built from the numbers, not the server's free text.
+  // Diesel note built from the numbers, not the server's free text, with the
+  // sign it actually has (a drop is not "up").
   const fuelDelta = Number(fuelAlert?.fuel_delta_zar);
   const fuelImpact = Number(fuelAlert?.estimated_cost_impact);
   const fuelNote = fuelAlert
-    ? Number.isFinite(fuelDelta) && Number.isFinite(fuelImpact)
-      ? `Diesel is up ${formatCurrency(fuelDelta)}/L since this quote was made, so the job costs about ${formatCurrency(fuelImpact, { maximumFractionDigits: 0 })} more.${
-          status === 'DRAFT' || lapsed ? ' Update the price before sending.' : ''
+    ? Number.isFinite(fuelDelta) && Number.isFinite(fuelImpact) && fuelDelta !== 0
+      ? `Diesel ${fuelDelta > 0 ? 'up' : 'down'} ${formatCurrency(Math.abs(fuelDelta))}/L since quoted: cost ${
+          fuelImpact >= 0 ? '+' : '−'
+        }${formatCurrency(Math.abs(fuelImpact), { maximumFractionDigits: 0 })}.${
+          (status === 'DRAFT' || lapsed) && fuelDelta > 0 ? ' Re-price before sending.' : ''
         }`
       : (fuelAlert.message ?? '')
     : '';
+
+  // §11: any send path (Send, Resend, status → Sent) is blocked by a blocking
+  // warning and asks first when the quote was priced in an earlier diesel
+  // period. A newer backend answers with its own send check; an older one is
+  // checked here from the stored snapshot.
+  const snapshot = (pick(q, ['route_snapshot']) ?? {}) as Record<string, unknown>;
+  const pricedAt =
+    str(pick(q, ['priced_at'])) ||
+    str(snapshot.priced_at) ||
+    (snapshot.fuel_price_per_litre_used != null ? str(pick(q, ['created_at'])) : '');
+  const guardedSend = async (go: () => void) => {
+    // A second tap while the check runs must not open a second sheet.
+    if (checkingRef.current || sendBusy) return;
+    checkingRef.current = true;
+    setSendChecking(true);
+    let warnings: Record<string, unknown>[] | null = null;
+    try {
+      const res = await postData<Record<string, unknown>>({
+        url: 'quotes/cost-breakdown/',
+        data: { quote_id: Number(id) },
+        // A slow network falls back to the local check rather than hanging.
+        config: { timeout: 10000 },
+      });
+      const check = (res?.send_check ?? null) as Record<string, unknown> | null;
+      if (check) warnings = asArray<Record<string, unknown>>(check.warnings);
+    } catch {
+      warnings = null; // older backend, offline or slow: the local check below
+    } finally {
+      checkingRef.current = false;
+      setSendChecking(false);
+    }
+    if (warnings === null) {
+      const block = asArray<Record<string, unknown>>(pick(q, ['warnings'])).find(
+        (w) => w.severity === 'block',
+      );
+      warnings = [
+        ...(block ? [block] : []),
+        ...(pricedAt && pricedInEarlierPeriod(pricedAt)
+          ? [
+              {
+                code: 'diesel_period_changed',
+                severity: 'warn',
+                title: 'Priced on an earlier diesel price',
+              },
+            ]
+          : []),
+      ];
+    }
+    const block = warnings.find((w) => w.severity === 'block');
+    if (block) {
+      toast.error(str(block.title, "Can't send yet"));
+      return;
+    }
+    const older = warnings.find((w) => w.code === 'diesel_period_changed');
+    if (older) {
+      Alert.alert(str(older.title, 'Priced on older diesel'), str(older.detail) || undefined, [
+        {
+          text: 'Edit quote',
+          style: 'cancel',
+          onPress: () => navigation.navigate('CreateQuote', { quoteId: id }),
+        },
+        { text: 'Send anyway', onPress: go },
+      ]);
+      return;
+    }
+    go();
+  };
+
   // "expired" / "N h left" beside the valid-until date.
   const validMs = validUntil ? Date.parse(validUntil) : NaN;
   const validNote = lapsed
     ? 'expired'
-    : openStatus && Number.isFinite(validMs) && validMs > Date.now() && validMs - Date.now() < 48 * 3600_000
+    : openStatus &&
+        Number.isFinite(validMs) &&
+        validMs > Date.now() &&
+        validMs - Date.now() < 48 * 3600_000
       ? `${Math.ceil((validMs - Date.now()) / 3600_000)} h left`
       : '';
   const outcome = str(pick(q, ['outcome'])).toLowerCase();
@@ -446,8 +559,10 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
   const editQuote = () => navigation.navigate('CreateQuote', { quoteId: id });
   const changeStatus = (s: string) => {
-    if (s === status || statusBusy) return;
-    run(setStatusBusy, () => patchQuote(id, { status: s }), 'Status updated');
+    if (s === status || statusBusy || sendChecking) return;
+    const go = () => run(setStatusBusy, () => patchQuote(id, { status: s }), 'Status updated');
+    if (s === 'SENT') void guardedSend(go);
+    else go();
   };
 
   const download = async () => {
@@ -533,8 +648,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     send: {
       label: status === 'SENT' ? 'Resend' : 'Send',
       icon: 'send' as IconName,
-      loading: sendBusy,
-      onPress: () => setSendOpen(true),
+      loading: sendBusy || sendChecking,
+      onPress: () => void guardedSend(() => setSendOpen(true)),
     },
     edit: { label: 'Edit quote', icon: 'edit' as IconName, onPress: editQuote },
   }[primaryKind];
@@ -547,8 +662,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     menuActions.push({
       label: status === 'SENT' ? 'Resend' : 'Send',
       icon: 'send',
-      disabled: sendBusy,
-      onPress: () => setSendOpen(true),
+      disabled: sendBusy || sendChecking,
+      onPress: () => void guardedSend(() => setSendOpen(true)),
     });
   }
   if (canRecordOutcome) {
@@ -611,14 +726,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         {outcome === 'accepted' && status !== 'ACCEPTED' && !booked && <StatusPill status="WON" />}
         {outcome === 'rejected' && status !== 'DECLINED' && <StatusPill status="LOST" />}
         <Badge label={roundTrip ? 'Round trip' : 'One way'} tone={roundTrip ? 'info' : 'neutral'} />
-        {marginPct > 0 && costsItemised && (
-          <Mono className="text-caption text-faint">Margin {formatPercent(marginPct)}</Mono>
+        {marginPct !== null && (
+          <Mono className={`text-caption ${marginPct < 0 ? 'text-danger' : 'text-faint'}`}>
+            Margin {pct(marginPct)}
+          </Mono>
         )}
       </View>
 
-      {booked && (
-        <Txt className="-mt-2 mb-4 text-sub text-muted">Booked as {bookedLabel}</Txt>
-      )}
+      {booked && <Txt className="-mt-2 mb-4 text-sub text-muted">Booked as {bookedLabel}</Txt>}
       {loadStateOnly && (
         <Txt className="-mt-2 mb-4 text-sub text-muted">
           Marked {(LEGACY_STATUS_LABELS[status] ?? status).toLowerCase()} on an older record. No
@@ -649,8 +764,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           origin={origin}
           dest={dest}
           stops={stopLabels}
-          distance={distanceKm > 0 ? `${Math.round(distanceKm)} km` : undefined}
-          duration={pick(q, ['sla_hours']) ? `SLA ${num(pick(q, ['sla_hours']))}h` : undefined}
+          distance={
+            distanceKm > 0
+              ? `${formatNumber(distanceKm, { maximumFractionDigits: 1 })} km`
+              : undefined
+          }
+          duration={
+            pick(q, ['sla_hours']) ? `Delivery within ${num(pick(q, ['sla_hours']))} h` : undefined
+          }
         />
         {hasRouteCoords && (
           <View className="mt-3">
@@ -664,11 +785,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      {marginPct > 0 && marginPct < 12 && costsItemised && (
+      {marginPct !== null && marginPct < targetMargin && (
         <View className="mb-5">
           <Banner
-            tone="warning"
-            message={`Margin ${formatPercent(marginPct)} is below your pricing guardrail. Review before sending.`}
+            tone={marginPct < 0 ? 'danger' : 'warning'}
+            message={
+              marginPct < 0
+                ? 'Price is below your costs'
+                : `Margin under your ${pct(targetMargin)} target`
+            }
+            onPress={!booked && openStatus ? editQuote : undefined}
           />
         </View>
       )}
@@ -722,9 +848,20 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
 
       {total > 0 && (
         <Group label="Cost breakdown">
-          {costRows.map((c) => (
-            <DetailRow key={c.label} label={c.label} value={formatCurrency(c.value)} />
-          ))}
+          {costRows.map((c) =>
+            c.label === 'Tolls' && tollsUnknown ? (
+              // Saved while the toll lookup had failed: unknown, never R 0.
+              <DetailRow
+                key={c.label}
+                label="Tolls"
+                hint="Not worked out: edit the quote to add them"
+                value="—"
+                valueColor={colors.danger}
+              />
+            ) : (
+              <DetailRow key={c.label} label={c.label} value={formatCurrency(c.value)} />
+            ),
+          )}
           {hasGap && (
             <DetailRow
               label="Not itemised"
@@ -734,12 +871,34 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           )}
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
-              {roundTrip ? 'Total, both legs' : 'Total'}
-              {customerPrice?.vat_registered ? ' excl. VAT' : ''}
-              {marginPct && costsItemised ? ` · ${marginPct}% margin` : ''}
+              {roundTrip ? 'Price, both legs, excl. VAT' : 'Price excl. VAT'}
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
+          {costFloor === null && tollsUnknown && (
+            <DetailRow
+              label="Cost floor"
+              hint="Incomplete: tolls unknown"
+              value="—"
+              valueColor={colors.danger}
+            />
+          )}
+          {costFloor !== null && (
+            <>
+              {/* Today's costs (backend costing) against the price as quoted,
+                  or the floor stored when it was quoted: said which. */}
+              <DetailRow
+                label={serverFloor !== null ? 'Cost floor today' : 'Cost floor when quoted'}
+                hint={serverFloor !== null ? 'Fuel above is as quoted' : undefined}
+                value={formatCurrency(costFloor, { maximumFractionDigits: 0 })}
+              />
+              <DetailRow
+                label={serverFloor !== null ? 'Margin today' : 'Margin'}
+                value={`${pct(marginPct ?? 0)} · ${formatCurrency(total - costFloor, { maximumFractionDigits: 0 })}`}
+                valueColor={(marginPct ?? 0) < 0 ? colors.danger : undefined}
+              />
+            </>
+          )}
           {customerPrice ? (
             customerPrice.vat_registered ? (
               <>
@@ -783,10 +942,6 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             />
           </View>
         )}
-        {confidence ? (
-          <DetailRow label="Confidence" value={titleCase(confidence)} mono={false} />
-        ) : null}
-        {/* <DetailRow label="Margin" value={formatPercent(marginPct || 0)} /> */}
         {validUntil ? (
           <DetailRow
             label="Valid until"

@@ -20,7 +20,8 @@ export interface QuoteLite {
   /** What the customer is shown: incl. VAT (15%, or 0% international). */
   amountInclVat: number;
   status: string;
-  marginPct?: number;
+  /** null = unknown (show "—"); undefined = the row has no margin field. */
+  marginPct?: number | null;
   confidence?: number;
   validUntil?: string;
   raw: Raw;
@@ -46,10 +47,14 @@ export const normalizeQuote = (q: Raw): QuoteLite => ({
     customer_price: pick(q, ['customer_price']) as CustomerPrice | null | undefined,
   }),
   status: str(pick(q, ['status']), 'DRAFT').toUpperCase(),
+  // margin_percentage: null means unknown (no complete cost floor): kept as
+  // null so lists show "—", never 0 %.
   marginPct:
-    pick(q, ['margin_percent', 'marginPct', 'margin']) != null
-      ? num(pick(q, ['margin_percent', 'marginPct', 'margin']))
-      : undefined,
+    pick(q, ['margin_percentage', 'margin_percent', 'marginPct', 'margin']) != null
+      ? num(pick(q, ['margin_percentage', 'margin_percent', 'marginPct', 'margin']))
+      : 'margin_percentage' in q && q.margin_percentage === null
+        ? null
+        : undefined,
   confidence: pick(q, ['confidence']) != null ? num(pick(q, ['confidence'])) : undefined,
   validUntil: pick(q, ['valid_until', 'expiresAt', 'expires_at']) as string | undefined,
   raw: q,

@@ -3,11 +3,10 @@ import type { CostBreakdown } from './costs';
 import type { GeoPoint } from '@/lib/routeGeometry';
 import { extractCode, roundCoord, round2, type Loc, type StopEntry } from './types';
 
-// Moved out of CreateQuoteScreen.tsx's buildPayload (Phase 0 extraction) —
-// same object literal, same key order, no behaviour change. This is the DRF
-// contract: key order and field set must stay byte-identical to what the
-// backend already accepts. (`is_international` is the one addition, 2026-10;
-// it is left out entirely when the route/points don't say either way.)
+// The quote save payload (DRF contract). Additive keys only: `is_international`
+// (left out when the route/points don't say either way) and the §9 pricing
+// snapshot (fuel_price_used … empty_return_included), which older backends
+// ignore.
 
 export interface BuildQuotePayloadInput {
   customerId: string;
@@ -39,6 +38,16 @@ export interface BuildQuotePayloadInput {
    */
   routeSnapshot: Record<string, unknown> | null;
   /**
+   * The costs to snapshot (QUOTE-RULES §9), or null to send none (an edited
+   * quote whose route hasn't been worked out again keeps its stored snapshot).
+   * Newer backends price and snapshot the quote themselves from its fields and
+   * `costing_inputs`; the copy in route_snapshot serves older backends and
+   * reopening.
+   */
+  pricing: CostBreakdown | null;
+  /** quote_costing COSTING_INPUT_KEYS: what the quote fields alone don't say. */
+  costingInputs: Record<string, number | boolean | object> | null;
+  /**
    * The trip leaves South Africa (zero-rated for VAT). Null when neither the
    * route nor a point's country says either way: nothing is sent, so a stored
    * value is kept.
@@ -69,6 +78,8 @@ export function buildQuotePayload(
     baseRateNum,
     aiApplied,
     routeSnapshot,
+    pricing,
+    costingInputs,
     international,
   }: BuildQuotePayloadInput,
   status: 'DRAFT' | 'SENT',
@@ -114,9 +125,11 @@ export function buildQuotePayload(
     driver_allowance: round2(costs.driver),
     additional_charges: round2(costs.crossBorderCost + serviceCharge),
     total_amount: round2(costs.total),
-    // An applied market price has no markup and no known margin, so it sends
-    // none: the stored value is kept (0 on create) rather than a made-up one.
-    ...(aiApplied === null ? { margin_percentage: costs.marginPct } : {}),
+    // One margin definition: (price − cost floor) / price. Sent only when the
+    // floor is known, so a save never wipes a stored figure with a guess.
+    ...(costs.costing.margin_pct !== null
+      ? { margin_percentage: Math.max(-999.99, Math.min(999.99, round2(costs.costing.margin_pct))) }
+      : {}),
     notes,
     status,
     confidence: 'MEDIUM',
@@ -132,6 +145,27 @@ export function buildQuotePayload(
           : null,
     // The per-km rate the base was priced at (a Quote field since 2026-09).
     base_rate_per_km: baseRateNum > 0 ? round2(baseRateNum) : null,
-    ...(routeSnapshot ? { route_snapshot: routeSnapshot } : {}),
+    ...(routeSnapshot
+      ? { route_snapshot: pricing ? { ...routeSnapshot, ...pricingSnapshot(pricing, routeSnapshot) } : routeSnapshot }
+      : {}),
+    ...(costingInputs ? { costing_inputs: costingInputs } : {}),
   };
 }
+
+/** §9 snapshot fields, as the backend names them (it sets its own columns). */
+export function pricingSnapshot(c: CostBreakdown, routeSnapshot: Record<string, unknown> | null) {
+  const source = c.fuelFromMarketCheck ? 'override' : c.fuelSource === 'missing' ? null : c.fuelSource;
+  return {
+    fuel_price_used: c.fuelPrice > 0 ? round4(c.fuelPrice) : null,
+    fuel_price_source: source,
+    fuel_zone: c.fuelZone,
+    fuel_effective_from: c.diesel.official_effective_from,
+    fuel_official_at_pricing: c.diesel.official_price,
+    fuel_litres: round4(c.fuelLitresTotal),
+    priced_at: (routeSnapshot?.priced_at as string | undefined) ?? new Date().toISOString(),
+    vehicle_type_id: c.truckId ?? null,
+    empty_return_included: c.emptyReturnIncluded,
+  };
+}
+
+const round4 = (n: number) => Math.round(n * 10000) / 10000;

@@ -106,6 +106,12 @@ export interface Quote {
   total_amount: string | number;
   fuel_surcharge?: string | number | null;
   fuel_price_at_creation?: string | number | null;
+  /** Pricing snapshot (QUOTE-RULES §9): the R/L used, where it came from, the
+      zone and the litres. Absent on quotes saved before the snapshot. */
+  fuel_price_used?: string | number | null;
+  fuel_price_source?: string | null;
+  fuel_zone?: string | null;
+  fuel_litres?: string | number | null;
   valid_until: string | null;
   outcome?: string | null;
   created_at?: string | null;

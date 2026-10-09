@@ -264,10 +264,13 @@ export function SegmentedControl<T extends string>({
   options,
   value,
   onChange,
+  tall,
 }: {
   options: { label: string; value: T }[];
   value: T;
   onChange: (v: T) => void;
+  /** Draw the segments a full 44 pt tall (dense forms where hitSlop isn't enough). */
+  tall?: boolean;
 }) {
   const { scheme, colors } = useTheme();
   return (
@@ -284,7 +287,7 @@ export function SegmentedControl<T extends string>({
             accessibilityRole="button"
             accessibilityLabel={o.label}
             accessibilityState={{ selected: active }}
-            className="min-h-[36px] flex-1 items-center justify-center rounded-chip"
+            className={`${tall ? 'min-h-[44px]' : 'min-h-[36px]'} flex-1 items-center justify-center rounded-chip`}
             style={
               active
                 ? {

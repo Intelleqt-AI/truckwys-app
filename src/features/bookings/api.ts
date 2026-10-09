@@ -5,6 +5,7 @@ import { asArray, num, str, pick } from '@/lib/api/list';
 import { useInfiniteList } from '@/lib/api/useInfiniteList';
 import { normalizeQuote, normalizeLoad, type LoadLite } from '@/types/domain';
 import { roundTo } from '@/lib/formatters';
+import { parseErrorBody, sendBlockMessage } from './quote/sendBlock';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
 /**
@@ -110,6 +111,32 @@ export function useQuoteFuelAlert(id: string | number, enabled: boolean) {
       try {
         const res = await fetchData<QuoteFuelAlert>(`quotes/${id}/fuel-alert/`);
         return res?.has_alert ? res : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
+/**
+ * The backend's costing for a saved quote today (POST quotes/cost-breakdown/
+ * {quote_id}, newer backends): floor, margin_pct, the stored snapshot and the
+ * send check. Null on an older backend (404) or any failure: the screen then
+ * uses the quote's stored cost floor.
+ */
+export function useQuoteCosting(id: string | number, enabled: boolean) {
+  return useQuery<Record<string, unknown> | null>({
+    queryKey: ['quote-costing', id],
+    enabled: enabled && !!id,
+    retry: false,
+    queryFn: async () => {
+      try {
+        const res = await postData<Record<string, unknown>>({
+          url: 'quotes/cost-breakdown/',
+          data: { quote_id: Number(id) },
+          config: { timeout: 10000 },
+        });
+        return res && res.success === true ? res : null;
       } catch {
         return null;
       }
@@ -251,6 +278,26 @@ export function useCompanyProfileData() {
   });
 }
 
+/**
+ * Re-check the official fuel price now: POST fuel-prices/refresh/ (newer
+ * backends, any user), else the older GET ?force=true.
+ */
+export async function refreshFuelPrices(): Promise<{ ok: boolean; message: string | null }> {
+  try {
+    const res = (await postData<Record<string, unknown>>({ url: 'fuel-prices/refresh/', data: {} })) ?? {};
+    // refresh {attempted, ok, throttled, changed, message}
+    const r = (res.refresh ?? res) as Record<string, unknown>;
+    return { ok: r.ok !== false, message: typeof r.message === 'string' && r.message ? r.message : null };
+  } catch (e) {
+    const status = Number((e as { status?: number }).status);
+    if ([404, 405, 501].includes(status)) {
+      await fetchData('fuel-prices/current/?force=true');
+      return { ok: true, message: null };
+    }
+    throw e;
+  }
+}
+
 export function useFuelPrice() {
   return useQuery<Record<string, unknown>>({
     queryKey: ['fuel-prices'],
@@ -282,8 +329,13 @@ export const recordLocationPick = (label: string, lat: number, lon: number) =>
     data: { location_text: label, lat: roundTo(lat, 6), lon: roundTo(lon, 6) },
   }).catch(() => {});
 
+// X-TW-Quote-Rules: 1 opts into the QUOTE-RULES response shape (unknown
+// fuel/tolls as null + tolls_unknown / distance_estimated flags). Without it
+// the backend keeps the legacy shape for already-shipped builds. A plain
+// header: OTA-safe, and older backends ignore it.
+export const QUOTE_RULES_HEADER = { 'X-TW-Quote-Rules': '1' };
 export const calculateRoute = (data: Record<string, unknown>) =>
-  postData<Record<string, unknown>>({ url: 'route/calculate/', data });
+  postData<Record<string, unknown>>({ url: 'route/calculate/', data, config: { headers: QUOTE_RULES_HEADER } });
 
 export const analyzeQuote = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'quotes/analyze/', data });
@@ -375,10 +427,42 @@ export const convertQuoteToLoad = (
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
+// Blob.text() isn't in React Native's Blob: read it with FileReader.
+const blobText = (b: Blob): Promise<string> =>
+  new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => resolve('');
+      reader.readAsText(b);
+    } catch {
+      resolve('');
+    }
+  });
+
 // Quote PDF is a GET that streams a PDF blob (web uses downloadBlob).
+//
+// A refused PDF (a draft with a blocking warning, §11) answers 400 JSON, which
+// with responseType 'blob' arrives as a Blob: read it and throw the block's
+// own title rather than "Request failed (400)".
 export const downloadQuotePdf = async (id: string | number): Promise<Blob> => {
-  const res = await api.get(`quotes/${id}/generate_pdf/`, { responseType: 'blob' });
-  return res.data as Blob;
+  try {
+    const res = await api.get(`quotes/${id}/generate_pdf/`, { responseType: 'blob' });
+    return res.data as Blob;
+  } catch (e) {
+    const data = (e as { data?: unknown }).data;
+    if (data && typeof Blob !== 'undefined' && data instanceof Blob) {
+      const body = parseErrorBody(await blobText(data));
+      const msg = sendBlockMessage(body);
+      if (msg) {
+        const err = new Error(msg) as Error & { status?: number; data?: unknown };
+        err.status = (e as { status?: number }).status;
+        err.data = body;
+        throw err;
+      }
+    }
+    throw e;
+  }
 };
 
 // ── Load mutations / actions ────────────────────────────────────────────────

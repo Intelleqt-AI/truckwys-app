@@ -9,6 +9,7 @@ import type {
   Proposal,
   ProposalField,
   ProposalOperation,
+  ProposalPriceWarning,
   ProposalResult,
   ProposalStatus,
   ProposedAction,
@@ -82,8 +83,22 @@ export function parseProposal(v: unknown): Proposal | null {
     confirmText: str(pick(o, ['confirm_text']), 'Confirm'),
     status: STATUSES.includes(status) ? status : 'pending',
     result: parseResult(o.result),
+    priceWarnings: parsePriceWarnings(o.price_warnings),
+    requiresAcknowledgement: o.requires_acknowledgement === true,
+    sends: op === 'SEND' || o.sends === true || o.will_send === true,
   };
 }
+
+export const parsePriceWarnings = (v: unknown): ProposalPriceWarning[] =>
+  asArray(v)
+    .map((w) => asRecord(w))
+    .filter((w) => str(w.title))
+    .map((w) => ({
+      code: str(w.code),
+      severity: str(w.severity, 'warn'),
+      title: str(w.title),
+      ...(w.detail != null ? { detail: str(w.detail) } : {}),
+    }));
 
 function parseProposedAction(v: unknown): ProposedAction | null {
   const o = asRecord(v);
@@ -237,15 +252,39 @@ export async function adoptAfterTimeout(conversationId: number): Promise<Msg | n
 
 // ── Proposals ──────────────────────────────────────────────────────────────
 export interface ExecuteOutcome {
-  status: 'executed' | 'failed';
+  /** needs_acknowledgement: the quote is priced below cost/target; confirm again to send. */
+  status: 'executed' | 'failed' | 'needs_acknowledgement';
+  priceWarnings?: ProposalPriceWarning[];
   /** Assistant message the server wants appended after a successful execute. */
   message?: string;
   action?: NavAction | null;
   result: ProposalResult | null;
 }
 
-export async function executeProposal(id: number): Promise<ExecuteOutcome> {
-  const res = asRecord(await postData({ url: `agent/proposals/${id}/execute/`, data: {} }));
+/**
+ * `acknowledge`: the person confirmed with the price warnings on screen
+ * (sent as acknowledge_price_warnings; older backends ignore it). A 400
+ * needs_acknowledgement comes back as that status, not an error.
+ */
+export async function executeProposal(id: number, acknowledge = false): Promise<ExecuteOutcome> {
+  let raw: unknown;
+  try {
+    raw = await postData({
+      url: `agent/proposals/${id}/execute/`,
+      data: acknowledge ? { acknowledge_price_warnings: true } : {},
+    });
+  } catch (e) {
+    const body = asRecord((e as { data?: unknown }).data);
+    if (str(body.status) === 'needs_acknowledgement' || str(body.code) === 'price_warnings_unacknowledged') {
+      return {
+        status: 'needs_acknowledgement',
+        priceWarnings: parsePriceWarnings(body.price_warnings),
+        result: null,
+      };
+    }
+    throw e;
+  }
+  const res = asRecord(raw);
   const executed = str(pick(res, ['status'])) === 'executed';
   const action = parseActions([res.action])[0] ?? null;
   return {

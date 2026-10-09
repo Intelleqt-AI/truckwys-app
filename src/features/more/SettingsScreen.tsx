@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -66,6 +66,24 @@ import {
   type NotificationPrefs,
 } from './api';
 import { normalizeVehicleType } from '@/features/bookings/api';
+import {
+  dieselInputFromApi,
+  hasPetrolRule,
+  LEGACY_DIESEL_SENTINEL,
+  petrolInputFromApi,
+  resolvePetrol,
+  saShortDate,
+} from '@/features/bookings/quote/rules';
+import { capacityTons } from '@/features/bookings/quote/types';
+import { fuelChangeMessage } from './fuelChange';
+import {
+  companyFieldErrors,
+  ownPricePerLitreError,
+  priceBoxPlan,
+  priceText,
+  type CompanyBox,
+  type PriceBoxes,
+} from './companyFieldErrors';
 import { InvoiceNumberingSection } from '@/features/finance/InvoiceNumberingSection';
 import { ComingSoonNote, ProviderCards } from '@/features/accounting/components/ProviderCards';
 import { FleetTrackingCards } from '@/features/integrations/FleetTrackingCards';
@@ -646,7 +664,6 @@ function VehicleTypesSection() {
               const rate = num(pick(r, ['base_rate']));
               const fuelType = str(pick(r, ['fuel_type']));
               const consumption = num(pick(r, ['fuel_consumption_l_per_100km']));
-              const sensitivity = num(pick(r, ['fuel_consumption_sensitivity_pct']));
               const description = str(pick(r, ['description']));
               const isActive = pick(r, ['active']) !== false;
               const isSel = selected.has(tid);
@@ -668,11 +685,10 @@ function VehicleTypesSection() {
                 });
               };
               const meta = [
-                cap ? `${cap}t` : null,
+                cap ? `${capacityTons(cap) ?? cap} t` : null,
                 rate ? `R ${rate}/km` : null,
                 fuelType || null,
                 consumption ? `${consumption} L/100km` : null,
-                consumption && sensitivity ? `+${sensitivity}%/t over capacity` : null,
               ]
                 .filter(Boolean)
                 .join(' · ');
@@ -1253,17 +1269,27 @@ const PROVINCE_OPTIONS = ['GP', 'WC', 'KZN', 'EC', 'LP', 'MP', 'NW', 'FS', 'NC']
   label: p,
   value: p,
 }));
-// The backend's factory default for Company.fuel_price_per_litre. Used both as
-// the blank-box fallback on save and to recognise an untouched diesel price when
-// the live feed offers a fresher one — those two uses must stay in step, or the
-// "don't overwrite a deliberate price" guard inverts.
-const DIESEL_DEFAULT_PRICE = 23.5;
 
 function CompanySection() {
-  const { data } = useCompanyProfile();
+  const { data, isError: profileError } = useCompanyProfile();
   const qc = useQueryClient();
   const demo = useDemo();
   const [seeded, setSeeded] = useState(false);
+  // Inline errors per box: the client checks and the server's 400 field errors.
+  const [boxErrors, setBoxErrors] = useState<Partial<Record<CompanyBox, string>>>({});
+  // The price boxes as loaded: only a changed box is checked and sent.
+  const loadedPricesRef = useRef<PriceBoxes>({ electric: null, hybrid: null, baseRate: null });
+  // The fuel choices as loaded: a change to them is confirmed before saving.
+  const loadedFuelRef = useRef<{
+    dieselMode: 'LIVE' | 'OWN';
+    dieselOwn: number | null;
+    petrolMode: 'LIVE' | 'OWN';
+    petrolOwn: number | null;
+    grade: '95' | '93';
+  }>({ dieselMode: 'LIVE', dieselOwn: null, petrolMode: 'LIVE', petrolOwn: null, grade: '95' });
+  const loadedPetrolOfficialRef = useRef<number | null>(null);
+  const [savedNote, setSavedNote] = useState('');
+  const clearBox = (b: CompanyBox) => setBoxErrors((e) => (e[b] ? { ...e, [b]: undefined } : e));
   const [busy, setBusy] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
 
@@ -1290,18 +1316,32 @@ function CompanySection() {
   const [baseRate, setBaseRate] = useState('');
   const [tollRate, setTollRate] = useState('');
   const [slaHours, setSlaHours] = useState('');
-  // One default price per fuel type. Diesel keeps the legacy field name
-  // (fuel_price_per_litre) because it predates the other three, and it's the
-  // only one the column can't hold NULL for.
+  // Diesel (QUOTE-RULES §1): the official price for the zone, unless the fleet
+  // sets its own. The own box is ONLY ever what the person typed: never the
+  // live price (not on load, not on refresh, not on a zone change). Empty ⇒
+  // the official price is used.
   const [fuelPrice, setFuelPrice] = useState('');
+  // Official price, or the fleet's own: picked explicitly. "My own price"
+  // with an empty box is an error, never a silent switch to official.
+  const [dieselMode, setDieselMode] = useState<'LIVE' | 'OWN'>('LIVE');
+  const [dieselError, setDieselError] = useState('');
+  // Petrol (petrol and hybrid trucks), same rule as diesel on a newer
+  // backend: the official ULP price (95, or 93 for an inland fleet) unless the
+  // fleet sets its own. The own box is only ever what the person typed (or
+  // their stored own price); never the official figure. Switching to Official
+  // keeps the stored own price. An older backend has only the own box.
   const [fuelPetrol, setFuelPetrol] = useState('');
+  const [petrolMode, setPetrolMode] = useState<'LIVE' | 'OWN'>('LIVE');
+  const [petrolGradeChoice, setPetrolGradeChoice] = useState<'95' | '93'>('95');
+  const [petrolError, setPetrolError] = useState('');
   const [fuelElectric, setFuelElectric] = useState('');
   const [fuelHybrid, setFuelHybrid] = useState('');
-  // Which gazetted diesel price this fleet buys at — coastal (Cape Town,
+  // Which gazetted fuel prices this fleet buys at — coastal (Cape Town,
   // Durban, Gqeberha, East London) or inland (Gauteng and the interior),
-  // roughly R0.87/L apart. Only diesel is split this way.
+  // roughly R0.87/L apart. Diesel and petrol are both split this way.
   const [fuelZone, setFuelZone] = useState<'INLAND' | 'COASTAL'>('INLAND');
   const [livePrice, setLivePrice] = useState<Record<string, unknown> | null>(null);
+  const [liveLoaded, setLiveLoaded] = useState(false);
   const [fetchingLive, setFetchingLive] = useState(false);
   // Banking details, shown in a "How to pay" block on invoices (PDF, email and
   // the online copy) once a bank name and account number are both filled in.
@@ -1315,8 +1355,21 @@ function CompanySection() {
   // check and send; 'yes' emails the customer straight away.
   const [autoEmail, setAutoEmail] = useState('no');
 
+  // The own price is seeded once the live price is in (or failed), because an
+  // older backend stores "live" as 23,50 or as the official figure itself.
   useEffect(() => {
-    if (seeded || !data) return;
+    let cancelled = false;
+    fetchFuelPrices(false)
+      .then((d) => !cancelled && setLivePrice(d as Record<string, unknown>))
+      .catch(() => null)
+      .finally(() => !cancelled && setLiveLoaded(true));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (seeded || !data || !liveLoaded) return;
     const addr = (pick(data, ['address']) ?? {}) as Record<string, unknown>;
     const contact = (pick(data, ['contact']) ?? {}) as Record<string, unknown>;
     setCompanyName(str(pick(data, ['company_name', 'name'])));
@@ -1339,12 +1392,29 @@ function CompanySection() {
     };
     seedNum(['default_quote_validity_days'], setValidityDays);
     // Web reads default_base_rate_per_km; older records used base_rate_per_km.
-    seedNum(['default_base_rate_per_km', 'base_rate_per_km', 'base_rate'], setBaseRate);
+    // Comma decimal, like every price box ("33,50").
+    setBaseRate(priceText(pick(data, ['default_base_rate_per_km', 'base_rate_per_km', 'base_rate'])));
     seedNum(['default_toll_rate_per_km'], setTollRate);
-    seedNum(['fuel_price_per_litre'], setFuelPrice);
-    seedNum(['fuel_price_petrol'], setFuelPetrol);
-    seedNum(['fuel_price_electric'], setFuelElectric);
-    seedNum(['fuel_price_hybrid'], setFuelHybrid);
+    const diesel = dieselInputFromApi(data, livePrice);
+    // The stored own price shows even on Official (kept, like petrol), with
+    // a comma decimal ("29,11").
+    setFuelPrice(
+      pick(data, ['fuel_price_own']) != null
+        ? priceText(pick(data, ['fuel_price_own']))
+        : diesel.mode === 'OWN' && diesel.own_price != null
+          ? priceText(diesel.own_price)
+          : '',
+    );
+    setDieselMode(diesel.mode === 'OWN' && diesel.own_price != null ? 'OWN' : 'LIVE');
+    setFuelPetrol(priceText(pick(data, ['fuel_price_petrol'])));
+    setPetrolMode(
+      str(pick(data, ['fuel_price_petrol_mode'])).toUpperCase() === 'OWN' && num(pick(data, ['fuel_price_petrol'])) > 0
+        ? 'OWN'
+        : 'LIVE',
+    );
+    setPetrolGradeChoice(str(pick(data, ['fuel_price_petrol_grade'])) === '93' ? '93' : '95');
+    setFuelElectric(priceText(pick(data, ['fuel_price_electric'])));
+    setFuelHybrid(priceText(pick(data, ['fuel_price_hybrid'])));
     seedNum(['default_sla_hours'], setSlaHours);
     seedNum(['cross_border_crossings_per_year'], setCrossingsPerYear);
     setFuelZone(str(pick(data, ['fuel_zone'])) === 'COASTAL' ? 'COASTAL' : 'INLAND');
@@ -1358,10 +1428,36 @@ function CompanySection() {
     setAutoEmail(pick(data, ['auto_email_invoices']) === true ? 'yes' : 'no');
     const logo = str(pick(data, ['logo_url']));
     if (logo && !logo.endsWith('/brand/logo.svg')) setLogoUrl(logo);
+    loadedPricesRef.current = {
+      electric: parseNum(priceText(pick(data, ['fuel_price_electric']))),
+      hybrid: parseNum(priceText(pick(data, ['fuel_price_hybrid']))),
+      baseRate: parseNum(priceText(pick(data, ['default_base_rate_per_km', 'base_rate_per_km', 'base_rate']))),
+    };
+    // A stored out-of-range price shows on its box from the start.
+    setBoxErrors(
+      priceBoxPlan(loadedPricesRef.current, loadedPricesRef.current, {
+        petrolRule: hasPetrolRule(data, livePrice),
+      }).show,
+    );
+    {
+      const d = dieselInputFromApi(data, livePrice);
+      const pMode =
+        str(pick(data, ['fuel_price_petrol_mode'])).toUpperCase() === 'OWN' && num(pick(data, ['fuel_price_petrol'])) > 0
+          ? 'OWN'
+          : 'LIVE';
+      loadedFuelRef.current = {
+        dieselMode: d.mode === 'OWN' && d.own_price != null ? 'OWN' : 'LIVE',
+        dieselOwn: d.mode === 'OWN' ? d.own_price : null,
+        petrolMode: pMode,
+        petrolOwn: num(pick(data, ['fuel_price_petrol'])) || null,
+        grade: str(pick(data, ['fuel_price_petrol_grade'])) === '93' ? '93' : '95',
+      };
+      loadedPetrolOfficialRef.current = resolvePetrol(data, livePrice).official_price;
+    }
     setSeeded(true);
-  }, [data, seeded]);
+  }, [data, seeded, liveLoaded, livePrice]);
 
-  const save = async () => {
+  const save = async (confirmed = false) => {
     if (demo.block()) return;
     // Every numeric box is validated through parseNum first. The old guards
     // compared Number(v) against bounds, and BOTH sides of a comparison are
@@ -1371,9 +1467,9 @@ function CompanySection() {
       ['Quote validity', validityDays],
       ['Base rate / km', baseRate],
       ['Toll rate / km', tollRate],
-      ['Diesel price', fuelPrice],
-      ['Petrol price', fuelPetrol],
-      ['Electric price', fuelElectric],
+      ['Your diesel price', fuelPrice],
+      ['Your petrol price', fuelPetrol],
+      ['Electricity cost', fuelElectric],
       ['Hybrid price', fuelHybrid],
       ['SLA hours', slaHours],
       ['Border crossings per year', crossingsPerYear],
@@ -1457,15 +1553,81 @@ function CompanySection() {
     for (const [label, v, max] of [
       ['Base rate / km', baseRate, BASE_RATE_MAX],
       ['Toll rate / km', tollRate, TOLL_RATE_MAX],
-      ['Diesel price', fuelPrice, FUEL_PRICE_MAX],
-      ['Petrol price', fuelPetrol, FUEL_PRICE_MAX],
-      ['Electric price', fuelElectric, FUEL_PRICE_MAX],
+      ['Your diesel price', fuelPrice, FUEL_PRICE_MAX],
+      ['Your petrol price', fuelPetrol, FUEL_PRICE_MAX],
+      ['Electricity cost', fuelElectric, FUEL_PRICE_MAX],
       ['Hybrid price', fuelHybrid, FUEL_PRICE_MAX],
     ] as const) {
       const n = parseNum(v);
       if (n != null && n > max) return toast.error(`${label} is too large`);
     }
 
+    if (dieselMode === 'OWN') {
+      const err = ownPricePerLitreError(parseNum(fuelPrice));
+      if (err) {
+        setDieselError(err);
+        return toast.error('Check your diesel price');
+      }
+    }
+    setDieselError('');
+    const plan = priceBoxPlan(
+      { electric: parseNum(fuelElectric), hybrid: parseNum(fuelHybrid), baseRate: parseNum(baseRate) },
+      loadedPricesRef.current,
+      { petrolRule },
+    );
+    setBoxErrors({ ...plan.show, ...plan.block });
+    if (Object.keys(plan.block).length) return toast.error('Check the highlighted prices');
+    if (petrolRule && petrolMode === 'OWN') {
+      const p = parseNum(fuelPetrol);
+      if (p == null) {
+        setPetrolError('Enter your price, or choose Official price');
+        return toast.error('Enter your petrol price');
+      }
+      if (p < 5 || p > 100) {
+        setPetrolError('Between R 5 and R 100 per litre');
+        return toast.error('Enter a petrol price between R 5 and R 100 per litre');
+      }
+    }
+    setPetrolError('');
+    const ownDiesel = dieselMode === 'OWN' ? clearableNum(fuelPrice, 4) : null;
+    if (ownDiesel != null && Math.abs(ownDiesel - LEGACY_DIESEL_SENTINEL) < 0.005 && !(data && 'fuel_price_mode' in data)) {
+      return toast.error('R 23,50 is reserved here. Enter 23,49 or 23,51');
+    }
+    // A change to the price quotes run on is confirmed first, in plain words.
+    const loaded = loadedFuelRef.current;
+    const dieselChange = fuelChangeMessage(
+      'diesel',
+      { mode: loaded.dieselMode, price: loaded.dieselMode === 'OWN' ? loaded.dieselOwn : officialDiesel.official_price },
+      { mode: dieselMode, price: dieselMode === 'OWN' ? parseNum(fuelPrice) : officialDiesel.official_price },
+    );
+    const petrolChange = petrolRule
+      ? fuelChangeMessage(
+          'petrol',
+          {
+            mode: loaded.petrolMode,
+            price: loaded.petrolMode === 'OWN' ? loaded.petrolOwn : loadedPetrolOfficialRef.current,
+            grade: loaded.grade,
+          },
+          {
+            mode: petrolMode,
+            price: petrolMode === 'OWN' ? parseNum(fuelPetrol) : officialPetrol.official_price,
+            grade: petrolGradeChoice,
+          },
+        )
+      : null;
+    const change = dieselChange ?? petrolChange;
+    if (change && !confirmed) {
+      const both = dieselChange && petrolChange;
+      Alert.alert(
+        both ? 'Change your fuel prices?' : change.title,
+        both ? `${dieselChange.message}\n\n${petrolChange.message}` : change.message,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: both ? 'Save' : change.confirm, onPress: () => void save(true) },
+        ],
+      );
+      return;
+    }
     setBusy(true);
     try {
       await updateCompanyProfile({
@@ -1498,120 +1660,103 @@ function CompanySection() {
         // diesel below.
         cross_border_crossings_per_year: optionalNum(crossingsPerYear, 0) ?? 24,
         default_quote_validity_days: optionalNum(validityDays, 0),
-        default_base_rate_per_km: optionalNum(baseRate, 2),
+        // Price boxes go only when changed (see priceBoxPlan).
+        ...(plan.send.baseRate ? { default_base_rate_per_km: optionalNum(baseRate, 2) } : {}),
         default_toll_rate_per_km: optionalNum(tollRate, 3),
         fuel_zone: fuelZone,
-        // Diesel is NOT NULL with a 23.50 factory default, so a blank box falls
-        // back to that rather than clearing — matching the web page.
-        fuel_price_per_litre: optionalNum(fuelPrice, 4) ?? DIESEL_DEFAULT_PRICE,
-        fuel_price_petrol: clearableNum(fuelPetrol, 4),
-        fuel_price_electric: clearableNum(fuelElectric, 4),
-        fuel_price_hybrid: clearableNum(fuelHybrid, 4),
+        // Own price set ⇒ OWN; empty ⇒ LIVE (official). A newer backend takes
+        // the mode fields; an older one reads 23,50 as "use the live price".
+        // Official keeps the stored own price (not cleared), like petrol.
+        ...(data && 'fuel_price_mode' in data
+          ? ownDiesel != null
+            ? { fuel_price_mode: 'OWN', fuel_price_own: ownDiesel }
+            : { fuel_price_mode: 'LIVE' }
+          : { fuel_price_per_litre: ownDiesel ?? LEGACY_DIESEL_SENTINEL }),
+        // Petrol: a newer backend takes the mode (+ the own price when it's
+        // OWN; Official leaves the stored own price alone). An older one only
+        // has the own price. Never the official figure.
+        ...(petrolRule
+          ? {
+              fuel_price_petrol_mode: petrolMode,
+              fuel_price_petrol_grade: petrolGradeChoice,
+              ...(petrolMode === 'OWN' ? { fuel_price_petrol: clearableNum(fuelPetrol, 4) } : {}),
+            }
+          : { fuel_price_petrol: clearableNum(fuelPetrol, 4) }),
+        ...(plan.send.electric ? { fuel_price_electric: clearableNum(fuelElectric, 4) } : {}),
+        ...(plan.send.hybrid ? { fuel_price_hybrid: clearableNum(fuelHybrid, 4) } : {}),
         default_sla_hours: optionalNum(slaHours, 0),
       });
       invalidateFor(qc, 'company');
-      toast.success();
+      if (change) {
+        setSavedNote([dieselChange?.saved, petrolChange?.saved].filter(Boolean).join(' '));
+        loadedFuelRef.current = {
+          dieselMode,
+          dieselOwn: dieselMode === 'OWN' ? parseNum(fuelPrice) : loaded.dieselOwn,
+          petrolMode,
+          petrolOwn: petrolMode === 'OWN' ? parseNum(fuelPetrol) : loaded.petrolOwn,
+          grade: petrolGradeChoice,
+        };
+      }
+      toast.success(change ? [dieselChange?.saved, petrolChange?.saved].filter(Boolean).join(' ') : undefined);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not update company');
+      // Field errors go to their box; the toast says where to look.
+      const fieldErrs = companyFieldErrors((e as { data?: unknown }).data);
+      if (fieldErrs.diesel) setDieselError(fieldErrs.diesel);
+      if (fieldErrs.petrol) setPetrolError(fieldErrs.petrol);
+      setBoxErrors(fieldErrs);
+      toast.error(
+        Object.keys(fieldErrs).length
+          ? 'Check the highlighted prices'
+          : e instanceof Error
+            ? e.message
+            : 'Could not update company',
+      );
     } finally {
       setBusy(false);
     }
   };
 
   /**
-   * Pull the live national prices into the form (not saved until Save changes).
-   *
-   * One action rather than web's two: the endpoint returns diesel and petrol in
-   * a single response, and web wires a FETCH NOW button next to each that both
-   * call the same handler — so pressing the petrol one silently rewrites diesel
-   * too. One button that says it fills both is the honest version.
-   *
-   * There is no live feed for electric or hybrid anywhere in the system, so those
-   * two stay manual.
-   *
-   * `zoneOverride` is passed by the zone selector so the fetch prices at the
-   * zone just chosen rather than whatever `fuelZone` still holds — reading it
-   * back from state would let a fast response land before the setFuelZone
-   * commit and write the wrong zone's price. `dieselOnly` keeps a zone switch
-   * off the petrol field — petrol has no coastal/inland split, so a zone
-   * change has no business rewriting it.
+   * Refresh the official prices. Shows them; never writes them into the own
+   * diesel or petrol box.
    */
-  const loadLivePrice = async (manual: boolean, zoneOverride?: string, dieselOnly = false) => {
-    const zone = zoneOverride ?? fuelZone;
-    if (manual) setFetchingLive(true);
+  const loadLivePrice = async () => {
+    setFetchingLive(true);
     try {
-      const d = (await fetchFuelPrices(manual)) as Record<string, unknown>;
+      const d = (await fetchFuelPrices(true)) as Record<string, unknown>;
       setLivePrice(d);
       if (pick(d, ['success']) === false) {
-        if (manual) toast.error(str(pick(d, ['error']), 'Could not fetch live fuel prices'));
+        toast.error("Couldn't refresh prices");
         return;
       }
-      // Diesel is gazetted per zone — reading inland_price unconditionally
-      // over-charged every coastal fleet by the coastal/inland gap. Falls
-      // back to inland_price when coastal_price is absent (an older backend).
-      const diesel = zone === 'COASTAL' ? (pick(d, ['coastal_price']) ?? pick(d, ['inland_price'])) : pick(d, ['inland_price']);
-      if (diesel != null) {
-        // On the silent load, only fill what still looks untouched — blank, or
-        // still sitting on the factory default. A manual fetch is an explicit
-        // request, so it always wins. Never quietly overwrite a real price.
-        setFuelPrice((prev) => {
-          const n = parseNum(prev);
-          const untouched =
-            !prev.trim() || (n != null && Math.abs(n - DIESEL_DEFAULT_PRICE) < 0.001);
-          return manual || untouched ? String(num(diesel)) : prev;
-        });
-      }
-      // petrol_95 comes back as 0 (not null) when there's no data — writing that
-      // would store a zero price.
-      const petrol = num(pick(d, ['petrol_95']));
-      if (petrol > 0 && !dieselOnly) {
-        setFuelPetrol((prev) => (manual || !prev.trim() ? String(petrol) : prev));
-      }
-      if (manual) {
-        if (dieselOnly) toast.success(`Diesel updated to the ${zone === 'COASTAL' ? 'coastal' : 'inland'} price`);
-        else toast.success('Fuel prices refreshed');
-      }
-    } catch (e) {
-      // The endpoint 500s rather than degrading to a 200, so this path is real.
-      if (manual) toast.error(e instanceof Error ? e.message : 'Could not fetch live fuel prices');
+      // Petrol stays what the fleet typed: never prefilled from the official feed.
+    } catch {
+      toast.error("Couldn't refresh prices");
     } finally {
-      if (manual) setFetchingLive(false);
+      setFetchingLive(false);
     }
   };
 
-  // Chained off the profile load, not parallel: the guard above reads the
-  // current diesel value to decide whether it looks untouched, so the saved
-  // value has to be in state first.
-  useEffect(() => {
-    if (!seeded) return;
-    void loadLivePrice(false);
-  }, [seeded]);
+  // The official diesel price for the chosen zone: the one figure shown.
+  const officialDiesel = dieselInputFromApi({ fuel_zone: fuelZone }, livePrice);
+  const officialNote = officialDiesel.official_price
+    ? `Official ${formatCurrency(officialDiesel.official_price)}/L${
+        officialDiesel.official_effective_from ? ` · ${saShortDate(officialDiesel.official_effective_from)}` : ''
+      }${officialDiesel.official_stale ? ' · may be old' : ''}`
+    : 'No official price on record';
 
-  // Read-out under the fields: what the live feed last said, and whether it's old.
-  const liveStale = pick(livePrice ?? {}, ['is_stale']) === true;
-  const liveDiesel = num(
-    pick(
-      livePrice ?? {},
-      fuelZone === 'COASTAL' ? ['coastal_price', 'inland_price'] : ['inland_price'],
-    ),
+  // Petrol: same Official / My own price rule on a newer backend.
+  const petrolRule = hasPetrolRule(data, livePrice);
+  const officialPetrol = petrolInputFromApi(
+    { fuel_zone: fuelZone, fuel_price_petrol_grade: petrolGradeChoice, fuel_price_petrol_mode: 'LIVE' },
+    livePrice,
   );
-  const liveNote = (() => {
-    if (!livePrice || pick(livePrice, ['success']) === false || liveDiesel <= 0) return '';
-    // The price is the 50ppm wholesale list price from a given day; say which
-    // day (effective_from, in SAST), falling back to the month it was fetched.
-    const effective = str(pick(livePrice, ['effective_from']));
-    const updated = str(pick(livePrice, ['last_updated']));
-    const grade = str(pick(livePrice, ['diesel_grade']));
-    const warning = str(pick(livePrice, ['stale_warning']));
-    const zoneLabel = fuelZone === 'COASTAL' ? 'coastal' : 'inland';
-    const parts = [
-      `Live national diesel ${formatCurrency(liveDiesel)}/L (${[grade, zoneLabel].filter(Boolean).join(' ')})`,
-    ];
-    if (effective) parts.push(`effective ${formatDate(effective.slice(0, 10))}`);
-    else if (updated) parts.push(`updated ${formatDate(updated)}`);
-    if (warning) parts.push(warning);
-    return parts.join(' · ');
-  })();
+  const petrolGradeLabel = `ULP ${officialPetrol.grade ?? '95'}`;
+  const officialPetrolNote = officialPetrol.official_price
+    ? `Official ${petrolGradeLabel} ${formatCurrency(officialPetrol.official_price)}/L${
+        officialPetrol.official_effective_from ? ` · ${saShortDate(officialPetrol.official_effective_from)}` : ''
+      }${officialPetrol.official_stale ? ' · may be old' : ''}`
+    : `No official ${petrolGradeLabel} price on record`;
 
   const uploadLogo = async () => {
     if (demo.block()) return;
@@ -1738,11 +1883,7 @@ function CompanySection() {
       />
 
       <Label className="mt-1 text-muted">Banking details</Label>
-      <Txt className="-mt-2 text-caption text-faint">
-        Shown in a &quot;How to pay&quot; section on the invoices you send (PDF, invoice email and
-        online invoice) once a bank name and account number are filled in. Until then, invoices ask
-        customers to contact you for banking details.
-      </Txt>
+      <Txt className="-mt-2 text-caption text-faint">Shown as &quot;How to pay&quot; on your invoices.</Txt>
       <TextField
         label="Bank name"
         placeholder="e.g. FNB"
@@ -1809,11 +1950,7 @@ function CompanySection() {
         value={autoEmail}
         onSelect={setAutoEmail}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        An invoice is raised automatically when a load is delivered. With No, it waits as a draft
-        for you to check and send. With Yes, it is emailed to the customer straight away and marked
-        sent. A customer with no email address always gets a draft.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Yes emails the invoice on delivery; No keeps a draft.</Txt>
 
       <Label className="mt-1 text-muted">Quote defaults</Label>
       <SelectField
@@ -1825,11 +1962,7 @@ function CompanySection() {
         value={allowCrossBorder}
         onSelect={setAllowCrossBorder}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Whether your fleet is set up to run loads that cross into neighbouring countries. Set to
-        &quot;No&quot; and any quote whose route actually crosses a border is refused rather than
-        priced.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">No refuses quotes whose route crosses a border.</Txt>
       <TextField
         label="Border crossings per year"
         placeholder="e.g. 24"
@@ -1837,11 +1970,7 @@ function CompanySection() {
         value={crossingsPerYear}
         onChangeText={setCrossingsPerYear}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Count each leg separately &mdash; a return trip is two. A C-BRTA permit is bought for a
-        year, so a quote charges its share of one crossing: the more you cross, the less each load
-        carries.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Each leg counts; spreads the C-BRTA permit cost.</Txt>
       <TextField
         label="Quote validity (days)"
         placeholder="e.g. 7"
@@ -1852,27 +1981,19 @@ function CompanySection() {
       <TextField
         label="Base rate / km"
         prefix="R"
-        placeholder="e.g. 33.00"
+        placeholder="e.g. 33,00"
         keyboardType="decimal-pad"
         value={baseRate}
-        onChangeText={setBaseRate}
+        onChangeText={(v) => {
+          setBaseRate(v);
+          clearBox('baseRate');
+        }}
+        error={boxErrors.baseRate}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Used when the vehicle type on a quote has no rate of its own (Settings → Vehicle Types).
-        A type&apos;s own rate always wins.
-      </Txt>
-      <TextField
-        label="Toll rate / km"
-        prefix="R"
-        placeholder="e.g. 0.50"
-        keyboardType="decimal-pad"
-        value={tollRate}
-        onChangeText={setTollRate}
-      />
-      <Txt className="-mt-1 text-caption text-faint">
-        Fallback only — used when the routing service can&apos;t itemise the toll plazas on a
-        route.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Used when a truck has no rate of its own.</Txt>
+      {/* No toll rate per km: quotes never guess tolls from distance any
+          more (QUOTE-RULES §6), so the old fallback field is gone. */}
+
       <TextField
         label="Default SLA (hours)"
         placeholder="e.g. 48"
@@ -1881,100 +2002,169 @@ function CompanySection() {
         value={slaHours}
         onChangeText={setSlaHours}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Delivery time promised on a new quote. Can be overridden per quote.
-      </Txt>
+      <Txt className="-mt-1 text-caption text-faint">Promised delivery time on new quotes.</Txt>
 
-      {/* ── Fuel price defaults ───────────────────────────────────────────── */}
+      {/* ── Fuel prices ───────────────────────────────────────────────────── */}
       <View className="mt-1 flex-row items-center justify-between">
-        <Label className="text-muted">Fuel price defaults</Label>
-        {/* A real button: as a bare label this read as a heading and nobody
-            knew it was the way to pull the national price. */}
+        <Label className="text-muted">Fuel prices</Label>
         <Button
-          label={fetchingLive ? 'Fetching' : 'Fetch live'}
-          icon="download"
+          label="Refresh"
+          icon="refresh"
           variant="secondary"
-          size="sm"
           loading={fetchingLive}
-          onPress={() => loadLivePrice(true)}
+          onPress={loadLivePrice}
         />
       </View>
-      <Txt className="-mt-2 text-caption text-faint">
-        Used when a vehicle type of that fuel runs a quote. Diesel and petrol can be pulled from the
-        live national price; electric and hybrid have no feed, so set those yourself.
-      </Txt>
       <SelectField
-        label="Fuel pricing zone"
+        label="Fuel zone"
         options={[
           { label: 'Inland', value: 'INLAND', sub: 'Gauteng and the interior' },
           { label: 'Coastal', value: 'COASTAL', sub: 'Cape Town, Durban, Gqeberha, East London' },
         ]}
         value={fuelZone}
-        onSelect={(v) => {
-          const zone = v === 'COASTAL' ? 'COASTAL' : 'INLAND';
-          setFuelZone(zone);
-          // The zone goes in as an argument, not read back off state — a fast
-          // response could otherwise land before setFuelZone commits and
-          // write the price for the zone just left.
-          void loadLivePrice(true, zone, true);
-        }}
+        onSelect={(v) => setFuelZone(v === 'COASTAL' ? 'COASTAL' : 'INLAND')}
       />
-      <Txt className="-mt-1 text-caption text-faint">
-        Diesel is gazetted at two prices: it arrives at the coastal ports and costs more inland
-        once the transport differential is added &mdash; about R0.87/L at the moment. Changing
-        this fetches the current price for the zone and updates Diesel below.
+      <Txt
+        className={`-mt-1 text-caption ${officialDiesel.official_price ? 'text-faint' : 'text-danger'}`}
+      >
+        {officialNote}
       </Txt>
-      <View className="flex-row gap-3">
-        <View className="flex-1">
-          <TextField
-            label="Diesel (R/L)"
-            prefix="R"
-            placeholder="e.g. 23,50"
-            keyboardType="decimal-pad"
-            value={fuelPrice}
-            onChangeText={setFuelPrice}
-          />
-        </View>
-        <View className="flex-1">
-          <TextField
-            label="Petrol (R/L)"
-            prefix="R"
-            placeholder="Not set"
-            keyboardType="decimal-pad"
-            value={fuelPetrol}
-            onChangeText={setFuelPetrol}
-          />
-        </View>
+      <View>
+        <Label className="mb-2 text-muted">Price quotes on</Label>
+        <SegmentedControl
+          options={[
+            { label: 'Official price', value: 'LIVE' },
+            { label: 'My own price', value: 'OWN' },
+          ]}
+          value={dieselMode}
+          tall
+          onChange={(v) => {
+            setDieselMode(v === 'OWN' ? 'OWN' : 'LIVE');
+            setDieselError('');
+          }}
+        />
       </View>
-      <View className="flex-row gap-3">
-        <View className="flex-1">
-          <TextField
-            label="Electric (R/kWh)"
-            prefix="R"
-            placeholder="Not set"
-            keyboardType="decimal-pad"
-            value={fuelElectric}
-            onChangeText={setFuelElectric}
-          />
-        </View>
-        <View className="flex-1">
-          <TextField
-            label="Hybrid (R/L)"
-            prefix="R"
-            placeholder="Not set"
-            keyboardType="decimal-pad"
-            value={fuelHybrid}
-            onChangeText={setFuelHybrid}
-          />
-        </View>
-      </View>
-      {liveNote && (
-        <Txt className={`-mt-1 text-caption ${liveStale ? 'text-warning' : 'text-faint'}`}>
-          {liveNote}
-        </Txt>
+      {dieselMode === 'OWN' && (
+        <TextField
+          label="My diesel price (R/L)"
+          prefix="R"
+          placeholder="e.g. 33,00"
+          keyboardType="decimal-pad"
+          value={fuelPrice}
+          onChangeText={(v) => {
+            setFuelPrice(v);
+            if (dieselError) setDieselError('');
+          }}
+          error={dieselError || undefined}
+        />
       )}
+      {petrolRule ? (
+        <>
+          <View className="mt-2">
+            <Label className="text-muted">Petrol</Label>
+            <Txt className="mt-1 text-caption text-faint">Hybrid trucks use the petrol price.</Txt>
+          </View>
+          {fuelZone === 'INLAND' ? (
+            <View>
+              <Label className="mb-2 text-muted">Official grade</Label>
+              <SegmentedControl
+                options={[
+                  { label: 'ULP 95', value: '95' },
+                  { label: 'ULP 93', value: '93' },
+                ]}
+                value={petrolGradeChoice}
+                tall
+                onChange={(v) => setPetrolGradeChoice(v === '93' ? '93' : '95')}
+              />
+            </View>
+          ) : null}
+          <Txt
+            className={`-mt-1 text-caption ${officialPetrol.official_price ? 'text-faint' : 'text-danger'}`}
+          >
+            {officialPetrolNote}
+            {fuelZone === 'COASTAL' && petrolGradeChoice === '93' ? ' (93 is inland only)' : ''}
+          </Txt>
+          <View>
+            <Label className="mb-2 text-muted">Price petrol quotes on</Label>
+            <SegmentedControl
+              options={[
+                { label: 'Official price', value: 'LIVE' },
+                { label: 'My own price', value: 'OWN' },
+              ]}
+              value={petrolMode}
+              tall
+              onChange={(v) => {
+                setPetrolMode(v === 'OWN' ? 'OWN' : 'LIVE');
+                setPetrolError('');
+              }}
+            />
+          </View>
+          {petrolMode === 'OWN' && (
+            <TextField
+              label="My petrol price (R/L)"
+              prefix="R"
+              placeholder="e.g. 33,00"
+              keyboardType="decimal-pad"
+              value={fuelPetrol}
+              onChangeText={(v) => {
+                setFuelPetrol(v);
+                if (petrolError) setPetrolError('');
+              }}
+              error={petrolError || undefined}
+            />
+          )}
+        </>
+      ) : (
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <TextField
+              label="Petrol (R/L)"
+              prefix="R"
+              placeholder="Not set"
+              keyboardType="decimal-pad"
+              value={fuelPetrol}
+              onChangeText={setFuelPetrol}
+            />
+          </View>
+          <View className="flex-1">
+            <TextField
+              label="Hybrid (R/L)"
+              prefix="R"
+              placeholder="Not set"
+              keyboardType="decimal-pad"
+              value={fuelHybrid}
+              onChangeText={(v) => {
+                setFuelHybrid(v);
+                clearBox('hybrid');
+              }}
+              error={boxErrors.hybrid}
+            />
+          </View>
+        </View>
+      )}
+      <TextField
+        label="Your electricity cost per kWh"
+        prefix="R"
+        placeholder="Not set"
+        keyboardType="decimal-pad"
+        value={fuelElectric}
+        onChangeText={(v) => {
+          setFuelElectric(v);
+          clearBox('electric');
+        }}
+        error={boxErrors.electric}
+      />
+      <Txt className="-mt-1 text-caption text-faint">Electric trucks: no official price, so quotes use this.</Txt>
 
-      <Button label="Save changes" loading={busy} onPress={save} fullWidth />
+      {/* Never save over a profile that hasn't loaded (or failed to). */}
+      <Button
+        label={profileError ? "Couldn't load settings" : 'Save changes'}
+        loading={busy}
+        disabled={!seeded || profileError}
+        onPress={() => void save()}
+        fullWidth
+      />
+      {!!savedNote && <Txt className="-mt-1 text-caption text-success">{savedNote}</Txt>}
     </View>
   );
 }

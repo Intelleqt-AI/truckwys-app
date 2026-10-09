@@ -281,8 +281,10 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
         <View className="mt-3 flex-row items-center justify-between">
           <Mono className="text-body font-semibold text-fg">{wholeRand(quote.amountInclVat)}</Mono>
           {/* A quote has no live margin once it is booked or expired. */}
-          {quote.marginPct != null && stage !== 'EXPIRED' && stage !== 'BOOKED' && (
-            <Mono className="text-caption text-faint">Margin {formatPercent(quote.marginPct)}</Mono>
+          {quote.marginPct !== undefined && stage !== 'EXPIRED' && stage !== 'BOOKED' && (
+            <Mono className="text-caption text-faint">
+              Margin {quote.marginPct === null ? '—' : formatPercent(quote.marginPct)}
+            </Mono>
           )}
         </View>
       </TouchableOpacity>

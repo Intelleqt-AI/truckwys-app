@@ -101,6 +101,9 @@ export interface Combination {
   margin_zar: number;
   margin_pct: number;
   win_probability: number | null;
+  /** Newer backends: the price is under the cost floor / under floor ÷ (1 − target). */
+  below_floor?: boolean;
+  below_target?: boolean;
 }
 
 export interface WinModel {
@@ -108,7 +111,31 @@ export interface WinModel {
   scope: 'user' | 'global' | null;
   training_samples: number;
   reason: string | null;
+  /** How far the win model is from scoring (newer backends). */
+  model_progress?: unknown;
 }
+
+/**
+ * "Win chance appears after 200 won and 200 lost quotes (you have 12 and 3)"
+ * from a model_progress block (a tier {accepted, rejected, accepted_needed,
+ * rejected_needed}, or {company|user: tier}); null when it can't be said.
+ */
+export function winProgressText(progress: unknown): string | null {
+  if (!progress || typeof progress !== 'object') return null;
+  const p = progress as Record<string, unknown>;
+  const tier = (['company', 'user', 'global'].map((k) => p[k]).find((t) => t && typeof t === 'object') ??
+    p) as Record<string, unknown>;
+  const n = (k: string) => (typeof tier[k] === 'number' ? (tier[k] as number) : null);
+  const won = n('accepted');
+  const lost = n('rejected');
+  const needWon = n('accepted_needed');
+  const needLost = n('rejected_needed');
+  if (won === null || lost === null || needWon === null || needLost === null) return null;
+  return `Win chance appears after ${needWon} won and ${needLost} lost quotes (you have ${won} and ${lost})`;
+}
+
+/** No market evidence for this lane: the copy the market check shows instead. */
+export const NO_MARKET_TEXT = 'No market data for this lane yet. Prices are your costs plus your margin.';
 
 export interface ReturnLeg {
   fuel_zar: number;
@@ -201,13 +228,12 @@ export function chipFor(t: ItemKey, item: ReviewItem): { tone: ChipTone; label: 
   const kind = kindOf(t, item);
   const d = item.detail || {};
   if (kind === 'official') {
-    const fiasa = (d.source || (t === 'fuel' ? 'FIASA' : '')).toUpperCase() === 'FIASA';
     return {
       tone: d.current === false ? 'warning' : 'success',
-      label: fiasa ? 'Official price (FIASA)' : 'Official price',
+      label: 'Official price',
     };
   }
-  if (kind === 'benchmark') return { tone: 'neutral', label: 'Lane benchmark' };
+  if (kind === 'benchmark') return { tone: 'neutral', label: 'Market median' };
   if (kind === 'source') {
     const src = sourceOf(item);
     const host = src ? httpsHost(src.url) : null;
@@ -262,26 +288,18 @@ export function classify(
 }
 
 export function failureText(f: Failure, secsLeft: number | null): { title: string; text: string } {
-  const wait = secsLeft != null && secsLeft > 0 ? `Try again in ${secsLeft} s.` : 'Try again shortly.';
+  const wait = secsLeft != null && secsLeft > 0 ? `Retry in ${secsLeft} s` : 'Retry shortly';
   switch (f.code) {
     case 'unavailable':
-      return f.missing
-        ? { title: "Price check isn't available yet", text: 'Your quote works as normal.' }
-        : { title: "Price check isn't available right now", text: 'Your quote works as normal.' };
+      return { title: f.missing ? 'Not available yet' : 'Not available right now', text: '' };
     case 'cooldown':
       return { title: 'Checked a moment ago', text: wait };
     case 'throttled':
-      return { title: 'Too many checks this minute', text: wait };
+      return { title: 'Too many checks', text: wait };
     case 'budget':
-      return {
-        title: "Today's price checks are used up",
-        text: 'Your company has reached its daily limit. Checks start again at midnight, and your quote works as normal.',
-      };
+      return { title: "Today's checks used up", text: 'More from midnight' };
     default:
-      return {
-        title: "Couldn't check market prices",
-        text: 'Your quote is unaffected. Try again in a minute.',
-      };
+      return { title: "Couldn't check", text: 'Retry in a minute' };
   }
 }
 
@@ -295,9 +313,12 @@ export const checkedAgo = (at: number, now: number) => {
 /** What the card says when there's no win chance to show. */
 export const WIN_REASON_COPY: Record<string, string> = {
   not_enough_history: 'Needs more closed quotes',
-  no_market_rate: 'No lane benchmark yet',
+  no_market_rate: 'No market data yet',
+  no_market: 'No market data yet',
   outside_training_range: 'No similar quotes yet',
   prediction_failed: "Couldn't score this quote",
+  floor_incomplete: 'Costs not complete yet',
+  model_curve_unusable: 'Not enough similar quotes',
 };
 
 /** One line per item for "Show details". */
@@ -349,8 +370,14 @@ export function detailLines(t: ItemKey, item: ReviewItem): string[] {
     }
   } else {
     lines.push(`Yours: ${perKm(d.your_rate_per_km)} × ${num1(d.distance_km)} km`);
-    if (d.market_low_per_km != null && d.market_high_per_km != null) {
-      lines.push(`Benchmark band: ${perKm(d.market_low_per_km)} to ${perKm(d.market_high_per_km)}`);
+    // Only a real band (both ends, low below high); never a broken range.
+    if (
+      d.market_low_per_km != null &&
+      d.market_high_per_km != null &&
+      d.market_low_per_km > 0 &&
+      d.market_high_per_km > d.market_low_per_km
+    ) {
+      lines.push(`Market: ${perKm(d.market_low_per_km)} – ${perKm(d.market_high_per_km)}`);
     }
   }
   return lines;

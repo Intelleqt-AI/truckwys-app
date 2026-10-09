@@ -6,7 +6,7 @@ import { View, TouchableOpacity } from 'react-native';
 // gorhom/bottom-sheet gotcha for any scrollable nested in sheet content).
 import { ScrollView } from 'react-native-gesture-handler';
 import { Label, Mono } from '@/components/ui';
-import { num, pick, str } from '@/lib/api/list';
+import { asArray, num, pick, str } from '@/lib/api/list';
 import { formatCurrency, formatDuration } from '@/lib/formatters';
 
 interface RouteStat {
@@ -19,14 +19,8 @@ interface RouteStat {
 }
 
 /**
- * Alternative-route chips — moved out of CreateQuoteScreen.tsx's render body
- * (Phase 2) verbatim, wrapped in memo. Phase 5: each card now carries the
- * actual decision information (distance/duration/tolls and, for the
- * non-selected routes, the delta against whichever route is selected) plus
- * FASTEST/CHEAPEST/RECOMMENDED tags computed client-side — all from fields
- * already in `routes[i]` and the response's `best_index`, no API change.
- * Same behaviour as before otherwise: only renders past one route, onPress
- * does exactly what it did inline.
+ * Route alternatives: name and tag, distance and time, tolls. A route whose
+ * toll lookup failed says "Tolls unknown", never R 0.
  */
 function RouteOptionChipsImpl({
   routes,
@@ -47,7 +41,8 @@ function RouteOptionChipsImpl({
     distanceKm: num(pick(r, ['distance_km'])),
     durationMin: num(pick(r, ['duration_minutes'])) || num(pick(r, ['duration_min'])),
     tollZar: num(pick(r, ['toll_cost_zar'])),
-    tollsUnavailable: pick(r, ['tolls_unavailable']) === true,
+    tollsUnavailable:
+      r.tolls_unknown === true || r.tolls_unavailable === true || ('toll_cost_zar' in r && r.toll_cost_zar == null),
   }));
   const fastestIdx = stats.reduce(
     (best, s, i) =>
@@ -61,11 +56,10 @@ function RouteOptionChipsImpl({
       s.tollsUnavailable ? best : best < 0 || s.tollZar < stats[best]!.tollZar ? i : best,
     -1,
   );
-  const selected = stats[selectedRouteIndex];
 
   return (
     <View>
-      <Label className="mb-2 text-muted">Alternative routes</Label>
+      <Label className="mb-2 text-muted">Routes</Label>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -77,22 +71,13 @@ function RouteOptionChipsImpl({
           const tags: string[] = [];
           if (i === bestIndex) tags.push('Recommended');
           if (i === fastestIdx) tags.push('Fastest');
-          if (i === cheapestIdx) tags.push('Cheapest');
-          const label = str(pick(r, ['label', 'summary']), `Route ${i + 1}`);
-
-          const deltaDistance = !active && selected ? s.distanceKm - selected.distanceKm : null;
-          const deltaDuration = !active && selected ? s.durationMin - selected.durationMin : null;
-          const deltaToll =
-            !active && selected && !s.tollsUnavailable && !selected.tollsUnavailable
-              ? s.tollZar - selected.tollZar
-              : null;
-          const sign = (n: number) => (n > 0 ? '+' : n < 0 ? '−' : '±');
-
+          if (i === cheapestIdx) tags.push('Fewest tolls');
+          const label = routeName(r, i);
           const a11yLabel = [
             label,
             `${Math.round(s.distanceKm)} kilometres`,
             formatDuration(s.durationMin / 60),
-            s.tollsUnavailable ? 'tolls unavailable' : `${formatCurrency(s.tollZar)} in tolls`,
+            s.tollsUnavailable ? 'tolls unknown' : `${formatCurrency(s.tollZar)} in tolls`,
             tags.length ? tags.join(', ') : null,
           ]
             .filter(Boolean)
@@ -116,37 +101,34 @@ function RouteOptionChipsImpl({
                   numberOfLines={1}
                 >
                   {label}
+                  {tags[0] ? <Mono className="text-caption font-medium text-success">{` · ${tags[0]}`}</Mono> : null}
                 </Mono>
-                {tags[0] && (
-                  <Mono
-                    className="text-caption font-medium text-success"
-                    numberOfLines={1}
-                  >
-                    {tags[0]}
-                  </Mono>
-                )}
               </View>
               <Mono className="text-caption text-faint" numberOfLines={1}>
                 {Math.round(s.distanceKm)} km · {formatDuration(s.durationMin / 60)}
               </Mono>
-              {deltaDistance == null || deltaDuration == null || deltaToll == null ? (
-                <Mono className="text-caption text-faint" numberOfLines={1}>
-                  {s.tollsUnavailable ? 'Tolls unavailable' : `${formatCurrency(s.tollZar)} tolls`}
-                </Mono>
-              ) : (
-                <Mono className="text-caption text-faint" numberOfLines={1}>
-                  {sign(deltaDistance)}
-                  {Math.round(Math.abs(deltaDistance))} km · {sign(deltaDuration)}
-                  {Math.round(Math.abs(deltaDuration))} min · {sign(deltaToll)}
-                  {formatCurrency(Math.abs(deltaToll))}
-                </Mono>
-              )}
+              <Mono className={`text-caption ${s.tollsUnavailable ? 'text-danger' : 'text-faint'}`} numberOfLines={1}>
+                {s.tollsUnavailable ? 'Tolls unknown' : `Tolls ${formatCurrency(s.tollZar, { maximumFractionDigits: 0 })}`}
+              </Mono>
             </TouchableOpacity>
           );
         })}
       </ScrollView>
     </View>
   );
+}
+
+/**
+ * A route's name by its roads ("Via N3", "Via N3 / N11"), from the toll plazas
+ * it passes; TomTom's own labels ("Best Routes", "Alternative 1") say nothing.
+ */
+export function routeName(r: Record<string, unknown>, i: number): string {
+  const roads: string[] = [];
+  for (const b of asArray<Record<string, unknown>>(r.toll_breakdown)) {
+    const road = str(pick(b, ['route'])).trim();
+    if (road && !roads.includes(road)) roads.push(road);
+  }
+  return roads.length ? `Via ${roads.slice(0, 2).join(' / ')}` : `Route ${i + 1}`;
 }
 
 export const RouteOptionChips = memo(RouteOptionChipsImpl);

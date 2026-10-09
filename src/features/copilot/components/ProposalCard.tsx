@@ -3,6 +3,7 @@ import { Txt, Mono, Label, Icon, Badge, Button } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { Proposal } from '../types';
 import { OPERATION_TONE, STATUS_CHIP, toneText } from './proposalTone';
+import { settledText } from '../settledText';
 
 // A confirm-first write the agent has drafted.
 //
@@ -48,9 +49,18 @@ export function ProposalCard({
         </View>
       )}
 
+      {(proposal.priceWarnings ?? []).map((w) => (
+        <View key={w.code + w.title} className="mx-3.5 mt-3 flex-row gap-2 rounded-chip bg-surface-hover p-2.5">
+          <Icon name="alert" size={14} color={w.severity === 'block' ? colors.dangerDot : colors.warningDot} />
+          <Txt className="flex-1 text-caption" style={{ color: w.severity === 'block' ? colors.danger : colors.warning }}>
+            {w.detail ? `${w.title.replace(/\.$/, '')}. ${w.detail}` : w.title}
+          </Txt>
+        </View>
+      ))}
+
       {!!proposal.analysisSummary && (
         <View className="mx-3.5 mt-3 rounded-chip border border-line p-2.5">
-          <Label className="mb-1 text-faint">AI analysis</Label>
+          <Label className="mb-1 text-faint">Analysis</Label>
           <Txt className="text-caption text-muted">{proposal.analysisSummary}</Txt>
         </View>
       )}
@@ -85,7 +95,15 @@ export function ProposalCard({
         {pending ? (
           <View className="flex-row gap-2.5">
             <Button
-              label={proposal.confirmText}
+              label={
+                proposal.sends
+                  ? proposal.requiresAcknowledgement
+                    ? 'Send anyway'
+                    : 'Send'
+                  : proposal.requiresAcknowledgement
+                    ? `${proposal.confirmText} anyway`
+                    : proposal.confirmText
+              }
               icon="check"
               loading={busy}
               onPress={onConfirm}
@@ -111,9 +129,15 @@ export function ProposalCard({
 function Settled({ proposal }: { proposal: Proposal }) {
   const { colors } = useTheme();
   const chip = STATUS_CHIP[proposal.status] ?? { text: proposal.status, tone: 'neutral' as const };
-  // SEND is "Sent", everything else is "Saved" — matching the web wording.
-  const text =
-    proposal.status === 'executed' && proposal.operation === 'SEND' ? '✓ Sent' : chip.text;
+  // A proposal that sent the quote says "✓ Sent to {customer}"; saves keep
+  // the chip's own wording.
+  const text = settledText({
+    status: proposal.status,
+    operation: proposal.operation,
+    sends: proposal.sends,
+    fields: proposal.fields,
+    chipText: chip.text,
+  });
   return (
     <View>
       <Mono className="text-caption font-medium" style={{ color: toneText(chip.tone, colors) }}>

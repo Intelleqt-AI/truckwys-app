@@ -46,7 +46,7 @@ const RISK = ['risk-scores', 'customer-risk'];
 const ASSIGN = ['drivers-available-for-assign', 'vehicles-available-for-assign'];
 
 const MAP: Record<DomainEvent, string[]> = {
-  quote: ['quotes', 'quote', 'customer-quotes', 'quote-fuel-alert', 'ledger-quotes', ...DASHBOARD, ...FINANCE, ...RISK],
+  quote: ['quotes', 'quote', 'customer-quotes', 'quote-fuel-alert', 'quote-costing', 'ledger-quotes', ...DASHBOARD, ...FINANCE, ...RISK],
   // A load's status drives revenue recognition, fleet utilisation and the
   // Home heatmap; delivering one can also auto-raise an invoice. A quote reports
   // the load it was booked as (booked_load), so quotes move with loads too.

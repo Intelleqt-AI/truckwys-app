@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { View, Alert, TextInput } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Group, Toggle, Txt, Mono, Badge, Button, TextField, Label, Card } from '@/components/ui';
@@ -91,6 +91,7 @@ function PricingBasics({ focus }: { focus?: string }) {
   const [draft, setDraft] = useState<Record<BasicKey, string> | null>(null);
   const [errors, setErrors] = useState<Partial<Record<BasicKey, string>>>({});
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   const stored = (k: BasicKey) => storedNum(pick(company ?? {}, [k]));
   useEffect(() => {
@@ -127,7 +128,7 @@ function PricingBasics({ focus }: { focus?: string }) {
     if (Object.keys(errs).length) return;
     const keys = Object.keys(patch) as BasicKey[];
     if (!keys.length) {
-      toast.info('Nothing changed');
+      toast.notice('Nothing changed');
       return;
     }
     Alert.alert(
@@ -138,12 +139,22 @@ function PricingBasics({ focus }: { focus?: string }) {
         {
           text: 'Save',
           onPress: async () => {
+            if (busyRef.current) return;
+            busyRef.current = true;
             setBusy(true);
             try {
-              await updateCompanyProfile(patch);
+              const res = (await updateCompanyProfile(patch)) as Record<string, unknown> | undefined;
+              // The form shows what was saved now, not the profile cached
+              // before the refetch lands.
+              const next = { ...(company ?? {}), ...patch, ...(res ?? {}) };
+              qc.setQueryData(['company-profile'], next);
+              setDraft({
+                margin_target_pct: boundText(storedNum(next.margin_target_pct)),
+                operating_cost_per_km: boundText(storedNum(next.operating_cost_per_km)),
+                driver_allowance_per_night: boundText(storedNum(next.driver_allowance_per_night)),
+              });
               invalidateFor(qc, 'company');
-              setDraft(null);
-              toast.success('Saved');
+              toast.notice('Saved');
             } catch (e) {
               const data = (e as { data?: unknown }).data as Record<string, unknown> | undefined;
               const fe: Partial<Record<BasicKey, string>> = {};
@@ -159,6 +170,7 @@ function PricingBasics({ focus }: { focus?: string }) {
                   : apiMessage(e, (e as Error).message),
               );
             } finally {
+              busyRef.current = false;
               setBusy(false);
             }
           },
@@ -280,6 +292,7 @@ export function QuoteFollowUpsCard() {
   const [boxes, setBoxes] = useState<Record<BoundKey, string> | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   useEffect(() => {
     if (saved && (!flags || !boxes)) {
@@ -331,7 +344,7 @@ export function QuoteFollowUpsCard() {
     const patch = automationPatch(saved, draft);
     const lines = automationChangeLines(saved, patch);
     if (!lines.length) {
-      toast.info('Nothing changed');
+      toast.notice('Nothing changed');
       return;
     }
     Alert.alert('Save changes?', lines.join('\n'), [
@@ -339,18 +352,32 @@ export function QuoteFollowUpsCard() {
       {
         text: 'Save',
         onPress: async () => {
+          if (busyRef.current) return;
+          busyRef.current = true;
           setBusy(true);
           try {
-            await patchQuoteAutomation(patch);
+            const res = await patchQuoteAutomation(patch);
+            // Straight from the PATCH answer (never the stale cache).
+            qc.setQueryData(['quote-automation'], res);
+            setFlags({
+              fuel_surcharge_enabled: res.fuel_surcharge_enabled,
+              fuel_alerts_enabled: res.fuel_alerts_enabled,
+              follow_ups_enabled: res.follow_ups_enabled,
+              weekly_margin_email_enabled: res.weekly_margin_email_enabled,
+            });
+            setBoxes({
+              fuel_surcharge_threshold_pct: boundText(res.fuel_surcharge_threshold_pct),
+              follow_up_after_days: boundText(res.follow_up_after_days),
+              expiry_nudge_days: boundText(res.expiry_nudge_days),
+            });
             invalidateFor(qc, 'company');
-            setFlags(null);
-            setBoxes(null);
-            toast.success('Saved');
+            toast.notice('Saved');
           } catch (e) {
             const fe = fieldErrors(e);
             setErrors(fe);
             toast.error(apiMessage(e, (e as Error).message || 'Could not save'));
           } finally {
+            busyRef.current = false;
             setBusy(false);
           }
         },

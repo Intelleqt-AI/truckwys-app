@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { AppSheet, Button, Card, Icon, Txt, Mono } from '@/components/ui';
@@ -45,6 +45,8 @@ export function FuelClausePrompt() {
   const { data: live } = useFuelPrice();
   const [closed, setClosed] = useState(false);
   const [busy, setBusy] = useState(false);
+  // A ref, not the state: two quick taps land before a re-render.
+  const inFlight = useRef(false);
 
   const diesel = pending ? dieselInputFromApi(null, live ?? null) : null;
   const reference = diesel
@@ -52,6 +54,8 @@ export function FuelClausePrompt() {
     : '';
 
   const decide = async (on: boolean) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await patchQuoteAutomation({ fuel_surcharge_enabled: on });
@@ -61,6 +65,7 @@ export function FuelClausePrompt() {
     } catch (e) {
       toast.error(apiMessage(e, 'Saving failed. Please try again.'));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -102,10 +107,13 @@ export function PricingSetupCard() {
   const { nav } = useAppNavigation();
   const { data } = usePricingSetup(admin);
   const [busy, setBusy] = useState<'confirm' | 'dismiss' | null>(null);
+  const inFlight = useRef(false);
   const rows = unsetItems(data);
   if (!admin || !data?.needs_setup || rows.length === 0) return null;
 
   const run = async (kind: 'confirm' | 'dismiss') => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(kind);
     try {
       await postPricingSetup(kind === 'confirm' ? confirmBody(data) : { action: 'dismiss' });
@@ -114,6 +122,7 @@ export function PricingSetupCard() {
     } catch (e) {
       toast.error(apiMessage(e, 'Saving failed. Please try again.'));
     } finally {
+      inFlight.current = false;
       setBusy(null);
     }
   };

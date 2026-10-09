@@ -930,6 +930,8 @@ export interface CostingInputs {
   tolls?: {
     one_way?: number | null;
     empty_return?: number | null;
+    /** Round trip: the way back's own tolls (its own route's plazas). */
+    return_leg?: number | null;
     lookup_failed?: boolean;
     confirmed_none?: boolean;
   } | null;
@@ -942,6 +944,14 @@ export interface CostingInputs {
   border_costs_unknown?: BorderCostsUnknown | null;
   /** The border figure is the user's own (covers every crossing). */
   border_cost_is_override?: boolean | null;
+  /** The empty truck's border costs crossing back (return leg). */
+  border_cost_empty_return?: number | null;
+  /** The part of border_cost that is an estimate (not a published tariff). */
+  border_estimate?: number | null;
+  /** The same for the empty run home's border cost. */
+  border_estimate_empty_return?: number | null;
+  /** Carried, not costed: the route priced the border with it. */
+  abnormal_load?: boolean | null;
   include_empty_return?: boolean | null;
   settings?: { include_empty_return_default?: boolean | null; empty_return_min_km?: number | null } | null;
   minimum_charge?: number | null;
@@ -1223,19 +1233,29 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     );
   }
   // R 0 from a toll lookup that worked is a known R 0: the route has no plazas.
-  const tollAmt = tollOneWay !== null ? cents(tollOneWay * legsLoaded) : null;
+  // A round trip's way back is priced on its own route's plazas when the
+  // route calculation gave them (tolls.return_leg); else the same plazas.
+  const tollBack = roundTrip ? toNum(tolls.return_leg) : null;
+  const tollAmt =
+    tollOneWay === null
+      ? null
+      : roundTrip && tollBack !== null
+        ? cents(tollOneWay + tollBack)
+        : cents(tollOneWay * legsLoaded);
   add(
     'tolls',
     'loaded',
     tollAmt,
-    tollOneWay === null
+    tollAmt === null
       ? 'Unknown'
-      : tollOneWay === 0
+      : tollOneWay === 0 && !tollBack
         ? 'No toll plazas on this route'
-        : roundTrip
-        ? `${fmtRand(tollOneWay, 2)} × 2 legs`
-        : `${fmtRand(tollOneWay, 2)} one way`,
-    { one_way: tollOneWay, legs: legsLoaded },
+        : tollBack !== null
+          ? `${fmtRand(tollOneWay!, 2)} out + ${fmtRand(tollBack, 2)} back`
+          : roundTrip
+            ? `${fmtRand(tollOneWay!, 2)} × 2 legs`
+            : `${fmtRand(tollOneWay!, 2)} one way`,
+    { one_way: tollOneWay, legs: legsLoaded, ...(tollBack !== null ? { return_leg: tollBack } : {}) },
   );
 
   // --- driver nights (§6) ---
@@ -1324,7 +1344,16 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
         'enter_border_costs',
       ]),
     );
-  } else if (border !== null && border > 0) add('border', 'loaded', cents(border), 'Border, permit and non-SA toll costs');
+  } else if (border !== null && border > 0) {
+    const est = toNum(inp.border_estimate);
+    add(
+      'border',
+      'loaded',
+      cents(border),
+      'Border, permit and non-SA toll costs' + (est ? ` (includes ${fmtRand(est, 2)} estimated)` : ''),
+      est ? { estimate: est } : {},
+    );
+  }
   else if (inp.international) {
     // An international trip always has border costs: without them the floor
     // is badly low, so it is incomplete.
@@ -1414,8 +1443,17 @@ export function computeCosting(inputs: CostingInputs | null | undefined): Costin
     if (inp.international && borderUnknown) {
       add('border_return', 'empty_return', null, 'Not known crossing back', { status: 'needs_input' });
     } else if (inp.international && border !== null && border > 0) {
-      // The empty truck crosses the border(s) back: the same costs per crossing.
-      add('border_return', 'empty_return', cents(border), 'Border costs crossing back, empty');
+      // The empty truck crosses back: the route calculation prices that leg
+      // (exit-only charges, its own km); else the loaded leg's figure.
+      const back = toNum(inp.border_cost_empty_return);
+      const estBack = back !== null ? toNum(inp.border_estimate_empty_return) : null;
+      add(
+        'border_return',
+        'empty_return',
+        cents(back !== null ? back : border),
+        'Border costs crossing back, empty' + (estBack ? ` (includes ${fmtRand(estBack, 2)} estimated)` : ''),
+        estBack ? { estimate: estBack } : {},
+      );
     }
   }
 
@@ -1680,4 +1718,16 @@ export function withServerInputs(
       server.default_price_per_km !== undefined ? server.default_price_per_km : local.default_price_per_km,
     target_margin_pct: server.target_margin_pct ?? local.target_margin_pct,
   };
+}
+
+/**
+ * The estimated (not published) share of one leg's border lines; an agent
+ * line stops being an estimate once the person typed their agent's fee. With
+ * no itemised lines (older backends), the route's own border_estimate_zar.
+ */
+export function borderEstimateOf(items: Record<string, unknown>[], fallback: unknown, agentFeeTyped: boolean): number {
+  if (!items.length) return toNum(fallback) ?? 0;
+  return items
+    .filter((i) => i.verified !== true && !(agentFeeTyped && /agent/i.test(String(i.code ?? ''))))
+    .reduce((sum, i) => sum + (toNum(i.amount) ?? 0), 0);
 }

@@ -6,6 +6,7 @@ import { View, TouchableOpacity } from 'react-native';
 // gorhom/bottom-sheet gotcha for any scrollable nested in sheet content).
 import { ScrollView } from 'react-native-gesture-handler';
 import { Label, Mono } from '@/components/ui';
+import { routeChipText } from './routeSummary';
 import { asArray, num, pick, str } from '@/lib/api/list';
 import { formatCurrency, formatDuration } from '@/lib/formatters';
 
@@ -72,9 +73,13 @@ function RouteOptionChipsImpl({
           if (i === bestIndex) tags.push('Recommended');
           if (i === fastestIdx) tags.push('Fastest');
           if (i === cheapestIdx) tags.push('Fewest tolls');
-          const label = routeName(r, i);
+          // The backend's own summary when it sends one (newer backends):
+          // "Fastest · via N17/N3" and "tolls R 1 020". Else our own words.
+          const summary = routeChipText(r.toll_summary);
+          const label = summary ? summary.title : routeName(r, i);
           const a11yLabel = [
             label,
+            summary?.plazas ? `plazas ${summary.plazas}` : null,
             `${Math.round(s.distanceKm)} kilometres`,
             formatDuration(s.durationMin / 60),
             s.tollsUnavailable ? 'tolls unknown' : `${formatCurrency(s.tollZar)} in tolls`,
@@ -101,14 +106,20 @@ function RouteOptionChipsImpl({
                   numberOfLines={1}
                 >
                   {label}
-                  {tags[0] ? <Mono className="text-caption font-medium text-success">{` · ${tags[0]}`}</Mono> : null}
+                  {tags[0] && !summary ? (
+                    <Mono className="text-caption font-medium text-success">{` · ${tags[0]}`}</Mono>
+                  ) : null}
                 </Mono>
               </View>
               <Mono className="text-caption text-faint" numberOfLines={1}>
                 {Math.round(s.distanceKm)} km · {formatDuration(s.durationMin / 60)}
               </Mono>
               <Mono className={`text-caption ${s.tollsUnavailable ? 'text-danger' : 'text-faint'}`} numberOfLines={1}>
-                {s.tollsUnavailable ? 'Tolls unknown' : `Tolls ${formatCurrency(s.tollZar, { maximumFractionDigits: 0 })}`}
+                {s.tollsUnavailable
+                  ? 'Tolls unknown'
+                  : summary?.tolls
+                    ? summary.tolls.charAt(0).toUpperCase() + summary.tolls.slice(1)
+                    : `Tolls ${formatCurrency(s.tollZar, { maximumFractionDigits: 0 })}`}
               </Mono>
             </TouchableOpacity>
           );

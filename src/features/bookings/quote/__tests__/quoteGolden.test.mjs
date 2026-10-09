@@ -42,9 +42,11 @@ for (const c of golden.cases) {
       'lines',
     );
     for (const [i, l] of exp.lines.entries()) {
+      // Keys this calculator adds must be in the golden line too (and equal).
+      for (const k of ['estimate', 'return_leg']) if (k in got.lines[i]) assert.ok(k in l, `${l.key} has no ${k} in golden`);
       if ('litres' in l) close(got.lines[i].litres, l.litres, `${l.key}.litres`);
       if ('burn_l_per_100km' in l) close(got.lines[i].burn_l_per_100km, l.burn_l_per_100km, `${l.key}.burn`);
-      for (const k of ['nights', 'suggested_nights', 'rate_per_night', 'suggested', 'source', 'one_way', 'legs', 'status']) {
+      for (const k of ['nights', 'suggested_nights', 'rate_per_night', 'suggested', 'source', 'one_way', 'legs', 'status', 'estimate', 'return_leg', 'basis']) {
         if (k in l) assert.equal(got.lines[i][k], l[k], `${l.key}.${k}`);
       }
     }

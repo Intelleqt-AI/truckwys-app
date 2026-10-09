@@ -457,6 +457,8 @@ export interface ConvertToLoadBody {
   /** That existing load brings this job's truck home (newer backends). */
   return_load_id?: number | string;
   expect_return?: boolean;
+  /** Volume contract call-off: the tonnes on this load (tonnage quotes). */
+  tonnes?: number;
 }
 export const convertQuoteToLoad = (id: string | number, data: ConvertToLoadBody = {}) =>
   postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
@@ -528,6 +530,14 @@ export const uploadLoadPod = (id: string | number, file: { uri: string; name: st
   });
 };
 
+// Tonnage (per-tonne) loads: the weighbridge tonnes and slip; the server
+// re-prices the load and its draft invoice (rate x max(tonnes, minimum)).
+export const saveWeighbridge = (id: string | number, tonnes: number, slip: string) =>
+  patchData<Record<string, unknown>>({
+    url: `loads/${id}/`,
+    data: { actual_tonnes: tonnes, weighbridge_slip: slip.trim(), actual_tonnes_source: 'weighbridge' },
+  });
+
 // ── Trip economics (return loads, round-trip margins) ───────────────────────
 // Each answers `null` on a backend without the endpoint (404 / 405 / 501), so
 // the screen hides the feature instead of showing an error.
@@ -575,15 +585,17 @@ export function useReturnCandidates(id: string | number, direction: CandidateDir
  * GET quotes/{id}/booking-preview/: candidates, invoice preview and whether it
  * can be booked, WITHOUT creating the job. Null on an older backend.
  */
-export function useBookingPreview(quoteId: string | number, pickupDate: string, deliveryDate: string) {
+export function useBookingPreview(quoteId: string | number, pickupDate: string, deliveryDate: string, tonnes?: number | null) {
   return useQuery<BookingPreview | null>({
-    queryKey: ['booking-preview', quoteId, pickupDate, deliveryDate],
+    queryKey: ['booking-preview', quoteId, pickupDate, deliveryDate, tonnes ?? null],
     retry: false,
     placeholderData: (prev) => prev,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (pickupDate) params.set('pickup_date', pickupDate);
       if (deliveryDate) params.set('delivery_date', deliveryDate);
+      // A contract call-off's tonnes: the invoice preview is rate x these.
+      if (tonnes != null) params.set('tonnes', String(tonnes));
       const qs = params.toString();
       return parseBookingPreview(
         await orNullIfMissing(() => fetchData(`quotes/${quoteId}/booking-preview/${qs ? `?${qs}` : ''}`)),

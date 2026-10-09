@@ -7,6 +7,7 @@ import {
   SheetScreen,
   SelectField,
   DateField,
+  TextField,
   RadioRows,
   Group,
   Banner,
@@ -17,6 +18,7 @@ import {
 } from '@/components/ui';
 import { str, pick } from '@/lib/api/list';
 import { convertQuoteToLoad, linkReturnLoad, seedLoad, useBookingPreview, useQuote } from './api';
+import { callOffCap, checkCallOff } from './quote/tonnage';
 import {
   bookErrorText,
   bookingBodyFor,
@@ -59,7 +61,7 @@ const dateOnly = (v: unknown) => /^\d{4}-\d{2}-\d{2}/.exec(str(v))?.[0] ?? '';
  * and any loads that could pair with this one as a return trip.
  */
 export function BookJobScreen({ route, navigation }: Props) {
-  const { quoteId, reference, vehicleType, popCallerOnSuccess } = route.params;
+  const { quoteId, reference, vehicleType, popCallerOnSuccess, callOff } = route.params;
   const qc = useQueryClient();
   const { data: quote } = useQuote(quoteId);
   const q = (quote ?? {}) as Record<string, unknown>;
@@ -71,6 +73,16 @@ export function BookJobScreen({ route, navigation }: Props) {
   const [pickupDate, setPickupDate] = useState<string | undefined>();
   const [deliveryDate, setDeliveryDate] = useState<string | undefined>();
   const [choice, setChoice] = useState<ReturnChoice>('empty');
+  // A contract call-off: the tonnes on this load (default the planned load,
+  // capped at what is left).
+  // The server's cap: what is left, and no more than the largest eligible truck.
+  const cap = callOff ? callOffCap({ remaining_tonnes: callOff.remaining, max_tonnes_per_load: callOff.max ?? null }) : 0;
+  const [tonnesText, setTonnesText] = useState(
+    callOff ? String(Math.min(callOff.size ?? cap, cap)).replace('.', ',') : '',
+  );
+  const check = callOff ? checkCallOff(tonnesText, cap) : { tonnes: null, error: null };
+  const tonnes = check.tonnes;
+  const tonnesBad = !!callOff && !!check.error;
   const [busy, setBusy] = useState(false);
   // Synchronous guards: a second tap lands before `busy` re-renders.
   const bookingRef = useRef(false);
@@ -83,7 +95,7 @@ export function BookJobScreen({ route, navigation }: Props) {
   const deliveryShown = deliveryDate ?? dateOnly(pick(q, ['delivery_date']));
   const datesOutOfOrder = !!pickupShown && !!deliveryShown && deliveryShown < pickupShown;
   // What booking would give, before booking (newer backends; null otherwise).
-  const { data: preview } = useBookingPreview(quoteId, pickupShown, deliveryShown);
+  const { data: preview } = useBookingPreview(quoteId, pickupShown, deliveryShown, tonnesBad ? null : tonnes);
   const alreadyBookedId = preview && !preview.preview ? preview.loadId : null;
 
   const { data: driversRaw, isLoading: driversLoading } = useQuery({
@@ -145,7 +157,7 @@ export function BookJobScreen({ route, navigation }: Props) {
   }, [preview]);
   // A suggestion that dropped off a refreshed preview falls back to Back empty.
   const choiceShown = returnOptions.some((o) => o.value === choice) ? choice : 'empty';
-  const canBook = !busy && !driverWithoutTruck && !datesOutOfOrder && preview?.canBook !== false;
+  const canBook = !busy && !driverWithoutTruck && !datesOutOfOrder && !tonnesBad && preview?.canBook !== false;
 
   const openJob = (id: number | string, title?: string) => {
     navigation.pop(popCallerOnSuccess ? 2 : 1);
@@ -167,6 +179,7 @@ export function BookJobScreen({ route, navigation }: Props) {
         ...(driverId ? { driver_id: driverId } : {}),
         ...(pickupDate ? { pickup_date: pickupDate } : {}),
         ...(deliveryDate ? { delivery_date: deliveryDate } : {}),
+        ...(callOff && tonnes != null ? { tonnes } : {}),
         ...returnBody,
       });
       const booked = parseBooking(body);
@@ -351,9 +364,9 @@ export function BookJobScreen({ route, navigation }: Props) {
   return (
     <SheetScreen
       variant="modal"
-      title="Book job"
+      title={callOff ? 'Book a load' : 'Book job'}
       onBack={() => navigation.goBack()}
-      footer={<Button label={busy ? 'Booking…' : 'Book job'} loading={busy} disabled={!canBook} onPress={book} fullWidth />}
+      footer={<Button label={busy ? 'Booking…' : callOff ? 'Book load' : 'Book job'} loading={busy} disabled={!canBook} onPress={book} fullWidth />}
     >
       <Txt className="mb-5 text-sub text-muted">
         {`Book ${reference || 'this quote'} as a job. Truck, driver and dates can wait.`}
@@ -389,6 +402,15 @@ export function BookJobScreen({ route, navigation }: Props) {
         />
         {driverWithoutTruck && (
           <Mono className="-mt-2 text-caption text-warning">Pick a truck for this driver, or clear the driver.</Mono>
+        )}
+        {callOff && (
+          <TextField
+            label="Tonnes on this load"
+            keyboardType="decimal-pad"
+            value={tonnesText}
+            onChangeText={setTonnesText}
+            error={check.error ?? undefined}
+          />
         )}
         <DateField label="Collection" value={pickupShown} onChange={setPickupDate} placeholder="Not set" />
         <DateField

@@ -52,6 +52,7 @@ export const ACTION_LABELS: Record<string, string> = {
   keep_price: 'Keep price',
   enter_weight: 'Enter weight',
   enter_border_costs: 'Enter border costs',
+  use_target_rate: 'Price at target rate',
 };
 
 function warning(
@@ -1733,4 +1734,285 @@ export function borderEstimateOf(items: Record<string, unknown>[], fallback: unk
   return items
     .filter((i) => i.verified !== true && !(agentFeeTyped && /agent/i.test(String(i.code ?? ''))))
     .reduce((sum, i) => sum + (toNum(i.amount) ?? 0), 0);
+}
+
+// ── Tonnage quotes (rate per tonne) ─────────────────────────────────────────
+// quote_costing.compute_tonnage(): every cost is computeCosting() for one load on one
+// truck; this only combines them. Golden: `tonnage_rules` / `tonnage_cases`.
+
+export const TONNAGE_VERSION = "qt-1";
+const T_EPS = 1e-9;
+
+export interface TonnageTruckInput {
+  vehicle: { id?: number | null; name?: string; capacity?: unknown; rated_burn_l_per_100km?: unknown };
+  operating_cost_per_km?: number | null; operating_cost_source?: string | null;
+  diesel?: Partial<DieselInput> | null; tolls?: CostingInputs["tolls"];
+}
+export interface TonnageInputs {
+  lane?: CostingInputs | null;
+  trucks?: TonnageTruckInput[] | null;
+  tonnes_per_load?: number | null; total_tonnes?: number | null; min_tonnes_per_load?: number | null;
+  vehicle_type_id?: number | null; rate_per_tonne?: number | null;
+}
+export interface TonnageAtRate { rate_per_tonne: number; billable_tonnes: number; revenue: number; margin: number | null; margin_pct: number | null }
+export interface TonnageTruck {
+  vehicle_type_id: number | null; name: string | null; payload_t: number; tonnes_per_load: number; loads_needed: number;
+  last_load_t: number; partial_last_load: boolean; cost_per_load: number | null; cost_last_load: number | null;
+  total_cost: number | null; min_tonnes_per_load: number; billable_tonnes: number; cost_per_tonne: number | null;
+  is_basis: boolean; at_rate: TonnageAtRate | null;
+}
+export interface Tonnage {
+  version: string; mode: "single" | "volume"; total_tonnes: number | null; tonnes_per_load: number | null;
+  min_tonnes_per_load: number | null; min_tonnes_source: "quote" | "basis_load" | null;
+  vehicle_type_id: number | null; basis_vehicle_type_id: number | null;
+  basis_reason: "chosen" | "safest" | "costs_unknown" | null;
+  trucks: TonnageTruck[]; excluded: { vehicle_type_id: number | null; name: string | null; reason: string }[];
+  summary: string | null; loads_planned: number | null; billable_tonnes: number | null; total_cost: number | null;
+  cost_per_tonne: number | null; target_margin_pct: number | null; target_rate_per_tonne: number | null;
+  minimum_charge_rate_per_tonne: number | null; default_rate_per_tonne: number | null; rate_per_tonne: number | null;
+  rate_used: number | null; rate_source: "user" | "default" | null; minimum_charge_per_load: number | null;
+  estimated_revenue: number | null; margin: number | null; margin_pct: number | null; basis_load_costing: Costing | null;
+}
+export interface TonnageCosting extends Omit<Costing, "trip" | "vehicle" | "default_price_per_km" | "rate_price" | "alternative_with_return_load"> {
+  pricing_basis: "per_tonne"; tonnage: Tonnage; trip: Costing["trip"] | null; vehicle: Costing["vehicle"];
+}
+
+const tR = (x: number) => Math.round(x * 1e6) / 1e6;
+const ceilRand = (x: number) => Math.ceil(x - T_EPS);
+/** "30 t", "22,5 t" (SA format). */
+export function tonnesTxt(t: number): string {
+  return `${fmtNum(t, Math.abs(t - Math.round(t)) < 1e-9 ? 0 : 1)} t`;
+}
+const truckLabel = (t: { name: string | null; payload_t: number }) => `${t.name || "Truck"} ${tonnesTxt(t.payload_t)}`;
+
+interface Plan extends Omit<TonnageTruck, "is_basis" | "at_rate"> { _full: Costing; _last: Costing }
+
+function truckPlan(lane: CostingInputs, entry: TonnageTruckInput, total: number, perLoad: number | null, minT: number): Plan {
+  const vehicle = entry.vehicle;
+  const payload = capacityTonnes(vehicle.capacity) as number;
+  const loadT = tR(perLoad ? Math.min(perLoad, payload) : payload);
+  const n = Math.ceil(total / loadT - T_EPS);
+  const lastT = tR(total - (n - 1) * loadT);
+  const { vehicle: _v, ...overrides } = entry;
+  const base: CostingInputs = { ...lane, ...overrides, vehicle, price: null };
+  const full = computeCosting({ ...base, load_kg: loadT * 1000 });
+  const last = Math.abs(lastT - loadT) < T_EPS ? full : computeCosting({ ...base, load_kg: lastT * 1000 });
+  const totalCost = full.floor !== null && last.floor !== null ? cents((n - 1) * full.floor + last.floor) : null;
+  const billable = tR((n - 1) * Math.max(loadT, minT) + Math.max(lastT, minT));
+  return {
+    vehicle_type_id: (vehicle.id ?? null) as number | null, name: vehicle.name ?? null, payload_t: payload,
+    tonnes_per_load: loadT, loads_needed: n, last_load_t: lastT, partial_last_load: lastT < loadT - T_EPS,
+    cost_per_load: full.floor, cost_last_load: last.floor, total_cost: totalCost, min_tonnes_per_load: minT,
+    billable_tonnes: billable, cost_per_tonne: totalCost !== null ? cents(totalCost / billable) : null,
+    _full: full, _last: last,
+  };
+}
+
+function atRate(p: Plan, rate: number | null, minT: number): TonnageAtRate | null {
+  if (rate === null) return null;
+  const billable = tR((p.loads_needed - 1) * Math.max(p.tonnes_per_load, minT) + Math.max(p.last_load_t, minT));
+  const revenue = cents(rate * billable);
+  const cost = p.total_cost;
+  return { rate_per_tonne: rate, billable_tonnes: billable, revenue,
+    margin: cost !== null ? cents(revenue - cost) : null,
+    margin_pct: cost !== null && revenue > 0 ? (revenue - cost) / revenue * 100 : null };
+}
+
+function aggregateLines(p: Plan): CostingLine[] {
+  const n = p.loads_needed;
+  return p._full.lines.map((lf, k) => {
+    const ll = p._last.lines[k] as CostingLine;
+    const line: CostingLine = { ...lf };
+    line.per_load_amount = lf.amount;
+    line.amount = lf.amount !== null && ll.amount !== null ? cents((n - 1) * lf.amount + ll.amount) : null;
+    if (lf.litres !== null && lf.litres !== undefined && ll.litres !== null && ll.litres !== undefined) {
+      line.litres = (n - 1) * (lf.litres as number) + (ll.litres as number);
+    }
+    if (n > 1) line.basis = `${lf.basis} · ${n} loads`;
+    line.loads = n;
+    return line;
+  });
+}
+
+/** A quote priced per tonne: rate × tonnes, never below a minimum per load.
+ *  Truck unknown → priced on the safest (highest cost per tonne) truck. */
+export function computeTonnage(inputs: TonnageInputs | null | undefined): TonnageCosting {
+  const i = inputs || {};
+  const lane: CostingInputs = { ...(i.lane || {}) };
+  for (const k of ["vehicle", "load_kg", "price", "operating_cost_per_km", "operating_cost_source"] as const) delete lane[k];
+  const warnings: QuoteWarning[] = [];
+  const perLoad = pos(i.tonnes_per_load);
+  const totalIn = pos(i.total_tonnes);
+  const mode: "single" | "volume" = totalIn !== null ? "volume" : "single";
+  const total = totalIn !== null ? totalIn : perLoad;
+  const minTyped = pos(i.min_tonnes_per_load);
+  const chosenNum = toNum(i.vehicle_type_id);
+  const chosenId = chosenNum ? Math.trunc(chosenNum) : null;
+  const rate = pos(i.rate_per_tonne);
+  const target = toNum(lane.target_margin_pct);
+  const minimumCharge = pos(lane.minimum_charge);
+
+  const usable: TonnageTruckInput[] = [];
+  const excluded: Tonnage["excluded"] = [];
+  for (const entry of i.trucks || []) {
+    const v = entry?.vehicle || {};
+    const row = { vehicle_type_id: (v.id ?? null) as number | null, name: v.name ?? null };
+    if (capacityTonnes(v.capacity) === null) excluded.push({ ...row, reason: "capacity_missing" });
+    else if (pos(v.rated_burn_l_per_100km) === null) excluded.push({ ...row, reason: "burn_missing" });
+    else usable.push(entry);
+  }
+  const chosen = chosenId ? usable.find((e) => e.vehicle.id === chosenId) ?? null : null;
+  if (chosenId && chosen === null) {
+    warnings.push(warning("chosen_truck_unavailable", "warn", "That truck can't price this quote",
+      "Priced on the safest truck in your fleet instead.", null, ["choose_vehicle"]));
+  }
+  let split = false;
+  let eligible = [...usable];
+  if (perLoad !== null) {
+    const fits = usable.filter((e) => (capacityTonnes(e.vehicle.capacity) as number) >= perLoad - T_EPS);
+    if (fits.length) {
+      eligible = [...fits, ...(chosen !== null && !fits.includes(chosen) ? [chosen] : [])];
+      for (const e of usable) {
+        if (!eligible.includes(e)) excluded.push({ vehicle_type_id: (e.vehicle.id ?? null) as number | null, name: e.vehicle.name ?? null, reason: "too_small" });
+      }
+    } else split = mode === "single";
+  }
+
+  const plans: [TonnageTruckInput, Plan][] = [];
+  if (total !== null) {
+    for (const e of eligible) {
+      const payload = capacityTonnes(e.vehicle.capacity) as number;
+      const ownLoad = perLoad ? Math.min(perLoad, payload) : payload;
+      plans.push([e, truckPlan(lane, e, total, perLoad, minTyped || tR(ownLoad))]);
+    }
+  }
+
+  let basis: Plan | null = null;
+  let basisReason: Tonnage["basis_reason"] = null;
+  if (plans.length) {
+    if (chosen !== null) {
+      basis = plans.find(([e]) => e === chosen)![1];
+      basisReason = "chosen";
+    } else {
+      const known = plans.filter(([, p]) => p.cost_per_tonne !== null).map(([, p]) => p);
+      if (known.length) {
+        const key = (p: Plan) => [p.cost_per_tonne as number, -p.payload_t, -(p.vehicle_type_id || 0)];
+        basis = known.reduce((best, p) => {
+          const a = key(p), b = key(best);
+          for (let k = 0; k < 3; k++) { const x = a[k] as number, y = b[k] as number; if (x !== y) return x > y ? p : best; }
+          return best;
+        });
+        basisReason = "safest";
+      } else {
+        basis = plans.map(([, p]) => p).reduce((best, p) =>
+          p.payload_t < best.payload_t || (p.payload_t === best.payload_t && (p.vehicle_type_id || 0) < (best.vehicle_type_id || 0)) ? p : best);
+        basisReason = "costs_unknown";
+      }
+    }
+  }
+  const minT = minTyped || (basis ? basis.tonnes_per_load : null);
+  const minSource: Tonnage["min_tonnes_source"] = minTyped ? "quote" : basis ? "basis_load" : null;
+
+  if (total === null) {
+    warnings.push(warning("tonnage_missing", "block", "Enter the tonnes to move",
+      "Tonnes per load, or the total for a contract.", null, ["enter_weight"]));
+  }
+  if (total !== null && basis === null) {
+    const laneOut = computeCosting({ ...lane, vehicle: null, price: null });
+    warnings.push(...laneOut.warnings.filter((w) => w.code !== "no_vehicle"));
+    warnings.push(warning("no_eligible_trucks", "block", "No truck in your fleet can carry this",
+      "Add a truck with its payload and fuel use.", null, ["add_vehicle", "choose_vehicle"]));
+  } else if (basis !== null) {
+    warnings.push(...basis._full.warnings.filter((w) => w.code !== "load_missing"));
+    const label = truckLabel(basis);
+    if (split || (mode === "single" && basis.loads_needed > 1)) {
+      warnings.push(warning("tonnes_exceed_payload", "warn", "Too heavy for one truck",
+        `${tonnesTxt(total as number)} is split into ${basis.loads_needed} loads on the ${label}.`));
+    }
+    if (basis.partial_last_load) {
+      warnings.push(warning("partial_last_load", "warn", "Last load is part-full",
+        `Load ${basis.loads_needed} carries ${tonnesTxt(basis.last_load_t)} of ${tonnesTxt(basis.tonnes_per_load)}; `
+        + `charged for ${tonnesTxt(Math.max(basis.last_load_t, minT as number))}.`));
+    }
+    if (minT !== null && Math.min(basis.tonnes_per_load, basis.last_load_t) < minT - T_EPS && !basis.partial_last_load) {
+      warnings.push(warning("below_minimum_tonnes", "warn", "Load is under the minimum tonnes",
+        `${tonnesTxt(basis.tonnes_per_load)} carried, charged for ${tonnesTxt(minT)} per load.`));
+    }
+    if (minT !== null && minT > basis.payload_t + T_EPS) {
+      warnings.push(warning("minimum_above_payload", "warn", "Minimum is more than the truck carries",
+        `${tonnesTxt(minT)} minimum on a ${tonnesTxt(basis.payload_t)} truck.`));
+    }
+  }
+
+  const cpt = basis ? basis.cost_per_tonne : null;
+  const targetRate = cpt !== null && target !== null && target < 100 ? ceilRand(cpt / (1 - target / 100)) : null;
+  const minChargeRate = minimumCharge && minT ? ceilRand(minimumCharge / minT) : null;
+  const defaultRate = targetRate !== null ? Math.max(targetRate, minChargeRate ?? 0) : null;
+  const rateUsed = rate !== null ? rate : defaultRate;
+  const rateSource: Tonnage["rate_source"] = rate !== null ? "user" : defaultRate !== null ? "default" : null;
+
+  const sorted = [...plans].sort(([, a], [, b]) => {
+    const ka = [a.cost_per_tonne === null ? 1 : 0, -(a.cost_per_tonne || 0), a.payload_t, a.vehicle_type_id || 0];
+    const kb = [b.cost_per_tonne === null ? 1 : 0, -(b.cost_per_tonne || 0), b.payload_t, b.vehicle_type_id || 0];
+    for (let k = 0; k < 4; k++) { const x = ka[k] as number, y = kb[k] as number; if (x !== y) return x - y; }
+    return 0;
+  });
+  const trucksOut: TonnageTruck[] = sorted.map(([, p]) => {
+    const { _full, _last, ...row } = p;
+    return { ...row, is_basis: p === basis, at_rate: atRate(p, rateUsed, minT as number) };
+  });
+
+  const basisAt = basis ? atRate(basis, rateUsed, minT as number) : null;
+  const userAt = basis && rate !== null ? atRate(basis, rate, minT as number) : null;
+  if (userAt !== null && cpt !== null && rate !== null && rate < cpt) {
+    const w = warning("rate_below_cost", "warn", "Rate is below your cost per tonne",
+      `${fmtRand(rate)}/t is under the ${fmtRand(cpt)}/t cost on the ${truckLabel(basis as Plan)}; `
+      + `this loses ${fmtRand(-(userAt.margin as number))}.`,
+      userAt.margin, targetRate ? ["use_target_rate"] : [], { target_rate_per_tonne: targetRate });
+    for (const a of w.actions) a.label = `Price at target · ${fmtRand(targetRate as number)}/t`;
+    warnings.push(w);
+  }
+  if (rate !== null && minimumCharge && minT && rate * minT < minimumCharge - 0.005) {
+    const short = minimumCharge - cents(rate * minT);
+    warnings.push(warning("below_minimum_charge", "block", "Price is below your minimum charge",
+      `${fmtRand(short)} a load below your ${fmtRand(minimumCharge)} minimum.`, cents(short), ["use_minimum"]));
+  }
+
+  const blocking = warnings.filter((w) => w.severity === "block").map((w) => w.code);
+  const summary = trucksOut.filter((t) => t.cost_per_tonne !== null)
+    .map((t) => `${truckLabel(t)} ${fmtRand(t.cost_per_tonne as number)}/t`).join(" · ") || null;
+  const full = basis ? basis._full : null;
+  const lines = basis ? aggregateLines(basis) : [];
+  const totalCost = basis ? basis.total_cost : null;
+  const billable = basisAt ? basisAt.billable_tonnes : basis ? basis.billable_tonnes : null;
+  const litresParts = lines.filter((ln) => ln.key === "fuel" || ln.key === "fuel_return").map((ln) => ln.litres as number | null | undefined);
+  const litresTotal = litresParts.length && litresParts.every((l) => l !== null && l !== undefined)
+    ? litresParts.reduce((s: number, l) => s + (l as number), 0) : null;
+  const known = lines.filter((ln) => ln.amount !== null).map((ln) => ln.amount as number);
+
+  const tonnage: Tonnage = {
+    version: TONNAGE_VERSION, mode, total_tonnes: total, tonnes_per_load: perLoad, min_tonnes_per_load: minT,
+    min_tonnes_source: minSource, vehicle_type_id: chosenId, basis_vehicle_type_id: basis ? basis.vehicle_type_id : null,
+    basis_reason: basisReason, trucks: trucksOut, excluded, summary, loads_planned: basis ? basis.loads_needed : null,
+    billable_tonnes: billable, total_cost: totalCost, cost_per_tonne: cpt, target_margin_pct: target,
+    target_rate_per_tonne: targetRate, minimum_charge_rate_per_tonne: minChargeRate, default_rate_per_tonne: defaultRate,
+    rate_per_tonne: rate, rate_used: rateUsed, rate_source: rateSource,
+    minimum_charge_per_load: rateUsed !== null && minT ? cents(rateUsed * minT) : null,
+    estimated_revenue: basisAt ? basisAt.revenue : null, margin: basisAt ? basisAt.margin : null,
+    margin_pct: basisAt ? basisAt.margin_pct : null, basis_load_costing: full,
+  };
+  return {
+    version: 'qc-1', pricing_basis: "per_tonne", tonnage,
+    trip: full ? full.trip : null, vehicle: full ? full.vehicle : null,
+    diesel: full ? full.diesel : resolveDieselInput(lane.diesel),
+    litres: { loaded: null, empty_return: null, total: litresTotal },
+    lines, floor: totalCost, floor_known: known.length ? cents(known.reduce((s, a) => s + a, 0)) : 0,
+    floor_complete: totalCost !== null, target_margin_pct: target,
+    target_price: targetRate !== null && billable ? cents(targetRate * billable) : null,
+    minimum_charge: minimumCharge,
+    default_price: defaultRate !== null && billable ? cents(defaultRate * billable) : null,
+    price: userAt ? userAt.revenue : null, margin: userAt ? userAt.margin : null,
+    margin_pct: userAt ? userAt.margin_pct : null,
+    warnings, blocking, can_send: blocking.length === 0,
+  };
 }

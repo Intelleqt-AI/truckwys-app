@@ -46,6 +46,15 @@ export type AppStackParamList = {
     /** Convert only: also pop the screen beneath this one (e.g. QuoteDetail) before pushing LoadDetail. */
     popCallerOnSuccess?: boolean;
   };
+  /** Book an accepted quote as a job (one-tap booking, return-load link offered). */
+  BookJob: {
+    quoteId: Id;
+    /** Quote number, shown in the copy. */
+    reference?: string;
+    vehicleType?: string;
+    /** Also pop the screen beneath this one (e.g. QuoteDetail) before opening the job. */
+    popCallerOnSuccess?: boolean;
+  };
   Customers: undefined;
   CustomerDetail: { id: Id; preview?: Record<string, unknown> };
   CustomerRisk: { id: Id };

@@ -1706,6 +1706,9 @@ export function withServerInputs(
     // an international trip): only an answer for the same kind of trip.
     driver: {
       ...local.driver,
+      // Nights given for this trip: the form's own (applied this session), else
+      // what the server echoed from costing_inputs.driver_nights.
+      nights: local.driver?.nights ?? server.driver?.nights ?? null,
       allowance_per_night:
         !!server.international === !!local.international
           ? (server.driver?.allowance_per_night ?? local.driver?.allowance_per_night ?? null)

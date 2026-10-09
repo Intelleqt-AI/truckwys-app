@@ -2354,6 +2354,19 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     setAdjustmentSource(null);
   };
 
+  // Empty ↔ Loaded back changes what the trip costs. A price at the default
+  // follows the new shape on its own; a typed rate or an adjustment would stay
+  // put while the floor moves, so it goes to the new shape's default price (the
+  // figure shown beside the switch). A market price from the price check has
+  // its own Undo and is left as chosen.
+  const setReturnShape = (booked: boolean) => {
+    if (booked === returnLoadBooked) return;
+    setReturnLoadBooked(booked);
+    if (aiApplied || (costs.priceIsDefault && serviceCharge === 0)) return;
+    setUseDefaultPrice(true);
+    resetPriceToActual();
+  };
+
   // ── Cost overrides: a way back to the worked-out figure ──────────────────
   const companyDefaultRate = num(pick(company ?? {}, ['default_base_rate_per_km']));
   // The truck's own rate wins over the company default, as on selection.
@@ -3560,7 +3573,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                         { label: 'Loaded', value: 'LOADED' },
                       ]}
                       value={returnLoadBooked ? 'LOADED' : 'EMPTY'}
-                      onChange={(v) => setReturnLoadBooked(v === 'LOADED')}
+                      onChange={(v) => setReturnShape(v === 'LOADED')}
                       tall
                     />
                     {/* The other answer's price at the target margin. */}

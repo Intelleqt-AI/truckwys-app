@@ -72,6 +72,8 @@ export interface FuelActuals {
   connection: { provider: string | null; reason?: string | null; can_measure?: boolean };
   last_run: LastRun | null;
   refresh_queued?: boolean;
+  /** "Refresh now" can run again from this time (SAST ISO); null = now. */
+  refresh_next_at?: string | null;
   vehicle_types: VehicleTypeFuel[];
   vehicles: VehicleFuel[];
   rules?: { period_days?: number; min_distance_km?: number; assumed_load_ratio?: number; max_age_days?: number; refresh?: string };
@@ -298,25 +300,49 @@ export interface Strip {
   lines: string[];
   link: { text: string; to: "fleet" | "integrations" } | null;
   canRefresh: boolean;
+  /** "You can refresh again at 14:35" while the 15-minute cooldown runs. */
+  cooldown: string | null;
 }
 
-export function headerStrip(d: Pick<FuelActuals, "connection" | "last_run" | "refresh_queued">): Strip {
+/** "14:35" (SAST) from an ISO time. */
+export function sastTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t + 2 * 3600 * 1000);
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+/** The cooldown line, or null when "Refresh now" can run (`now` for tests). */
+export function cooldownText(nextAt: string | null | undefined, now: Date = new Date()): string | null {
+  if (!nextAt) return null;
+  const t = new Date(nextAt).getTime();
+  if (!Number.isFinite(t) || t <= now.getTime()) return null;
+  return `You can refresh again at ${sastTime(nextAt)}`;
+}
+
+export const REFRESH_FAILED = "Last refresh failed: Cartrack didn't answer. Your last measured figures are kept.";
+export const REFRESH_PARTIAL = "Last refresh couldn't reach every truck. Their last measured figures are kept.";
+
+export function headerStrip(d: Pick<FuelActuals, "connection" | "last_run" | "refresh_queued" | "refresh_next_at">, now: Date = new Date()): Strip {
   const provider = d.connection?.provider ?? null;
   const reason = d.connection?.reason ?? "";
   if (provider !== "cartrack") {
     if (/ctrlfleet/i.test(reason)) {
       return { main: "CtrlFleet doesn't share fuel data, so fuel use can't be measured. Your figures are used.",
-        lines: [], link: null, canRefresh: false };
+        lines: [], link: null, canRefresh: false, cooldown: null };
     }
     return { main: "Connect Cartrack to measure fuel use per truck.", lines: [],
-      link: { text: "Integrations", to: "integrations" }, canRefresh: false };
+      link: { text: "Integrations", to: "integrations" }, canRefresh: false, cooldown: null };
   }
   const run = d.last_run;
-  const when = sastDayTime(run?.finished_at ?? null);
+  // A failed run updated nothing: no "Last updated" for it. Its own text
+  // (the tracker's error) is for the dev team, never shown here.
+  const when = run?.status === "failed" ? null : sastDayTime(run?.finished_at ?? null);
   const main = `Fuel use measured by Cartrack weekly.${when ? ` Last updated ${when}.` : ""}`;
   const lines: string[] = [];
-  if (run?.status === "partial") lines.push("Last refresh couldn't reach every truck.");
-  if (run?.status === "failed") lines.push(`Last refresh failed: ${run.message || "no answer from Cartrack"}`);
+  if (run?.status === "partial") lines.push(REFRESH_PARTIAL);
+  if (run?.status === "failed") lines.push(REFRESH_FAILED);
   const unmatched = run?.summary?.unmatched?.length ?? 0;
   const noSensor = run?.summary?.no_fuel_sensor?.length ?? 0;
   let link: Strip["link"] = null;
@@ -325,7 +351,7 @@ export function headerStrip(d: Pick<FuelActuals, "connection" | "last_run" | "re
     link = { text: "Fleet", to: "fleet" };
   }
   if (noSensor > 0) lines.push(`${noSensor} truck${noSensor === 1 ? " has" : "s have"} no fuel sensor in Cartrack.`);
-  return { main, lines, link, canRefresh: true };
+  return { main, lines, link, canRefresh: true, cooldown: d.refresh_queued ? null : cooldownText(d.refresh_next_at, now) };
 }
 
 // ---------------------------------------------------------------- vehicle detail
@@ -351,7 +377,7 @@ export function truckCard(v: VehicleFuel, type: VehicleTypeFuel | null | undefin
   const truckAvg = num(m.l_per_100km);
   const typeAvg = num(type?.measured?.l_per_100km);
   const amber = truckAvg != null && typeAvg != null && typeAvg > 0 && truckAvg > typeAvg * 1.15 && type
-    ? `Uses more than other ${type.name}s` : null;
+    ? "Uses more than other trucks of this type" : null;
   return {
     value: l100(m.rated_burn_l_per_100km),
     lines,
@@ -378,7 +404,8 @@ export function quoteBurnLine(rb: RatedBurn | null | undefined): QuoteBurnLine |
   const quoteChoice = rb.chosen_by === "quote";
   const base = rb.label.split("; measured ")[0] ?? rb.label;
   return {
-    label: quoteChoice ? `${base} (your choice for this quote)` : base,
+    // One bracket: "Your figure: 42,0 L/100 km (your choice for this quote)".
+    label: quoteChoice ? `${base.replace(/ \(vehicle type settings\)$/, "")} (your choice for this quote)` : base,
     quoteChoice,
     offerUseMeasured: quoteChoice,
     offerUseMine: rb.source === "measured" && num(rb.configured) != null,
@@ -451,11 +478,27 @@ export function noticeWithBurn(notice: string | null | undefined, then: BurnSnap
   return bc && !notice.includes(bc.text) ? `${notice} ${bc.text}` : notice;
 }
 
-/** Under the fuel line of a reopened quote that keeps its price. */
-export function pricedOnText(snap: RatedBurn | null | undefined): string | null {
+/** "R 7 120" (whole rand, space thousands). */
+export function randWhole(v: unknown): string | null {
+  const n = num(v);
+  return n == null ? null : `R ${fmtFigure(n)}`;
+}
+
+/** The fuel amount a saved quote was priced on: its snapshot's fuel lines. */
+export function snapshotFuelAmount(snapshot: { lines?: { key?: string; amount?: number | null }[] | null } | null | undefined): number | null {
+  const lines = (snapshot?.lines ?? []).filter((l) => l && (l.key === "fuel" || l.key === "fuel_return"));
+  if (!lines.length || lines.some((l) => num(l.amount) == null)) return null;
+  return Math.round(lines.reduce((t, l) => t + (num(l.amount) ?? 0), 0) * 100) / 100;
+}
+
+/** Under the fuel line of a reopened quote that keeps its price: the figure
+ *  AND the fuel amount it was priced on (the row itself shows today's). */
+export function pricedOnText(snap: RatedBurn | null | undefined, pricedFuel?: number | null): string | null {
   const v = l100(snap?.value);
   if (!snap || !v) return null;
-  if (snap.source === "measured") return `Priced on ${v} measured by Cartrack`;
-  if (snap.source === "standard") return `Priced on the standard estimate, ${v}`;
-  return `Priced on your figure, ${v}`;
+  const amt = randWhole(pricedFuel);
+  const tail = amt ? `: fuel ${amt}` : "";
+  if (snap.source === "measured") return `Priced on ${v} measured by Cartrack${tail}`;
+  if (snap.source === "standard") return `Priced on the standard estimate, ${v}${tail}`;
+  return `Priced on your figure, ${v}${tail}`;
 }

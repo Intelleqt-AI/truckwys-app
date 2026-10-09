@@ -88,6 +88,7 @@ import {
   noticeWithBurn,
   pricedOnText,
   quoteBurnLine,
+  snapshotFuelAmount,
   ASK_ADMIN,
   type RatedBurn,
 } from './quote/fleetFuel';
@@ -401,6 +402,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [useConfiguredBurn, setUseConfiguredBurn] = useState(false);
   // What a reopened quote was priced on (costing_snapshot.rated_burn).
   const [savedBurn, setSavedBurn] = useState<RatedBurn | null>(null);
+  // ...and the fuel amount it was priced on (its snapshot's fuel lines).
+  const [savedFuelAmount, setSavedFuelAmount] = useState<number | null>(null);
   // Bumped to force a fresh route calculation ("Recalculate route").
   const [routeNonce, setRouteNonce] = useState(0);
   // The rate box follows the suggested truck until the person types in it.
@@ -882,6 +885,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       setUseConfiguredBurn(ci.use_configured_burn === true);
       const cs = (pick(q, ['costing_snapshot']) ?? {}) as Record<string, unknown>;
       setSavedBurn((cs.rated_burn as RatedBurn | undefined) ?? null);
+      setSavedFuelAmount(snapshotFuelAmount(cs as Parameters<typeof snapshotFuelAmount>[0]));
       const reopened = reopenedInputs(ci);
       setAbnormalLoad(reopened.abnormalLoad);
       setAgentFee(reopened.agentFee);
@@ -3781,7 +3785,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       onFuelRetry={costs.warnings.some((w) => w.code === 'diesel_stale') ? retryFuel : undefined}
                       burnNote={
                         savedBurn && reopen.state === 'kept' && adjustmentSource === 'saved'
-                          ? pricedOnText(savedBurn)
+                          ? pricedOnText(savedBurn, savedFuelAmount)
                           : burnLine
                             ? burnLine.label
                             : null

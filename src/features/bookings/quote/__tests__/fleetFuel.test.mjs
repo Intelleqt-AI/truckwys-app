@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   l100, kmText, sastDay, sastDayTime, burnInUse, fuelCell, selectedMode, periodHeading, measuredLines, methodSentence,
   confidenceChip, unusableText, leftOut, headerStrip, truckCard, quoteBurnLine, burnDetail, localRatedBurn,
-  measuredActionFor, burnChange, noticeWithBurn, pricedOnText,
+  measuredActionFor, burnChange, noticeWithBurn, pricedOnText, cooldownText, snapshotFuelAmount,
 } from "../fleetFuel.ts";
 
 let n = 0;
@@ -78,12 +78,12 @@ eq(unusableText({ ...M, usable: false, unusable_reason: "stale", computed_at: "2
 eq(unusableText({ ...M, usable: false, unusable_reason: "tracker_disconnected" }), "Reconnect Cartrack to use this");
 const rej = [
   { reason: "odometer_reset", start: "2026-07-01T00:00:00+02:00", plate: "CA100GP" },
-  { reason: "differs_from_type", plate: "CA300GP", detail: "52,1 vs 40,2 L/100 km" },
+  { reason: "differs_from_type", plate: "CA300GP", detail: "average 52,1 L/100 km vs type median 40,2" },
   ...Array.from({ length: 5 }, () => ({ reason: "api_error" })),
 ];
 const lo = leftOut(rej);
 eq(lo.lines[0], "CA100GP, Odometer reset, 1 Jul");
-eq(lo.lines[1], "CA300GP, Truck differs from the others, 52,1 vs 40,2 L/100 km");
+eq(lo.lines[1], "CA300GP, Truck differs from the others, average 52,1 L/100 km vs type median 40,2");
 eq(lo.lines[2], "Tracker didn't answer");
 eq(lo.lines.length, 5);
 eq(lo.more, "and 2 more");
@@ -97,9 +97,22 @@ eq(s.main, "Fuel use measured by Cartrack weekly. Last updated 6 Oct, 02:31.");
 eq(s.lines, ["3 Cartrack trucks don't match a truck here (registration differs).", "2 trucks have no fuel sensor in Cartrack."]);
 eq(s.link, { text: "Fleet", to: "fleet" });
 eq(s.canRefresh, true);
-eq(headerStrip({ connection: conn, last_run: { status: "partial", summary: {} } }).lines, ["Last refresh couldn't reach every truck."]);
-eq(headerStrip({ connection: conn, last_run: { status: "failed", message: "Cartrack GET /vehicles failed: 401" } }).lines,
-  ["Last refresh failed: Cartrack GET /vehicles failed: 401"]);
+eq(headerStrip({ connection: conn, last_run: { status: "partial", summary: {} } }).lines,
+  ["Last refresh couldn't reach every truck. Their last measured figures are kept."]);
+{ // a failed run: plain words, never the tracker's error text, and no "Last updated"
+  const f = headerStrip({ connection: conn, last_run: { status: "failed", finished_at: "2026-10-06T02:31:00+02:00", message: "Cartrack GET /vehicles failed: 500" } });
+  eq(f.lines, ["Last refresh failed: Cartrack didn't answer. Your last measured figures are kept."]);
+  eq(f.main, "Fuel use measured by Cartrack weekly.");
+  assert.ok(!JSON.stringify(f).includes("500")); n++;
+}
+{ // 15-minute cooldown
+  const now = new Date("2026-10-09T12:20:00Z");
+  eq(headerStrip({ connection: conn, last_run: run, refresh_next_at: "2026-10-09T14:35:00+02:00" }, now).cooldown, "You can refresh again at 14:35");
+  eq(headerStrip({ connection: conn, last_run: run, refresh_next_at: "2026-10-09T14:15:00+02:00" }, now).cooldown, null);
+  eq(headerStrip({ connection: conn, last_run: run, refresh_queued: true, refresh_next_at: "2026-10-09T14:35:00+02:00" }, now).cooldown, null);
+  eq(cooldownText("2026-10-09T12:35:00Z", now), "You can refresh again at 14:35");
+  eq(cooldownText(null, now), null);
+}
 eq(headerStrip({ connection: { provider: null, reason: "CtrlFleet's API has no fuel or odometer data, so fuel use can't be measured from it." }, last_run: null }).main,
   "CtrlFleet doesn't share fuel data, so fuel use can't be measured. Your figures are used.");
 const none = headerStrip({ connection: { provider: null, reason: "No fleet tracker connected." }, last_run: null });
@@ -113,7 +126,7 @@ const tc = truckCard(truck, row());
 eq(tc.value, "47,0 L/100 km");
 eq(tc.lines, ["Average 40,1 L/100 km over 6 100 km", "Fuel data: engine fuel counter (CAN)"]);
 eq(tc.typeLine, "Type figure: 40,2 L/100 km");
-eq(tc.amber, "Uses more than other Superlinks");             // 40,1 > 34,2 x 1,15
+eq(tc.amber, "Uses more than other trucks of this type");             // 40,1 > 34,2 x 1,15
 eq(truckCard({ ...truck, measured: { ...truck.measured, l_per_100km: 36 } }, row()).amber, null);
 eq(truckCard({ ...truck, measured: null }, row()), null);
 eq(truckCard({ ...truck, measured: { rated_burn_l_per_100km: null, fuel_source: "", note: "Cartrack reports no fuel sensor on this truck." } }, row()).lines,
@@ -123,7 +136,7 @@ eq(truckCard({ ...truck, measured: { rated_burn_l_per_100km: null, fuel_source: 
 eq(quoteBurnLine({ value: 40.2, source: "measured", label: M.label, configured: 42, chosen_by: "measured" }),
   { label: M.label, quoteChoice: false, offerUseMeasured: false, offerUseMine: true });
 eq(quoteBurnLine({ value: 42, source: "configured", label: "Your figure: 42,0 L/100 km (vehicle type settings); measured 40,2 L/100 km", configured: 42, chosen_by: "quote" }),
-  { label: "Your figure: 42,0 L/100 km (vehicle type settings) (your choice for this quote)", quoteChoice: true, offerUseMeasured: true, offerUseMine: false });
+  { label: "Your figure: 42,0 L/100 km (your choice for this quote)", quoteChoice: true, offerUseMeasured: true, offerUseMine: false });
 eq(quoteBurnLine({ value: 38, source: "standard", label: "Standard estimate: 38,0 L/100 km (TruckWys default for this truck type)", configured: 38, chosen_by: null }).offerUseMine, false);
 eq(quoteBurnLine(null), null);
 eq(burnDetail(37.94), "Full-load figure; this load burns 37,9 L/100 km");
@@ -150,6 +163,10 @@ eq(noticeWithBurn("Costs down R 112 since 7 Oct.", meas, { value: 38.9, source: 
 eq(noticeWithBurn("Costs down R 112 since 7 Oct.", meas, meas), "Costs down R 112 since 7 Oct.");
 eq(noticeWithBurn(null, meas, conf), null);
 eq(pricedOnText({ value: 40.2, source: "measured" }), "Priced on 40,2 L/100 km measured by Cartrack");
+eq(pricedOnText({ value: 40.2, source: "measured" }, 7120.4), "Priced on 40,2 L/100 km measured by Cartrack: fuel R 7 120");
+eq(snapshotFuelAmount({ lines: [{ key: "fuel", amount: 7000.25 }, { key: "fuel_return", amount: 3100 }, { key: "tolls", amount: 900 }] }), 10100.25);
+eq(snapshotFuelAmount({ lines: [{ key: "fuel", amount: null }] }), null);
+eq(snapshotFuelAmount(null), null);
 eq(pricedOnText({ value: 42, source: "configured" }), "Priced on your figure, 42,0 L/100 km");
 eq(pricedOnText(null), null);
 

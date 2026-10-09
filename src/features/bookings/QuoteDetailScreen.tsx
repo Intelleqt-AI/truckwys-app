@@ -613,11 +613,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  // Sharing the link is sending it (§11): an open quote goes through the same
+  // send check as Send, so a blocked quote can't go out by link either.
   const share = async () => {
     if (!shareUrl) return toast.info('No share link yet. Send the quote first');
-    await Share.share({
-      message: `Truckwys quote ${str(pick(q, ['quote_number']), '')}: ${shareUrl}`,
-    });
+    const go = () =>
+      Share.share({
+        message: `Truckwys quote ${str(pick(q, ['quote_number']), '')}: ${shareUrl}`,
+      });
+    if (status === 'DRAFT' || status === 'SENT') await guardedSend(go);
+    else await go();
   };
 
   const confirmDelete = () =>

@@ -24,8 +24,13 @@ import {
 } from '@/components/ui';
 import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { RouteMap } from '@/components/RouteMap';
-import { useLoad, updateLoadStatus, uploadLoadPod, seedLoad } from './api';
+import { useLoad, updateLoadStatus, uploadLoadPod, seedLoad, saveWeighbridge } from './api';
+import { useFuelAdjustment } from './followupsApi';
+import { FuelAdjustmentGroup } from './FollowUps';
+import { WeighbridgeFields, WeighbridgeGroup } from './WeighbridgeGroup';
+import { fmtRatePerTonne, fmtTonnes, parseTonnes, type LoadTonnage } from './quote/tonnage';
 import { assignedIds } from './AssignDriverVehicleScreen';
+import { TripSection } from './trip/TripSection';
 import { useSubscription } from '@/hooks/useSubscription';
 import { LOAD_STEPS, VALID_TRANSITIONS, STATUS_LABEL, stepIndexFor } from './constants';
 import { num, str, pick, asArray } from '@/lib/api/list';
@@ -46,6 +51,8 @@ type Props = NativeStackScreenProps<AppStackParamList, 'LoadDetail'>;
 export function LoadDetailScreen({ route, navigation }: Props) {
   const { id, preview, title } = route.params;
   const { data, error, isError, isPending, refetch } = useLoad(id, preview);
+  // The quote's fuel price clause, worked out for this load's trip date.
+  const { data: fuelAdjustment } = useFuelAdjustment('loads', id, !!data);
   const { colors } = useTheme();
   const qc = useQueryClient();
   const subscription = useSubscription();
@@ -56,6 +63,9 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const [showPodPreview, setShowPodPreview] = useState(false);
   const [deliverBusy, setDeliverBusy] = useState(false);
   const [uploadDeliverBusy, setUploadDeliverBusy] = useState(false);
+  // Per-tonne loads: weighbridge tonnes (and slip) taken with the delivery.
+  const [wbTonnes, setWbTonnes] = useState('');
+  const [wbSlip, setWbSlip] = useState('');
 
   // A 404 means the load was deleted or moved, which retrying can't fix.
   if (isError && !data && (error as { status?: number } | null)?.status === 404) {
@@ -83,6 +93,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   const rate = num(pick(l, ['rate']));
   const distance = num(pick(l, ['distance']));
   const total = num(pick(l, ['total_amount']));
+  const tonnage = (l.tonnage ?? null) as LoadTonnage | null;
+  const perTonneLoad = str(pick(l, ['pricing_basis'])) === 'per_tonne' && !!tonnage;
   // Price excl. VAT, VAT and total incl. VAT as the customer is shown them (same
   // rule as the quote it came from: 15%, or 0% international; backend quote_vat).
   const rawPrice = pick(l, ['customer_price']);
@@ -250,7 +262,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     }
     // Cancelling a load that's already moving is destructive — confirm first.
     if (next === 'CANCELLED' && !['PENDING', 'LOADING'].includes(status)) {
-      Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it.', [
+      Alert.alert('Cancel load', 'Cancel this load? This can only be undone by re-opening it. If it is in a return pair, the pair is unlinked.', [
         { text: 'Keep', style: 'cancel' },
         { text: 'Cancel load', style: 'destructive', onPress: () => doStatus('CANCELLED') },
       ]);
@@ -280,9 +292,23 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  // Weighbridge tonnes typed in the delivery dialog are saved first, so the
+  // delivery invoice uses them (else the planned tonnes, flagged).
+  const saveDeliveryTonnes = async (): Promise<boolean> => {
+    if (!perTonneLoad || wbTonnes.trim() === '') return true;
+    const t = parseTonnes(wbTonnes);
+    if (t == null) {
+      toast.error('Enter the weighbridge tonnes, up to 100 t');
+      return false;
+    }
+    seedLoad(qc, await saveWeighbridge(id, t, wbSlip), id);
+    return true;
+  };
+
   const skipAndDeliver = async () => {
     setDeliverBusy(true);
     try {
+      if (!(await saveDeliveryTonnes())) return;
       seedLoad(qc, await updateLoadStatus(id, 'DELIVERED'), id);
       refresh();
       setShowDeliverModal(false);
@@ -300,6 +326,7 @@ export function LoadDetailScreen({ route, navigation }: Props) {
     const asset = res.assets[0];
     setUploadDeliverBusy(true);
     try {
+      if (!(await saveDeliveryTonnes())) return;
       const name = asset.fileName ?? `pod-${id}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
       seedLoad(qc, await uploadLoadPod(id, { uri: asset.uri, name, type }), id);
@@ -477,6 +504,21 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
       {/* Financials */}
       <Group label="Financials">
+        {perTonneLoad && tonnage ? (
+          <>
+            <DetailRow label="Rate" value={fmtRatePerTonne(tonnage.rate_per_tonne)} />
+            <DetailRow
+              label={tonnage.tonnes_source === 'actual' ? 'Billed tonnes' : 'Billed tonnes (planned)'}
+              hint={
+                tonnage.min_tonnes != null && tonnage.billable_tonnes > tonnage.tonnes
+                  ? `Minimum ${fmtTonnes(tonnage.min_tonnes)}`
+                  : undefined
+              }
+              value={fmtTonnes(tonnage.billable_tonnes)}
+            />
+          </>
+        ) : (
+          <>
         {/* The per-km figure is a rate, not a summand, so it sits under Base
             rate as a note rather than among the lines that add up. */}
         <DetailRow
@@ -486,7 +528,9 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         />
         <DetailRow label="Fuel surcharge" value={formatCurrency(fuelSurcharge)} />
         <DetailRow label="Additional charges" value={formatCurrency(additional)} />
-        {Math.abs(notItemised) > 0.5 && (
+          </>
+        )}
+        {!perTonneLoad && Math.abs(notItemised) > 0.5 && (
           <DetailRow
             label="Not itemised"
             hint={
@@ -517,6 +561,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         ) : null}
       </Group>
 
+      <FuelAdjustmentGroup adjustment={fuelAdjustment} onOpenInvoice={(inv) => nav.openInvoice(inv)} />
+
       {(fuelEst != null || fuelAct != null) && (
         <Group label="Fuel cost">
           <DetailRow
@@ -540,6 +586,15 @@ export function LoadDetailScreen({ route, navigation }: Props) {
           )}
         </Group>
       )}
+
+      {/* Trip margin (quoted vs actual) and the return-load link. Hidden on
+          a backend without trip economics. */}
+      <TripSection
+        loadId={id}
+        status={status}
+        tripType={str(pick(l, ['trip_type']), 'ONE_WAY')}
+        onOpenLoad={(other) => navigation.push('LoadDetail', { id: other })}
+      />
 
       {/* Assignment */}
       <Group
@@ -572,6 +627,18 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         <DetailRow label="Quote" value={str(pick(l, ['quote_number', 'quote']), '—')} last />
       </Group>
 
+      {perTonneLoad && (
+        <WeighbridgeGroup
+          key={`${String(l.actual_tonnes)}-${String(l.weighbridge_slip)}`}
+          load={l}
+          disabled={subscription.blocked}
+          onSaved={(res) => {
+            seedLoad(qc, res, id);
+            refresh();
+          }}
+        />
+      )}
+
       {showDeliverModal && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setShowDeliverModal(false)}>
           <TouchableOpacity
@@ -588,6 +655,22 @@ export function LoadDetailScreen({ route, navigation }: Props) {
               <Txt className="mb-4 mt-1.5 text-sub text-muted">
                 Attach a proof of delivery now, or skip it. You can still add one later from Upload POD.
               </Txt>
+              {perTonneLoad && (
+                <View className="mb-4 gap-1.5">
+                  <WeighbridgeFields
+                    tonnes={wbTonnes}
+                    slip={wbSlip}
+                    onTonnes={setWbTonnes}
+                    onSlip={setWbSlip}
+                    planned={pick(l, ['planned_tonnes'])}
+                  />
+                  <Txt className="text-caption text-muted">
+                    {wbTonnes.trim()
+                      ? 'Invoiced on these tonnes, minimum applied.'
+                      : `Leave empty to invoice the planned ${fmtTonnes(num(pick(l, ['planned_tonnes'])))} for now.`}
+                  </Txt>
+                </View>
+              )}
               <View className="gap-2.5">
                 <Button
                   label="Upload POD and mark delivered"

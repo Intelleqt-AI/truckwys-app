@@ -24,6 +24,7 @@ import {
 } from '@/components/ui';
 import { ListSkeleton, ErrorState, Skeleton } from '@/components/feedback';
 import { useQuotes, useLoadsTab, type OrdersSummary, type HistorySummary } from './api';
+import { ContractsTab } from './ContractsTab';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { bookedLoadOf, quoteStage, type QuoteStage } from '@/lib/quoteStage';
@@ -44,11 +45,13 @@ const TAB_TITLES: Record<BookingsTab, string> = {
   quotes: 'Quotes',
   orders: 'Open orders',
   history: 'Order history',
+  contracts: 'Contracts',
 };
 const TAB_DESCRIPTIONS: Record<BookingsTab, string> = {
   quotes: 'Draft, send and track quotes.',
   orders: 'Booked loads that are not yet delivered.',
   history: 'Delivered, invoiced and cancelled loads.',
+  contracts: 'Tonnes over a period, booked load by load.',
 };
 const wholeRand = (n: number) => formatCurrency(n, { maximumFractionDigits: 0 });
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -73,6 +76,7 @@ export function BookingsScreen({ route }: Props) {
           { label: 'Quotes', value: 'quotes' },
           { label: 'Orders', value: 'orders' },
           { label: 'History', value: 'history' },
+          { label: 'Contracts', value: 'contracts' },
         ]}
         value={tab}
         onChange={setTab}
@@ -81,6 +85,7 @@ export function BookingsScreen({ route }: Props) {
         <QuotesTab />
         <OrdersTab onViewQuotes={() => setTab('quotes')} />
         <HistoryTab />
+        <ContractsTab />
       </SwipeTabs>
       {/* Long-press for the voice/AI entry point — undiscoverable alone, so
           it's a second path onto the same screen, not the only one. */}
@@ -238,7 +243,7 @@ const quoteItemType = (q: QuoteLite) => {
 // for search, filter or a page arriving doesn't re-render every visible card.
 const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
   const { colors } = useTheme();
-  const { openQuote, openAssign, openLoad } = useAppNavigation();
+  const { openQuote, openBookJob, openLoad } = useAppNavigation();
   const stage = quoteStage(quote.raw) ?? quote.status;
   // The quote API names the load it was booked as, so no scan of the loads
   // table is needed.
@@ -253,8 +258,7 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
   })();
   const onPress = () => openQuote(quote.id, quote.raw);
   const onConvert = () =>
-    openAssign({
-      mode: 'convert',
+    openBookJob({
       quoteId: quote.id,
       reference: quote.code,
       vehicleType: str(pick(quote.raw, ['vehicle_type'])) || undefined,
@@ -296,7 +300,7 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
           activeOpacity={0.7}
           className="min-h-[44px] flex-row items-center justify-center gap-1.5 border-t border-line-row"
         >
-          <Mono className="text-sub font-medium text-link">Convert to booking</Mono>
+          <Mono className="text-sub font-medium text-link">Book job</Mono>
           <Icon name="arrowRight" size={14} color={colors.link} />
         </TouchableOpacity>
       )}

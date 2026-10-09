@@ -1,3 +1,4 @@
+import type { FuelUseInUse } from './quote/fleetFuel';
 import { useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { api, fetchData, postData, patchData, deleteData } from '@/lib/api/client';
 import type { AllPages } from '@/lib/api/fetchAllPages';
@@ -6,6 +7,18 @@ import { useInfiniteList } from '@/lib/api/useInfiniteList';
 import { normalizeQuote, normalizeLoad, type LoadLite } from '@/types/domain';
 import { roundTo } from '@/lib/formatters';
 import { parseErrorBody, sendBlockMessage } from './quote/sendBlock';
+import {
+  economicsPending,
+  isMissingEndpoint,
+  parseBookingPreview,
+  type BookingPreview,
+  parseCandidates,
+  parseEconomics,
+  returnHistoryText,
+  type Candidate,
+  type CandidateDirection,
+  type Economics,
+} from './trip/economics';
 
 // ── Lists ──────────────────────────────────────────────────────────────────
 /**
@@ -225,6 +238,9 @@ export interface VehicleType {
       instead of "Delete" for these. Absent/undefined on a pre-shared-catalogue
       backend, same reasoning as `company` above. */
   overrides_shared_default?: boolean;
+  /** Read-only: the litres per 100 km quotes use now (measured by Cartrack
+      when there is enough data, else the typed figure). */
+  fuel_use_in_use?: FuelUseInUse | null;
 }
 
 // The backend serializes every decimal field as a JSON string ("38.00", not
@@ -234,6 +250,20 @@ export interface VehicleType {
 // ['vehicle-types'] query key, so all three must normalize identically —
 // whichever queryFn actually runs wins the shared cache entry for the other
 // two. Import this into both rather than re-parsing locally.
+function normalizeFuelUse(v: unknown): FuelUseInUse | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const n = (x: unknown) => (x == null || x === '' || !Number.isFinite(Number(x)) ? null : Number(x));
+  return {
+    value: n(o.value),
+    source: str(o.source, 'missing'),
+    label: typeof o.label === 'string' ? o.label : null,
+    configured: n(o.configured),
+    burn_mode: typeof o.burn_mode === 'string' ? o.burn_mode : undefined,
+    measured: o.measured && typeof o.measured === 'object' ? (o.measured as FuelUseInUse['measured']) : null,
+  };
+}
+
 export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
   return {
     id: (pick(r, ['id', 'pk']) as string | number) ?? '',
@@ -260,6 +290,7 @@ export function normalizeVehicleType(r: Record<string, unknown>): VehicleType {
     // distinction survives.
     company: 'company' in r ? (r.company as number | null) : undefined,
     overrides_shared_default: r.overrides_shared_default === true,
+    fuel_use_in_use: normalizeFuelUse(r.fuel_use_in_use),
   };
 }
 
@@ -431,10 +462,25 @@ export const recordQuoteOutcome = (id: string | number, data: QuoteOutcome) =>
 
 // Driver/vehicle are optional — converting with neither leaves the booking
 // unassigned, to be picked up later from the load detail screen.
-export const convertQuoteToLoad = (
-  id: string | number,
-  data: { driver_id?: string; vehicle_id?: string } = {},
-) => postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
+//
+// One-tap booking (trip economics): idempotent — an already-booked quote
+// answers 200 with its job. Dates are YYYY-MM-DD; `return_of_load_id` books
+// this job as the return of that load, `expect_return` flags it as an
+// outbound waiting for one. Newer backends add `booking` (see trip/economics).
+export interface ConvertToLoadBody {
+  driver_id?: string;
+  vehicle_id?: string;
+  pickup_date?: string;
+  delivery_date?: string;
+  return_of_load_id?: number | string;
+  /** That existing load brings this job's truck home (newer backends). */
+  return_load_id?: number | string;
+  expect_return?: boolean;
+  /** Volume contract call-off: the tonnes on this load (tonnage quotes). */
+  tonnes?: number;
+}
+export const convertQuoteToLoad = (id: string | number, data: ConvertToLoadBody = {}) =>
+  postData<Record<string, unknown>>({ url: `quotes/${id}/convert_to_load/`, data });
 
 export const deleteQuote = (id: string | number) => deleteData({ url: `quotes/${id}/` });
 
@@ -502,3 +548,146 @@ export const uploadLoadPod = (id: string | number, file: { uri: string; name: st
     config: { headers: { 'Content-Type': 'multipart/form-data' } },
   });
 };
+
+// Tonnage (per-tonne) loads: the weighbridge tonnes and slip; the server
+// re-prices the load and its draft invoice (rate x max(tonnes, minimum)).
+export const saveWeighbridge = (id: string | number, tonnes: number, slip: string) =>
+  patchData<Record<string, unknown>>({
+    url: `loads/${id}/`,
+    data: { actual_tonnes: tonnes, weighbridge_slip: slip.trim(), actual_tonnes_source: 'weighbridge' },
+  });
+
+// ── Trip economics (return loads, round-trip margins) ───────────────────────
+// Each answers `null` on a backend without the endpoint (404 / 405 / 501), so
+// the screen hides the feature instead of showing an error.
+async function orNullIfMissing<T>(fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (isMissingEndpoint((e as { status?: number }).status)) return null;
+    throw e;
+  }
+}
+
+/** GET loads/{id}/economics/: the job's margin, or its return pair's. */
+export function useLoadEconomics(id: string | number, enabled = true) {
+  return useQuery<Economics | null>({
+    queryKey: ['load-economics', id],
+    enabled: enabled && id != null && id !== '',
+    retry: false,
+    // Tolls still being worked out (`tolls_pending`): look again calmly.
+    refetchInterval: (query) => (economicsPending(query.state.data) ? 20000 : false),
+    queryFn: async () =>
+      parseEconomics(await orNullIfMissing(() => fetchData(`loads/${id}/economics/`))),
+  });
+}
+
+/**
+ * GET loads/{id}/return-candidates/: `return` = loads that could bring this
+ * job's truck home; `outbound` = loads this job could be the return of.
+ */
+export function useReturnCandidates(id: string | number, direction: CandidateDirection, enabled = true) {
+  return useQuery<Candidate[] | null>({
+    queryKey: ['return-candidates', id, direction],
+    enabled: enabled && id != null && id !== '',
+    retry: false,
+    queryFn: async () => {
+      const res = await orNullIfMissing(() =>
+        fetchData<Record<string, unknown>>(`loads/${id}/return-candidates/?direction=${direction}`),
+      );
+      return res == null ? null : parseCandidates(res.candidates);
+    },
+  });
+}
+
+/**
+ * GET quotes/{id}/booking-preview/: candidates, invoice preview and whether it
+ * can be booked, WITHOUT creating the job. Null on an older backend.
+ */
+export function useBookingPreview(quoteId: string | number, pickupDate: string, deliveryDate: string, tonnes?: number | null) {
+  return useQuery<BookingPreview | null>({
+    queryKey: ['booking-preview', quoteId, pickupDate, deliveryDate, tonnes ?? null],
+    retry: false,
+    placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (pickupDate) params.set('pickup_date', pickupDate);
+      if (deliveryDate) params.set('delivery_date', deliveryDate);
+      // A contract call-off's tonnes: the invoice preview is rate x these.
+      if (tonnes != null) params.set('tonnes', String(tonnes));
+      const qs = params.toString();
+      return parseBookingPreview(
+        await orNullIfMissing(() => fetchData(`quotes/${quoteId}/booking-preview/${qs ? `?${qs}` : ''}`)),
+      );
+    },
+  });
+}
+
+/**
+ * The margin as quoted, frozen on the job when it was booked
+ * (load.quoted_margin_pct, never changed afterwards). Shares the job's
+ * detail cache; null when the job has none.
+ */
+export function useBookedQuotedMargin(loadId: string | number | null, enabled: boolean) {
+  return useQuery<Record<string, unknown>, Error, number | null>({
+    queryKey: ['load', loadId ?? ''],
+    enabled: enabled && loadId != null && loadId !== '',
+    queryFn: () => fetchData(`loads/${loadId}/`),
+    select: (l) => {
+      const v = l?.quoted_margin_pct;
+      if (v == null || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    },
+  });
+}
+
+/** POST loads/{outbound}/link-return/ {return_load_id}. */
+export const linkReturnLoad = (outboundId: string | number, returnId: string | number) =>
+  postData<Record<string, unknown>>({
+    url: `loads/${outboundId}/link-return/`,
+    data: { return_load_id: returnId },
+  });
+
+/** POST loads/{id}/close-costs/ {closed}: every cost recorded (or reopen). */
+export const closeLoadCosts = (id: string | number, closed: boolean) =>
+  postData<Record<string, unknown>>({ url: `loads/${id}/close-costs/`, data: { closed } });
+
+/** POST loads/{id}/unlink-return/ (either leg). */
+export const unlinkReturnLoad = (id: string | number) =>
+  postData<Record<string, unknown>>({ url: `loads/${id}/unlink-return/`, data: {} });
+
+/**
+ * Fallback for backends whose /quotes/analyze/ predates `return_load_history`:
+ * one pricing-analysis call per lane, only once the analysis has answered
+ * without the field. Null on any failure.
+ */
+export function useReturnLoadHistory(
+  lane: { origin: string; destination: string; pickup?: string; delivery?: string } | null,
+  needed: boolean,
+) {
+  return useQuery<string | null>({
+    queryKey: ['return-load-history', lane?.origin ?? '', lane?.destination ?? ''],
+    enabled: needed && !!lane && !!lane.origin && !!lane.destination,
+    retry: false,
+    staleTime: 30 * 60 * 1000,
+    queryFn: async () => {
+      try {
+        const res = await postData<Record<string, unknown>>({
+          url: 'quotes/pricing-analysis/',
+          data: {
+            origin: lane!.origin,
+            destination: lane!.destination,
+            pickup_location: lane!.pickup ?? lane!.origin,
+            delivery_location: lane!.delivery ?? lane!.destination,
+            trip_type: 'ONE_WAY',
+          },
+          config: { timeout: 10000 },
+        });
+        return returnHistoryText(res);
+      } catch {
+        return null;
+      }
+    },
+  });
+}

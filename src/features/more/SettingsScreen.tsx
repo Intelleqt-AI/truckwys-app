@@ -85,6 +85,7 @@ import {
   type PriceBoxes,
 } from './companyFieldErrors';
 import { InvoiceNumberingSection } from '@/features/finance/InvoiceNumberingSection';
+import { PricingSection } from './PricingSection';
 import { ComingSoonNote, ProviderCards } from '@/features/accounting/components/ProviderCards';
 import { FleetTrackingCards } from '@/features/integrations/FleetTrackingCards';
 import { ApiKeysCard, WebhooksCard } from '@/features/integrations/DeveloperCards';
@@ -114,6 +115,7 @@ const SECTIONS: { key: string; label: string; icon: IconName }[] = [
   { key: 'notifications', label: 'Notifications', icon: 'bell' },
   { key: 'security', label: 'Security', icon: 'lock' },
   { key: 'company', label: 'Company details', icon: 'building' },
+  { key: 'pricing', label: 'Pricing', icon: 'dollar' },
   { key: 'vehicle-types', label: 'Vehicle types', icon: 'truck' },
   { key: 'users', label: 'Users and permissions', icon: 'users' },
   { key: 'billing', label: 'Billing', icon: 'card' },
@@ -159,6 +161,7 @@ export function SettingsScreen({ route, navigation }: Props) {
       {section === 'notifications' && <NotificationsSection />}
       {section === 'security' && <SecuritySection />}
       {section === 'company' && <CompanySection />}
+      {section === 'pricing' && <PricingSection focus={route.params?.focus} />}
       {section === 'vehicle-types' && <VehicleTypesSection />}
       {section === 'users' && <UsersSection />}
       {section === 'billing' && <BillingSection navigation={navigation} />}
@@ -794,7 +797,7 @@ const NOTIF_CHANNELS: {
   channel: NotificationChannel;
   label: string;
   disabled?: boolean;
-  keys: { key: string; label: string; desc: string }[];
+  keys: { key: string; label: string; desc: string; adminOnly?: boolean }[];
 }[] = [
   {
     channel: 'email',
@@ -805,6 +808,12 @@ const NOTIF_CHANNELS: {
       { key: 'payments', label: 'Payments', desc: 'Payments received and failed' },
       { key: 'fleet_alerts', label: 'Fleet alerts', desc: 'Service due and compliance' },
       { key: 'weekly_reports', label: 'Weekly reports', desc: 'Monday summary of the week' },
+      {
+        key: 'fuel_alerts',
+        label: 'Fuel price alerts',
+        desc: 'When the official fuel price changes and open quotes are affected.',
+      },
+      { key: 'margin_report', label: 'Weekly margin email', desc: 'Mondays at 07:00. Admins only.', adminOnly: true },
     ],
   },
   {
@@ -816,6 +825,11 @@ const NOTIF_CHANNELS: {
       { key: 'maintenance_due', label: 'Maintenance due', desc: 'A vehicle is due for service' },
       { key: 'driver_updates', label: 'Driver updates', desc: 'Status changes from drivers' },
       { key: 'product_news', label: 'Product news', desc: 'New features and tips from Truckwys' },
+      {
+        key: 'quote_reminders',
+        label: 'Quote reminders',
+        desc: 'Quotes about to expire, quotes with no answer, fuel price alerts.',
+      },
     ],
   },
   {
@@ -831,6 +845,8 @@ const NOTIF_CHANNELS: {
 
 function NotificationsSection() {
   const { data } = useNotificationPrefs();
+  // The weekly margin email goes to admins only, so only they see its switch.
+  const isAdmin = useRole() === 'ADMIN';
   const qc = useQueryClient();
   const demo = useDemo();
   const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
@@ -872,11 +888,11 @@ function NotificationsSection() {
           key={group.channel}
           label={group.disabled ? `${group.label} · coming soon` : group.label}
         >
-          {group.keys.map((n, i) => (
+          {group.keys.filter((k) => !k.adminOnly || isAdmin).map((n, i, keys) => (
             <View
               key={n.key}
               className={`flex-row items-center justify-between gap-3 px-4 py-3.5 ${
-                i === group.keys.length - 1 ? '' : 'border-b border-line-row'
+                i === keys.length - 1 ? '' : 'border-b border-line-row'
               }`}
               style={group.disabled ? { opacity: 0.45 } : undefined}
             >

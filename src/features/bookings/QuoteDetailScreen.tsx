@@ -30,6 +30,7 @@ import {
   useQuoteFuelAlert,
   useQuoteCosting,
   useCompanyProfileData,
+  useBookedQuotedMargin,
   sendQuote,
   recordQuoteOutcome,
   deleteQuote,
@@ -62,6 +63,12 @@ import type { AppStackParamList } from '@/navigation/types';
 import { useTheme } from '@/theme/ThemeProvider';
 import { pricedInEarlierPeriod } from './quote/rules';
 import { pct } from './quote/CostBreakdownCard';
+import { TonnageTermsGroup } from './TonnageTermsGroup';
+import type { VolumeContract } from './quote/tonnage';
+import { actualsView, percent } from './trip/economics';
+import { useFollowUp, useFuelAdjustment } from './followupsApi';
+import { DraftClauseLine, FollowUpCard, FuelAdjustmentGroup } from './FollowUps';
+import { showFollowUp } from '@/lib/followups';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -93,14 +100,22 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const subscription = useSubscription();
   const demo = useDemo();
-  const { id, preview } = route.params;
+  const { id, preview, followUp } = route.params;
   const { data, error, isError, isPending, refetch } = useQuote(id, preview);
   const q = (data ?? {}) as Record<string, unknown>;
   const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
   // Diesel moving since a quote was priced matters while it can still change.
   const { data: fuelAlert } = useQuoteFuelAlert(id, !!data && ['DRAFT', 'SENT'].includes(status));
   const { data: costing } = useQuoteCosting(id, !!data);
+  // Quote follow-ups: the fuel clause / adjustment, and the follow-up card on a sent quote.
+  const { data: fuelAdjustment } = useFuelAdjustment('quotes', id, !!data);
+  const { data: followUpState } = useFollowUp(id, !!data && showFollowUp(status));
   const { data: company } = useCompanyProfileData();
+  // Once delivered (actuals recorded), the margin it was quoted at, from the job.
+  const { data: quotedMarginAtBooking } = useBookedQuotedMargin(
+    bookedLoadOf(data as Record<string, unknown> | undefined)?.id ?? null,
+    !!data && !!(data as Record<string, unknown>).actuals,
+  );
   const qc = useQueryClient();
   const nav = useAppNavigation();
   const [sendBusy, setSendBusy] = useState(false);
@@ -285,7 +300,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   // The quote API names the load it was booked as (booked_load); a quote
   // converts to at most one, and the backend refuses a second conversion.
   const bookedLoad = bookedLoadOf(q);
-  const booked = bookedLoad !== null;
+  // A volume contract books call-off loads until its tonnes are used up.
+  const perTonne = str(pick(q, ['pricing_basis'])) === 'per_tonne';
+  const contract = perTonne ? ((q.volume_contract ?? null) as VolumeContract | null) : null;
+  const contractOpen = !!contract && contract.remaining_tonnes > 0;
+  const booked = bookedLoad !== null && !contractOpen;
   // Legacy quotes carrying a load status (In transit, Completed) with no load
   // found: nothing to send or convert, and no booking to open.
   const loadStateOnly = !booked && (status === 'IT' || status === 'COMPLETED');
@@ -297,7 +316,10 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   // it goes out: Edit is the primary action and Send steps down.
   const needsEdit = !booked && openStatus && (lapsed || (status === 'DRAFT' && !!fuelAlert));
   const shownStatus = booked ? 'BOOKED' : lapsed ? 'EXPIRED' : status;
-  const canConvert = ['ACCEPTED', 'APPROVED'].includes(status) && !booked && !loadStateOnly;
+  const canConvert =
+    (['ACCEPTED', 'APPROVED'].includes(status) || (contractOpen && bookedLoad !== null)) && !booked && !loadStateOnly;
+  // Newer backends: what the job really earned once delivered (null until then).
+  const actuals = actualsView(pick(q, ['actuals']));
   const bookedLabel = bookedLoad
     ? `${bookedLoad.load_number || 'a booking'}${
         bookedLoad.status ? ` · ${LOAD_STATUS_LABEL(String(bookedLoad.status).toUpperCase())}` : ''
@@ -633,16 +655,24 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         navigation.navigate('LoadDetail', { id: bookedLoad!.id, title: bookedLoad!.load_number }),
     },
     convert: {
-      label: 'Convert to booking',
+      label: contract ? 'Book a load' : 'Book job',
       icon: 'arrowRight' as IconName,
       disabled: subscription.blocked,
       onPress: () =>
-        nav.openAssign({
-          mode: 'convert',
+        nav.openBookJob({
           quoteId: id,
           reference: str(pick(q, ['quote_number'])),
           vehicleType: str(pick(q, ['vehicle_type'])) || undefined,
           popCallerOnSuccess: true,
+          ...(contract
+            ? {
+                callOff: {
+                  remaining: contract.remaining_tonnes,
+                  size: contract.tonnes_per_load,
+                  max: contract.max_tonnes_per_load ?? null,
+                },
+              }
+            : {}),
         }),
     },
     send: {
@@ -759,6 +789,10 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         </View>
       )}
 
+      {showFollowUp(status) && !booked && followUpState && (
+        <FollowUpCard quoteId={id} state={followUpState} highlight={!!followUp} />
+      )}
+
       <View className="mb-5">
         <RoutePreview
           origin={origin}
@@ -846,9 +880,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         </Group>
       )}
 
+      {perTonne && (
+        <TonnageTermsGroup
+          quote={q}
+          onOpenLoad={(loadId, loadNumber) => navigation.navigate('LoadDetail', { id: loadId, title: loadNumber })}
+        />
+      )}
+
       {total > 0 && (
-        <Group label="Cost breakdown">
-          {costRows.map((c) =>
+        <Group label={perTonne ? 'Price' : 'Cost breakdown'}>
+          {!perTonne && costRows.map((c) =>
             c.label === 'Tolls' && tollsUnknown ? (
               // Saved while the toll lookup had failed: unknown, never R 0.
               <DetailRow
@@ -862,7 +903,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
               <DetailRow key={c.label} label={c.label} value={formatCurrency(c.value)} />
             ),
           )}
-          {hasGap && (
+          {!perTonne && hasGap && (
             <DetailRow
               label="Not itemised"
               hint="Set on the quote; its total includes charges not broken down here."
@@ -871,10 +912,13 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           )}
           <View className="flex-row items-center justify-between bg-surface-hover px-3.5 py-3.5">
             <Txt className="text-callout font-semibold text-fg">
-              {roundTrip ? 'Price, both legs, excl. VAT' : 'Price excl. VAT'}
+              {perTonne ? 'Estimated, excl. VAT' : roundTrip ? 'Price, both legs, excl. VAT' : 'Price excl. VAT'}
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
+          {status === 'DRAFT' && (
+            <DraftClauseLine quote={q} adjustment={fuelAdjustment} className="border-b border-line-row px-3.5 py-2.5" />
+          )}
           {costFloor === null && tollsUnknown && (
             <DetailRow
               label="Cost floor"
@@ -917,6 +961,33 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
               <DetailRow label="VAT" value="Not charged (not VAT-registered)" mono={false} last />
             )
           ) : null}
+        </Group>
+      )}
+
+      {status !== 'DRAFT' && !bookedLoad && <FuelAdjustmentGroup adjustment={fuelAdjustment} />}
+
+      {actuals && (
+        // What the job really earned once delivered (QuoteOutcome actuals).
+        <Group label="How it went">
+          <DetailRow
+            label={actuals.marginLabel}
+            value={actuals.margin}
+            valueColor={actuals.negative ? colors.danger : undefined}
+            boldValue
+          />
+          {quotedMarginAtBooking != null && (
+            <DetailRow label="Quoted margin" value={percent(quotedMarginAtBooking)} />
+          )}
+          {actuals.revenue && <DetailRow label="Revenue excl. VAT" value={actuals.revenue} />}
+          {actuals.cost && (
+            <DetailRow
+              label={`${actuals.costRowLabel} excl. VAT`}
+              hint={actuals.basis ?? undefined}
+              value={actuals.cost}
+              last={!actuals.backhaul}
+            />
+          )}
+          {actuals.backhaul && <DetailRow label="Return" value={actuals.backhaul} mono={false} last />}
         </Group>
       )}
 

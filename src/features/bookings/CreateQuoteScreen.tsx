@@ -33,7 +33,7 @@ import BottomSheet, {
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchData } from '@/lib/api/client';
+import { fetchData, postData } from '@/lib/api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   SegmentedControl,
@@ -56,6 +56,7 @@ import {
   suggestLocations,
   calculateRoute,
   analyzeQuote,
+  useReturnLoadHistory,
   benchmarkQuote,
   aiChatQuote,
   aiVoiceQuote,
@@ -64,6 +65,7 @@ import {
   sendQuote,
   type AiChatTurn,
 } from './api';
+import { analysisHasReturnHistory, returnHistoryText } from './trip/economics';
 import { useCustomers } from '@/features/customers/api';
 import type { GeoPoint } from '@/lib/routeGeometry';
 import { MapCanvas } from './quote/MapCanvas';
@@ -78,6 +80,18 @@ import { formatCurrency, formatDuration, formatNumber, formatPlain, parseNum, de
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
+import { useRole } from '@/lib/access';
+import {
+  burnInUse,
+  localRatedBurn,
+  measuredActionFor,
+  noticeWithBurn,
+  pricedOnText,
+  quoteBurnLine,
+  snapshotFuelAmount,
+  ASK_ADMIN,
+  type RatedBurn,
+} from './quote/fleetFuel';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { dismissKeyboard } from '@/lib/keyboard';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -105,10 +119,17 @@ import {
   changesSincePriced,
   saShortDate,
   ACTION_LABELS,
+  computeTonnage,
+  operatingCostPerKm,
   type ChangesSincePriced,
   type QuoteWarning,
+  type CostingInputs as TonnageLane,
+  type TonnageCosting,
 } from './quote/rules';
 import { QuoteWarnings } from './quote/QuoteWarnings';
+import { TonnageCard } from './quote/TonnageCard';
+import { nextAutoBasis, AUTO_BASIS_START, type AutoBasis } from './quote/tonnageRules';
+import { useTonnageAnalysis } from './quote/useTonnageAnalysis';
 import { CostFloorModal } from './quote/CostFloorModal';
 import { useServerCosting } from './quote/useServerCosting';
 import { analysisPayload } from './quote/analysisPayload';
@@ -175,6 +196,8 @@ import {
   type QuoteIssue,
 } from './quote/validation';
 import { QuoteFooterActions, type FooterStrip, type FooterOffer } from './quote/QuoteFooterActions';
+import { useFuelAdjustment } from './followupsApi';
+import { DraftClauseLine } from './FollowUps';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
 
@@ -246,6 +269,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     retry: false,
   });
   const [hydrated, setHydrated] = useState(false);
+  // A saved draft: the fuel clause its PDF will carry (null when the company has it off).
+  const existingDraft = editing && str(existing?.status).toUpperCase() === 'DRAFT';
+  const { data: draftFuelAdjustment } = useFuelAdjustment('quotes', editId ?? '', existingDraft);
 
   const { data: customers } = useCustomers();
   const { data: vtypes } = useVehicleTypes();
@@ -272,6 +298,22 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [stops, setStops] = useState<StopEntry[]>([]);
   const stopSeq = useRef(0);
   const [weight, setWeight] = useState(str(prefill?.weight));
+  // Pricing basis: per load (the classic price) or per tonne (rate per tonne x
+  // weighbridge tonnes, never below a minimum per load; with a total, a volume
+  // contract booked load by load). Same rules as the web builder.
+  const [pricingBasis, setPricingBasis] = useState<'per_load' | 'per_tonne'>(
+    prefill?.pricing_basis === 'per_tonne' || prefill?.contract === true ? 'per_tonne' : 'per_load',
+  );
+  const perTonne = pricingBasis === 'per_tonne';
+  const [isContract, setIsContract] = useState(prefill?.contract === true);
+  const [totalTonnes, setTotalTonnes] = useState('');
+  const [minTonnes, setMinTonnes] = useState('');
+  const [ratePerTonne, setRatePerTonne] = useState('');
+  const [contractStart, setContractStart] = useState('');
+  const [contractEnd, setContractEnd] = useState('');
+  // Truck unknown: priced (and routed) on the safest truck, the tonnage basis.
+  const [autoBasis, setAutoBasis] = useState<AutoBasis>(AUTO_BASIS_START);
+  const autoBasisName = autoBasis.name;
   // A new quote collects tomorrow; delivery follows the driving days (below)
   // until the person picks one.
   const [pickupDate, setPickupDate] = useState(editing ? '' : plusDays(1));
@@ -355,6 +397,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [distanceConfirmed, setDistanceConfirmed] = useState(false);
   // "Use official price" on this quote while the company prices on its own.
   const [useOfficialDiesel, setUseOfficialDiesel] = useState(false);
+  // Fleet actuals: this quote prices on the typed fuel figure instead of the
+  // one measured by Cartrack (costing_inputs.use_configured_burn).
+  const [useConfiguredBurn, setUseConfiguredBurn] = useState(false);
+  // What a reopened quote was priced on (costing_snapshot.rated_burn).
+  const [savedBurn, setSavedBurn] = useState<RatedBurn | null>(null);
+  // ...and the fuel amount it was priced on (its snapshot's fuel lines).
+  const [savedFuelAmount, setSavedFuelAmount] = useState<number | null>(null);
   // Bumped to force a fresh route calculation ("Recalculate route").
   const [routeNonce, setRouteNonce] = useState(0);
   // The rate box follows the suggested truck until the person types in it.
@@ -796,6 +845,22 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         );
       }
       setWeight(String((num(pick(q, ['weight'])) || 0) / 1000 || ''));
+      if (pick(q, ['pricing_basis']) === 'per_tonne') {
+        setPricingBasis('per_tonne');
+        const tot = pick(q, ['total_tonnes']);
+        setIsContract(tot != null);
+        setTotalTonnes(tot != null ? formatPlain(num(tot)) : '');
+        const mn = pick(q, ['min_tonnes_per_load']);
+        setMinTonnes(mn != null ? formatPlain(num(mn)) : '');
+        const rt = pick(q, ['rate_per_tonne']);
+        setRatePerTonne(rt != null ? formatPlain(num(rt)) : '');
+        setContractStart(str(pick(q, ['contract_start'])));
+        setContractEnd(str(pick(q, ['contract_end'])));
+        const tpl = pick(q, ['tonnes_per_load']);
+        if (tpl != null) setWeight(formatPlain(num(tpl)));
+        // Saved on the safest truck (none chosen): reopens on "safest".
+        if (pick(q, ['basis_vehicle_type']) == null) setVehicleType('');
+      }
       setCargo(str(pick(q, ['cargo_description'])));
       setTollOverride(String(num(pick(q, ['toll_charges']))));
       lastStatusRef.current = str(pick(q, ['status'])).toUpperCase();
@@ -817,6 +882,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       setUseOfficialDiesel(snap.use_official === true);
       // The quote's own border choices (costing_inputs, newer backends).
       const ci = (pick(q, ['costing_inputs']) ?? {}) as Record<string, unknown>;
+      setUseConfiguredBurn(ci.use_configured_burn === true);
+      const cs = (pick(q, ['costing_snapshot']) ?? {}) as Record<string, unknown>;
+      setSavedBurn((cs.rated_burn as RatedBurn | undefined) ?? null);
+      setSavedFuelAmount(snapshotFuelAmount(cs as Parameters<typeof snapshotFuelAmount>[0]));
       const reopened = reopenedInputs(ci);
       setAbnormalLoad(reopened.abnormalLoad);
       setAgentFee(reopened.agentFee);
@@ -949,14 +1018,20 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vtypes]);
   const suggestedTruck = useMemo(() => {
-    const local = suggestTruck(vtypes ?? [], weightTons ?? 0, { cargo, usage: quoteUsage });
+    // §3 tie-break on the burn quotes use (measured by Cartrack when usable), as the server.
+    const pick1 = suggestTruck(
+      (vtypes ?? []).map((v) => ({ ...v, fuel_consumption_l_per_100km: burnInUse(v) ?? undefined })),
+      weightTons ?? 0,
+      { cargo, usage: quoteUsage },
+    );
+    const local = pick1 ? ((vtypes ?? []).find((v) => String(v.id) === String(pick1.id)) ?? null) : null;
     const fromServer =
       serverSuggested && serverSuggested.key === suggestKey
         ? (vtypes ?? []).find((v) => String(v.id) === serverSuggested.id)
         : null;
     return fromServer ?? local;
   }, [vtypes, weightTons, cargo, quoteUsage, serverSuggested, suggestKey]);
-  const pricedTruckName = vehicleType || suggestedTruck?.name || '';
+  const pricedTruckName = vehicleType || (perTonne ? autoBasisName : null) || suggestedTruck?.name || '';
   const pricedTruckId = (vtypes ?? []).find((v) => v.name === pricedTruckName)?.id ?? null;
 
   // The rate follows the suggested truck until the person types a rate.
@@ -1160,6 +1235,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             include_empty_return: returnLoadBooked ? false : null,
             use_official_fuel: useOfficialDiesel,
             fuel_price_override: aiFuelPrice ?? quoteFuelPrice ?? null,
+            ...(useConfiguredBurn ? { use_configured_burn: true } : {}),
             is_international: crossesBorder,
             cargo_description: cargo || null,
             ...(pickupDate ? { pickup_date: pickupDate } : {}),
@@ -1180,7 +1256,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, quoteFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalApplies, spokenNights, driverEdited],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, quoteFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalApplies, spokenNights, driverEdited, useConfiguredBurn],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1227,6 +1303,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         tollsConfirmedNone,
         distanceConfirmed,
         serverInputs: serverCosting?.inputs ?? null,
+        useConfiguredBurn,
       }),
     [
       currentRoute,
@@ -1255,8 +1332,145 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       tollsConfirmedNone,
       distanceConfirmed,
       serverCosting,
+      useConfiguredBurn,
     ],
   );
+
+  // ── Per tonne ────────────────────────────────────────────────────────────
+  // Every truck in the fleet that can carry it, priced on the safest unless one
+  // is chosen (QUOTE-RULES "Tonnage quotes"). The server's answer when in, the
+  // same rules locally until then.
+  const tonnesNum = (v: string) => {
+    const n = parseNum(v);
+    return n != null && n > 0 ? n : null;
+  };
+  const rateNum = tonnesNum(ratePerTonne);
+  const totalTonnesNum = isContract ? tonnesNum(totalTonnes) : null;
+  const minTonnesNum = tonnesNum(minTonnes);
+  const chosenTruckId = vehicleType ? ((vtypes ?? []).find((v) => v.name === vehicleType)?.id ?? null) : null;
+  // Priced on by id: the truck chosen, or the auto truck the builder holds
+  // (tonnageRules.nextAutoBasis), else none (the safest).
+  const heldTruckId =
+    !vehicleType && autoBasis.held && autoBasisName
+      ? ((vtypes ?? []).find((v) => v.name === autoBasisName)?.id ?? null)
+      : null;
+  const pricedOnId = chosenTruckId ?? heldTruckId;
+  const tonnageInputKey = JSON.stringify([
+    weightTons,
+    totalTonnesNum,
+    minTonnesNum,
+    pickup?.lat,
+    pickup?.lon,
+    delivery?.lat,
+    delivery?.lon,
+    stops.map((st) => `${st.loc?.lat},${st.loc?.lon}`).join('|'),
+    tripType,
+    returnLoadBooked,
+    cargo,
+  ]);
+  const localTonnage = useMemo<TonnageCosting | null>(() => {
+    if (!perTonne || !(weightTons && weightTons > 0) || !routeData) return null;
+    const lane: TonnageLane = { ...costs.costingInputs };
+    const trucks = (vtypes ?? [])
+      .filter((v) => (v.available_vehicle_count ?? 1) > 0)
+      .map((v) => {
+        const op = operatingCostPerKm(company ?? {}, v, vtypes ?? []);
+        return {
+          vehicle: { id: Number(v.id), name: v.name, capacity: v.capacity, rated_burn_l_per_100km: burnInUse(v, useConfiguredBurn) },
+          operating_cost_per_km: op.perKm,
+          operating_cost_source: op.source,
+        };
+      });
+    return computeTonnage({
+      lane,
+      trucks,
+      tonnes_per_load: weightTons,
+      total_tonnes: totalTonnesNum,
+      min_tonnes_per_load: minTonnesNum,
+      vehicle_type_id: pricedOnId != null ? Number(pricedOnId) : null,
+      rate_per_tonne: rateNum,
+    });
+  }, [perTonne, weightTons, routeData, costs.costingInputs, vtypes, company, totalTonnesNum, minTonnesNum, pricedOnId, rateNum, useConfiguredBurn]);
+  const tonnagePayload = useMemo<Record<string, unknown> | null>(
+    () =>
+      perTonne && ready && routeData && routeOneWayKm > 0 && weightTons
+        ? {
+            pricing_basis: 'per_tonne',
+            customer_id: Number(customerId) || null,
+            pickup_location: pickup?.label ?? '',
+            delivery_location: delivery?.label ?? '',
+            cargo_description: cargo || null,
+            trip_type: tripType,
+            one_way_distance_km: routeOneWayKm,
+            duration_minutes: routeMinutes || null,
+            is_international: crossesBorder,
+            tonnes_per_load: weightTons,
+            total_tonnes: totalTonnesNum,
+            min_tonnes_per_load: minTonnesNum,
+            vehicle_type_id: pricedOnId,
+            rate_per_tonne: rateNum,
+            toll_cost_one_way: costs.tollKnown ? (costs.costingInputs.tolls?.one_way ?? null) : null,
+            tolls_unknown: !costs.tollKnown,
+            tolls_confirmed_none: tollsConfirmedNone,
+            include_empty_return: returnLoadBooked ? false : null,
+            distance_confirmed: distanceConfirmed,
+            use_official_fuel: useOfficialDiesel,
+            ...(useConfiguredBurn ? { use_configured_burn: true } : {}),
+            ...(parseNum(borderOverride) != null ? { cross_border_cost: parseNum(borderOverride) } : {}),
+            ...(driverEdited && parseNum(driverAllowance) != null
+              ? { driver_cost: parseNum(driverAllowance), driver_cost_is_override: true }
+              : {}),
+          }
+        : null,
+    [perTonne, ready, routeData, routeOneWayKm, routeMinutes, weightTons, customerId, pickup?.label, delivery?.label, cargo, tripType, crossesBorder, totalTonnesNum, minTonnesNum, pricedOnId, rateNum, costs.tollKnown, costs.costingInputs.tolls?.one_way, tollsConfirmedNone, returnLoadBooked, distanceConfirmed, useOfficialDiesel, borderOverride, driverEdited, driverAllowance, useConfiguredBurn],
+  );
+  const tonnageServer = useTonnageAnalysis(tonnagePayload);
+  const tonnageView = perTonne ? (tonnageServer?.costing ?? localTonnage) : null;
+  const tonnage = tonnageView?.tonnage ?? null;
+
+  // ── Truck fuel use (fleet actuals): the figure this quote prices on and
+  // where it comes from. The server's resolution when in, else the same rule
+  // from the type list (web: QuoteBuilder, same lib).
+  const burnTruck = perTonne
+    ? tonnage?.basis_vehicle_type_id != null
+      ? ((vtypes ?? []).find((v) => String(v.id) === String(tonnage.basis_vehicle_type_id)) ?? null)
+      : null
+    : pricedTruck;
+  const serverRatedBurn: RatedBurn | null = perTonne
+    ? ((tonnageServer?.costing as { resolution?: { rated_burn?: RatedBurn | null } } | undefined)?.resolution?.rated_burn ??
+      null)
+    : serverCosting && pricedTruck && String(serverCosting.inputs?.vehicle?.id) === String(pricedTruck.id)
+      ? serverCosting.ratedBurn
+      : null;
+  const ratedBurnNow: RatedBurn | null = serverRatedBurn ?? localRatedBurn(burnTruck, useConfiguredBurn);
+  const burnLine = quoteBurnLine(ratedBurnNow);
+  const role = useRole();
+  const switchToMeasuredBurn = async () => {
+    const act = measuredActionFor({
+      quoteUsesConfigured: useConfiguredBurn,
+      typeMode: ratedBurnNow?.mode ?? burnTruck?.fuel_use_in_use?.burn_mode,
+      isAdmin: role === 'ADMIN',
+    });
+    if (act === 'clear_quote_choice') return setUseConfiguredBurn(false);
+    if (act === 'ask_admin') return toast.error(ASK_ADMIN);
+    if (act !== 'switch_type' || burnTruck?.id == null) return;
+    try {
+      await postData({ url: `fleet/fuel-actuals/vehicle-types/${burnTruck.id}/burn-mode/`, data: { mode: 'MEASURED' } });
+      void qc.invalidateQueries({ queryKey: ['vehicle-types'] });
+    } catch (e) {
+      toast.error((e as { message?: string })?.message || "Couldn't switch to the measured figure.");
+    }
+  };
+  // The rate saved: the person's, else the default (target margin, minimum charge).
+  const rateToSave = rateNum ?? tonnage?.default_rate_per_tonne ?? null;
+  const tonnageTotal = tonnage?.estimated_revenue ?? 0;
+  useEffect(() => {
+    if (!perTonne || vehicleType) return;
+    const id = tonnage?.basis_vehicle_type_id;
+    const name = id != null ? ((vtypes ?? []).find((v) => String(v.id) === String(id))?.name ?? null) : null;
+    setAutoBasis((st) => nextAutoBasis(st, tonnageInputKey, name, tonnage?.basis_reason));
+  }, [perTonne, vehicleType, tonnage?.basis_vehicle_type_id, tonnage?.basis_reason, vtypes, tonnageInputKey]);
+
   // The quote rules' inputs for the analysis and the market check (§8).
   const costingPayload = analysisPayload({
     tripType,
@@ -1295,7 +1509,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   }, [pickupDate, transitNights]);
 
   const overloadWarning = costs.warnings.find((w) => w.code === 'overload');
-  const weightBlockedMessage = overloadWarning ? overloadWarning.title : '';
+  // A tonnage quote heavier than a truck is split into loads, never blocked.
+  const weightBlockedMessage = overloadWarning && !perTonne ? overloadWarning.title : '';
 
   // Drop a stale analysis the moment a real cost input moves, so the card can't
   // go on showing numbers for a quote that no longer exists while the next
@@ -1422,6 +1637,30 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [analysis],
   );
   const winProb = num(pick(opt, ['win_probability_at_optimal']));
+
+  // How often this lane's trips found a return load (pricing analysis
+  // `return_load_history`), shown under Empty / Loaded. Context only: it never
+  // changes the empty-return default. From /quotes/analyze/; an older backend
+  // without the field gets one pricing-analysis call per lane instead.
+  const analysisReturnHistory = returnHistoryText(analysis);
+  const historyLane = useMemo(
+    () =>
+      tripType === 'ONE_WAY' && costs.emptyReturnEligible && pickup && delivery
+        ? {
+            origin: extractCode(pickup.label),
+            destination: extractCode(delivery.label),
+            pickup: pickup.label,
+            delivery: delivery.label,
+          }
+        : null,
+    [tripType, costs.emptyReturnEligible, pickup, delivery],
+  );
+  const { data: fetchedReturnHistory } = useReturnLoadHistory(
+    historyLane,
+    !!analysis && !analysisHasReturnHistory(analysis),
+  );
+  const returnHistory = analysisReturnHistory ?? fetchedReturnHistory ?? null;
+
   // ── Describe the load (typed or voice) ────────────────────────────────────
   // The form as the Fill rule compares it (nlFill.planFill): value '' = empty.
   const fillCurrent = (lang: UiLang): Partial<Record<FillKey, FieldVal>> => {
@@ -2163,7 +2402,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           : costs.floor !== null && fuelAlert && Number.isFinite(Number(fuelAlert.estimated_cost_impact))
             ? costs.floor - Number(fuelAlert.estimated_cost_impact)
             : null;
-    const change = changesSincePriced(saved.total, floorThen, costs.floor, saved.pricedAt);
+    const raw = changesSincePriced(saved.total, floorThen, costs.floor, saved.pricedAt);
+    // A re-measured truck fuel figure explains the change (as the server's notice).
+    const change = { ...raw, notice: noticeWithBurn(raw.notice, savedBurn, ratedBurnNow) ?? raw.notice };
     setReopen(change.changed ? { state: 'notice', change } : { state: 'kept', earlierPeriod });
     // Runs once, on the first current route after hydrating.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2272,7 +2513,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         setDriverEdited(true);
         setDriverModal(true);
         break;
+      case 'use_target_rate':
+        if (tonnage?.target_rate_per_tonne != null) setRatePerTonne(String(tonnage.target_rate_per_tonne));
+        break;
       case 'use_minimum': {
+        if (perTonne) {
+          if (tonnage?.minimum_charge_rate_per_tonne != null) setRatePerTonne(String(tonnage.minimum_charge_rate_per_tonne));
+          break;
+        }
         const min = costs.costing.minimum_charge;
         if (min !== null) {
           setServiceCharge((sc) => Math.round((sc + (min - costs.total)) * 100) / 100);
@@ -2280,6 +2528,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         }
         break;
       }
+      case 'use_measured_burn':
+        void switchToMeasuredBurn();
+        break;
       case 'reprice':
         repriceKeepingMargin();
         break;
@@ -2323,10 +2574,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!ready || routeBlockedMessage || !vtypes) return [];
     // Stale diesel and a missing allowance rate sit on their own cost lines.
     const onLines = ['diesel_stale', 'driver_allowance_missing'];
-    const list = routeBusy && !routeData ? [] : costs.warnings.filter((w) => !onLines.includes(w.code));
+    const base = perTonne
+      ? // A rate under cost leads the list (after any block): impossible to miss.
+        [...(tonnageView?.warnings ?? [])]
+          .filter((w) => w.code !== 'load_missing')
+          .sort((a, b) => Number(b.code === 'rate_below_cost') - Number(a.code === 'rate_below_cost'))
+      : costs.warnings;
+    const list = routeBusy && !routeData ? [] : base.filter((w) => !onLines.includes(w.code));
     if (quoteFuelWarning) list.unshift(quoteFuelWarning);
     return reopenWarning ? [reopenWarning, ...list] : list;
-  }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning, quoteFuelWarning]);
+  }, [ready, routeBlockedMessage, vtypes, routeBusy, routeData, costs.warnings, reopenWarning, quoteFuelWarning, perTonne, tonnageView?.warnings]);
   const firstBlock = visibleWarnings.find((w) => w.severity === 'block') ?? null;
 
   // ── Jump bar (Phase 2) ───────────────────────────────────────────────────
@@ -2544,13 +2801,31 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const override = costs.costingInputs.diesel?.override_price;
     if (override != null && override > 0) out.fuel_price_override = override;
     if (costs.truckId != null && Number.isFinite(Number(costs.truckId))) out.vehicle_type_id = Number(costs.truckId);
+    if (useConfiguredBurn) out.use_configured_burn = true;
     if (costs.duration > 0) out.duration_minutes = costs.duration;
     const oneWay = costs.costingInputs.tolls?.one_way;
     if (costs.tollKnown && oneWay != null && oneWay >= 0) out.toll_cost_one_way = oneWay;
     return out;
   })();
 
-  const buildPayload = (status: 'DRAFT' | 'SENT') =>
+  const buildPayload = (status: 'DRAFT' | 'SENT') => {
+    const base = buildBasePayload(status);
+    if (!perTonne) return { ...base, pricing_basis: 'per_load' };
+    // Rate per tonne: the server re-prices it and sets the total.
+    return {
+      ...base,
+      total_amount: Math.round(tonnageTotal * 100) / 100,
+      pricing_basis: 'per_tonne',
+      rate_per_tonne: rateToSave,
+      tonnes_per_load: weightTons,
+      total_tonnes: totalTonnesNum,
+      min_tonnes_per_load: minTonnesNum,
+      basis_vehicle_type: chosenTruckId != null ? Number(chosenTruckId) : null,
+      contract_start: isContract && contractStart ? contractStart : null,
+      contract_end: isContract && contractEnd ? contractEnd : null,
+    };
+  };
+  const buildBasePayload = (status: 'DRAFT' | 'SENT') =>
     buildQuotePayload(
       {
         customerId,
@@ -2594,6 +2869,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     if (!pickup?.lat || !delivery?.lat) return 'Set a collection point and delivery first';
     if (routeBlockedMessage) return routeBlockedMessage;
     if (weightBlockedMessage) return weightBlockedMessage;
+    if (perTonne && isContract && totalTonnesNum == null) return "Enter the contract's total tonnes";
+    if (perTonne && isContract && contractStart && contractEnd && contractEnd < contractStart)
+      return 'The contract ends before it starts';
+    if (perTonne && rateToSave == null) return 'The rate per tonne is still being worked out';
     // Unlike weightInvalid (an unparseable weight quietly sends as 0 and only
     // blocks Send), a too-large-but-valid weight WOULD be sent on a draft
     // save too — Quote.weight is NOT NULL, so it's always in the payload —
@@ -2950,7 +3229,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       <BottomSheetFooter {...props} bottomInset={0}>
         <QuoteFooterBar insetsBottom={insets.bottom}>
           <QuoteFooterActions
-            total={costs.total}
+            total={perTonne ? tonnageTotal : costs.total}
             offer={priceOffer}
             ready={ready}
             priceHint={priceHint}
@@ -2976,6 +3255,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [
       insets.bottom,
       costs.total,
+      perTonne,
+      tonnageTotal,
       priceOffer,
       ready,
       priceHint,
@@ -3289,6 +3570,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                         {formatCurrency(costs.altReturnTargetPrice, { maximumFractionDigits: 0 })}
                       </Mono>
                     )}
+                    {returnHistory && (
+                      <Txt className="mt-1 text-caption text-muted">{returnHistory}</Txt>
+                    )}
                   </View>
                 )}
               </View>
@@ -3335,7 +3619,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             <QuoteSection id="load" label="Load" onLayout={registerSectionY}>
               <TextField
                 ref={weightInputRef}
-                label="Weight (t)"
+                label={perTonne ? (isContract ? 'Tonnes per load' : 'Tonnes') : 'Weight (t)'}
                 required
                 placeholder="e.g. 20"
                 keyboardType="decimal-pad"
@@ -3354,7 +3638,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 }}
               >
               <SelectField
-                label={!vehicleType && suggestedTruck ? 'Truck · suggested' : 'Truck'}
+                label={!vehicleType && perTonne ? 'Truck · safest' : !vehicleType && suggestedTruck ? 'Truck · suggested' : 'Truck'}
                 icon="truck"
                 placeholder={(vtypes ?? []).length ? 'Choose truck' : 'No trucks yet'}
                 options={vtypeOptions}
@@ -3426,12 +3710,56 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             </QuoteSection>
 
             <QuoteSection id="price" label="Price" onLayout={registerSectionY}>
+              <SegmentedControl
+                options={[
+                  { label: 'Per load', value: 'per_load' },
+                  { label: 'Per tonne', value: 'per_tonne' },
+                ]}
+                value={pricingBasis}
+                onChange={(v) => {
+                  setPricingBasis(v);
+                  if (v === 'per_load') setIsContract(false);
+                }}
+              />
+              {perTonne && ready && !routeBlockedMessage && !(ready && demo.quotaExceeded && !savedId.current) ? (
+                <>
+                  <TonnageCard
+                    tonnage={tonnage}
+                    held={!vehicleType && autoBasis.held}
+                    contract={isContract}
+                    onContract={setIsContract}
+                    totalTonnes={totalTonnes}
+                    onTotalTonnes={setTotalTonnes}
+                    minTonnes={minTonnes}
+                    onMinTonnes={setMinTonnes}
+                    periodStart={contractStart}
+                    periodEnd={contractEnd}
+                    onPeriod={(a, b) => {
+                      setContractStart(a);
+                      setContractEnd(b);
+                    }}
+                    rate={ratePerTonne}
+                    onRate={setRatePerTonne}
+                    onChooseTruck={(id) => {
+                      if (id == null) {
+                        setVehicleType('');
+                        return;
+                      }
+                      const vt = (vtypes ?? []).find((v) => Number(v.id) === id);
+                      if (vt) setVehicleType(vt.name);
+                    }}
+                    market={tonnageServer?.market ?? null}
+                    choices={tonnageServer?.choices ?? []}
+                  />
+                  <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />
+                </>
+              ) : null}
               {/* Demo's one-quote cap outranks route/weight/loading — same
               precedence as web's QuoteBuilder.tsx (billingBlocked → not ready →
               quotaExceeded → route → weight → results). Only applies to a
               fresh quote — editing an already-saved one (savedId.current set)
               never hits this. */}
-              {ready && demo.quotaExceeded && !savedId.current ? (
+              {perTonne && ready && !routeBlockedMessage && !(demo.quotaExceeded && !savedId.current) ? null : ready && demo.quotaExceeded && !savedId.current ? (
                 <Banner tone="danger" message={DEMO_QUOTA_MESSAGE} />
               ) : ready && !routeBlockedMessage && (costs.total > 0 || visibleWarnings.length > 0) ? (
                 <>
@@ -3455,6 +3783,23 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                           : quoteFuelLabel
                       }
                       onFuelRetry={costs.warnings.some((w) => w.code === 'diesel_stale') ? retryFuel : undefined}
+                      burnNote={
+                        savedBurn && reopen.state === 'kept' && adjustmentSource === 'saved'
+                          ? pricedOnText(savedBurn, savedFuelAmount)
+                          : burnLine
+                            ? burnLine.label
+                            : null
+                      }
+                      burnActions={
+                        savedBurn && reopen.state === 'kept' && adjustmentSource === 'saved'
+                          ? []
+                          : [
+                              ...(burnLine?.offerUseMeasured ? [{ label: 'Use measured', onPress: () => setUseConfiguredBurn(false) }] : []),
+                              ...(burnLine?.offerUseMine
+                                ? [{ label: 'Use my figure for this quote', onPress: () => setUseConfiguredBurn(true) }]
+                                : []),
+                            ]
+                      }
                       driverNote={
                         spokenNights != null && !driverEdited
                           ? `${spokenNights} night${spokenNights === 1 ? '' : 's'}${
@@ -3469,6 +3814,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       }
                       onSettingsPress={() => navigation.navigate('Settings', { section: 'company' })}
                     />
+                  )}
+                  {!weightBlockedMessage && costs.total > 0 && existingDraft && (
+                    <DraftClauseLine quote={existing} adjustment={draftFuelAdjustment} className="-mt-1" />
                   )}
                   <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />
                   {!weightBlockedMessage && costs.total > 0 && (
@@ -3553,6 +3901,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={fuelModal}
             onClose={() => setFuelModal(false)}
             costs={costs}
+            burnSource={burnLine?.label ?? null}
             weightTons={weightTons}
           />
           <RateBreakdownModal

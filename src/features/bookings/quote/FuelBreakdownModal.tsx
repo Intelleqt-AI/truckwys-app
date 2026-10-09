@@ -30,11 +30,14 @@ function FuelBreakdownModalImpl({
   onClose,
   costs,
   weightTons,
+  burnSource,
 }: {
   visible: boolean;
   onClose: () => void;
   costs: CostBreakdown;
   weightTons: number | null;
+  /** Where the truck's full-load figure comes from (fleet actuals). */
+  burnSource?: string | null;
 }) {
   const litres = costs.fuelLitres;
   const unit = /electric/i.test(costs.fuelType) ? 'kWh' : 'L';
@@ -46,6 +49,7 @@ function FuelBreakdownModalImpl({
       label: `Burn at ${weightTons != null && weightTons > 0 ? `${formatNumber(weightTons)} t` : 'full load'}`,
       value: costs.consumption ? `${one(costs.consumption)} L/100km` : '—',
     },
+    ...(burnSource ? [{ label: 'Full-load figure', value: burnSource }] : []),
     // 1 dp so the line multiplies out.
     { label: 'Distance', value: `${one(costs.chargeDistance)} km` },
     { label: 'Litres', value: costs.consumption ? `${exact ? '' : '≈ '}${formatNumber(Math.round(litres))} L` : '—' },

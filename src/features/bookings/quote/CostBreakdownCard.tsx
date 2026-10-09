@@ -35,6 +35,8 @@ function CostBreakdownCardImpl({
   driverNote,
   onFuelRetry,
   onSettingsPress,
+  burnNote,
+  burnActions,
 }: {
   costs: CostBreakdown;
   serviceCharge: number;
@@ -56,6 +58,10 @@ function CostBreakdownCardImpl({
   onFuelRetry?: (() => void) | null;
   /** Opens Settings (the target margin). */
   onSettingsPress?: () => void;
+  /** Where the truck's fuel figure comes from ("Measured by Cartrack: 40,2 L/100 km ..."). */
+  burnNote?: string | null;
+  /** "Use my figure for this quote" / "Use measured". */
+  burnActions?: { label: string; onPress: () => void }[];
 }) {
   const { colors } = useTheme();
   const margin = costs.marginPct;
@@ -88,6 +94,8 @@ function CostBreakdownCardImpl({
             onPress={onFuelPress}
             note={fuelNote}
             noteAction={fuelNote && onFuelRetry ? { label: 'Try again', onPress: onFuelRetry } : null}
+            subNote={burnNote}
+            subActions={burnActions}
           />
           <Row
             label="Tolls"
@@ -200,6 +208,8 @@ function Row({
   note,
   noteTone,
   noteAction,
+  subNote,
+  subActions,
 }: {
   label: string;
   value: string;
@@ -212,6 +222,9 @@ function Row({
   noteTone?: 'warning' | 'danger' | 'muted';
   /** One action for the note ("Try again"). */
   noteAction?: { label: string; onPress: () => void } | null;
+  /** A second, quiet line (the fuel figure's source) with its own links. */
+  subNote?: string | null;
+  subActions?: { label: string; onPress: () => void }[];
 }) {
   const { colors } = useTheme();
   const body = (
@@ -238,6 +251,23 @@ function Row({
                 <Txt className="text-caption font-medium text-link">{noteAction.label}</Txt>
               </TouchableOpacity>
             ) : null}
+          </View>
+        ) : null}
+        {subNote ? (
+          <View className="flex-row flex-wrap items-center gap-x-2">
+            <Txt className="shrink text-caption text-faint">{subNote}</Txt>
+            {(subActions ?? []).map((a) => (
+              <TouchableOpacity
+                key={a.label}
+                onPress={a.onPress}
+                accessibilityRole="button"
+                accessibilityLabel={a.label}
+                hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }}
+                className="min-h-[28px] justify-center"
+              >
+                <Txt className="text-caption font-medium text-link">{a.label}</Txt>
+              </TouchableOpacity>
+            ))}
           </View>
         ) : null}
       </View>

@@ -1,3 +1,4 @@
+import { burnInUse } from './fleetFuel';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import type { VehicleType } from '../api';
 import {
@@ -86,6 +87,9 @@ export interface ComputeCostsInput {
    * an older backend: everything is resolved here instead.
    */
   serverInputs?: CostingInputs | null;
+  /** This quote prices on the typed fuel figure, not Cartrack's measured one
+      (costing_inputs.use_configured_burn). */
+  useConfiguredBurn?: boolean;
   now?: Date;
 }
 
@@ -229,6 +233,7 @@ export function computeCosts({
   tollsConfirmedNone,
   distanceConfirmed,
   serverInputs,
+  useConfiguredBurn = false,
   now,
 }: ComputeCostsInput): CostBreakdown {
   const rd = routeData ?? {};
@@ -358,7 +363,8 @@ export function computeCosts({
           id: truck.id,
           name: truck.name,
           capacity: truck.capacity,
-          rated_burn_l_per_100km: truck.fuel_consumption_l_per_100km,
+          // The burn the server prices with (measured by Cartrack when usable).
+          rated_burn_l_per_100km: burnInUse(truck, useConfiguredBurn),
         }
       : null,
     diesel: dieselInput,

@@ -66,6 +66,9 @@ import { pct } from './quote/CostBreakdownCard';
 import { TonnageTermsGroup } from './TonnageTermsGroup';
 import type { VolumeContract } from './quote/tonnage';
 import { actualsView, percent } from './trip/economics';
+import { useFollowUp, useFuelAdjustment } from './followupsApi';
+import { DraftClauseLine, FollowUpCard, FuelAdjustmentGroup } from './FollowUps';
+import { showFollowUp } from '@/lib/followups';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -97,13 +100,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
   const subscription = useSubscription();
   const demo = useDemo();
-  const { id, preview } = route.params;
+  const { id, preview, followUp } = route.params;
   const { data, error, isError, isPending, refetch } = useQuote(id, preview);
   const q = (data ?? {}) as Record<string, unknown>;
   const status = str(pick(q, ['status']), 'DRAFT').toUpperCase();
   // Diesel moving since a quote was priced matters while it can still change.
   const { data: fuelAlert } = useQuoteFuelAlert(id, !!data && ['DRAFT', 'SENT'].includes(status));
   const { data: costing } = useQuoteCosting(id, !!data);
+  // Quote follow-ups: the fuel clause / adjustment, and the follow-up card on a sent quote.
+  const { data: fuelAdjustment } = useFuelAdjustment('quotes', id, !!data);
+  const { data: followUpState } = useFollowUp(id, !!data && showFollowUp(status));
   const { data: company } = useCompanyProfileData();
   // Once delivered (actuals recorded), the margin it was quoted at, from the job.
   const { data: quotedMarginAtBooking } = useBookedQuotedMargin(
@@ -783,6 +789,10 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         </View>
       )}
 
+      {showFollowUp(status) && !booked && followUpState && (
+        <FollowUpCard quoteId={id} state={followUpState} highlight={!!followUp} />
+      )}
+
       <View className="mb-5">
         <RoutePreview
           origin={origin}
@@ -906,6 +916,9 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
+          {status === 'DRAFT' && (
+            <DraftClauseLine quote={q} adjustment={fuelAdjustment} className="border-b border-line-row px-3.5 py-2.5" />
+          )}
           {costFloor === null && tollsUnknown && (
             <DetailRow
               label="Cost floor"
@@ -950,6 +963,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
           ) : null}
         </Group>
       )}
+
+      {status !== 'DRAFT' && !bookedLoad && <FuelAdjustmentGroup adjustment={fuelAdjustment} />}
 
       {actuals && (
         // What the job really earned once delivered (QuoteOutcome actuals).

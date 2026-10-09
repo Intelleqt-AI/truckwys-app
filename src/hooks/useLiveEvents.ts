@@ -22,6 +22,9 @@ const EVENT_TITLES: Record<string, string> = {
   'quote.declined': 'Quote declined',
   'quote.completed': 'Quote completed',
   'quote.expired': 'Quote expired',
+  'quote.fuel_alert': 'Fuel price alert',
+  'quote.expiring': 'Quote expiring soon',
+  'quote.no_answer': 'No answer yet',
   'invoice.auto_created': 'Invoice raised',
   'invoice.paid': 'Invoice paid',
   'invoice.overdue': 'Invoice overdue',
@@ -38,7 +41,14 @@ const EVENT_TITLES: Record<string, string> = {
 };
 
 // Events whose title and body the backend words precisely; the toast uses them as is.
-const SERVER_WORDED_EVENTS = new Set(['invoice.auto_created']);
+const SERVER_WORDED_EVENTS = new Set([
+  'invoice.auto_created',
+  // Quote follow-ups: "Diesel price up", "Quote expiring soon", "No answer yet"
+  // with the backend's own sentence as the body.
+  'quote.fuel_alert',
+  'quote.expiring',
+  'quote.no_answer',
+]);
 
 const DATA_CHANGED_DEBOUNCE_MS = 250;
 

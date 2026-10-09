@@ -132,6 +132,10 @@ api.interceptors.response.use(
       serverMsg = data.trim().startsWith('<') ? undefined : data;
     } else if (data && typeof data === 'object') {
       const obj = data as Record<string, unknown>;
+      // The newer endpoints answer {success: false, code, message}: the
+      // message is written to be shown as it is.
+      const ownMessage =
+        obj.success === false && typeof obj.message === 'string' && obj.message.trim() ? obj.message : undefined;
       const key =
         obj.error != null ? 'error' : obj.detail != null ? 'detail' : (Object.keys(obj)[0] ?? '');
       const first = obj[key];
@@ -143,7 +147,7 @@ api.interceptors.response.use(
       // 10 digits in total." {error}/{detail}/{non_field_errors} are already
       // meant to stand alone, so those stay unprefixed.
       const isFieldError = key !== 'error' && key !== 'detail' && key !== 'non_field_errors' && key !== '';
-      serverMsg = isFieldError && msg ? `${humanizeFieldName(key)}: ${msg}` : msg;
+      serverMsg = ownMessage ?? (isFieldError && msg ? `${humanizeFieldName(key)}: ${msg}` : msg);
     }
 
     // A refused send/PDF/status change (§11): the blocking warning's own title.

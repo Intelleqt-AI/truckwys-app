@@ -15,6 +15,7 @@ import { InvoiceDetailScreen } from '@/features/finance/InvoiceDetailScreen';
 import { ReportScreen } from '@/features/finance/reports/ReportScreen';
 import { AssignDriverVehicleScreen } from '@/features/bookings/AssignDriverVehicleScreen';
 import { BookJobScreen } from '@/features/bookings/BookJobScreen';
+import { FuelAlertScreen } from '@/features/bookings/FuelAlertScreen';
 import { CreateInvoiceScreen } from '@/features/finance/CreateInvoiceScreen';
 import { AddExpenseScreen } from '@/features/finance/AddExpenseScreen';
 import { CreateCreditNoteScreen } from '@/features/finance/creditNotes/CreateCreditNoteScreen';
@@ -170,6 +171,7 @@ export function AppNavigator() {
         <Stack.Screen name="AddDriver" component={AddDriverScreen} />
         <Stack.Screen name="AssignDriverVehicle" component={AssignDriverVehicleScreen} />
         <Stack.Screen name="BookJob" component={BookJobScreen} />
+        <Stack.Screen name="FuelAlert" component={FuelAlertScreen} />
       </Stack.Group>
     </Stack.Navigator>
   );

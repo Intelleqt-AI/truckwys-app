@@ -184,6 +184,8 @@ import {
   type QuoteIssue,
 } from './quote/validation';
 import { QuoteFooterActions, type FooterStrip, type FooterOffer } from './quote/QuoteFooterActions';
+import { useFuelAdjustment } from './followupsApi';
+import { DraftClauseLine } from './FollowUps';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'CreateQuote'>;
 
@@ -255,6 +257,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     retry: false,
   });
   const [hydrated, setHydrated] = useState(false);
+  // A saved draft: the fuel clause its PDF will carry (null when the company has it off).
+  const existingDraft = editing && str(existing?.status).toUpperCase() === 'DRAFT';
+  const { data: draftFuelAdjustment } = useFuelAdjustment('quotes', editId ?? '', existingDraft);
 
   const { data: customers } = useCustomers();
   const { data: vtypes } = useVehicleTypes();
@@ -3719,6 +3724,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       }
                       onSettingsPress={() => navigation.navigate('Settings', { section: 'company' })}
                     />
+                  )}
+                  {!weightBlockedMessage && costs.total > 0 && existingDraft && (
+                    <DraftClauseLine quote={existing} adjustment={draftFuelAdjustment} className="-mt-1" />
                   )}
                   <QuoteWarnings warnings={visibleWarnings} onAction={onWarningAction} />
                   {!weightBlockedMessage && costs.total > 0 && (

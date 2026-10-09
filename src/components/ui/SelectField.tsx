@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { View, TouchableOpacity, Modal, FlatList, ActivityIndicator } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,6 +32,7 @@ function SelectFieldImpl({
   searching,
   selectedLabel,
   listNote,
+  openRequest,
 }: {
   label?: string;
   value?: string;
@@ -56,11 +57,16 @@ function SelectFieldImpl({
   selectedLabel?: string;
   /** A line under the list (e.g. "12 more. Keep typing to narrow the list."). */
   listNote?: string;
+  /** Opens the list whenever this number changes (and isn't 0). */
+  openRequest?: number;
 }) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  useEffect(() => {
+    if (openRequest) setOpen(true);
+  }, [openRequest]);
   const selected = options.find((o) => o.value === value);
   const selectedText = selected?.label ?? (value ? selectedLabel : undefined);
   // De-duplicate by value so lists (e.g. vehicle types returned more than once)

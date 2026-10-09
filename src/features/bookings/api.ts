@@ -374,6 +374,7 @@ export const aiChatQuote = (
   currentFields: unknown = {},
   pendingEntity: unknown = null,
   declinedEntities: string[] = [],
+  voice: { detectedLanguage?: string | null; alternateText?: string | null } = {},
 ) =>
   postData<Record<string, unknown>>({
     url: 'ai/chat-quote/',
@@ -383,13 +384,23 @@ export const aiChatQuote = (
       current_fields: currentFields,
       pending_entity: pendingEntity,
       declined_entities: declinedEntities,
+      // From voice-quote: the language it heard, and the other language's
+      // transcript (used only to fill gaps, at lower confidence). Older
+      // backends ignore both.
+      ...(voice.detectedLanguage ? { detected_language: voice.detectedLanguage } : {}),
+      ...(voice.alternateText ? { alternate_text: voice.alternateText } : {}),
     },
   });
 
-export const aiVoiceQuote = (audio: { uri: string; name: string; type: string }) => {
+/** `language` forces English or Afrikaans; left out, the backend picks between them. */
+export const aiVoiceQuote = (
+  audio: { uri: string; name: string; type: string },
+  language?: 'en' | 'af',
+) => {
   const form = new FormData();
   // React Native FormData file part.
   form.append('audio', audio as unknown as Blob);
+  if (language) form.append('language', language);
   return postData<Record<string, unknown>>({
     url: 'ai/voice-quote/',
     data: form,

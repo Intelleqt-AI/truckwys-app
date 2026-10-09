@@ -378,3 +378,30 @@ test('border estimate: unverified lines only; a typed agent fee is not an estima
   assert.equal(borderEstimateOf(out, null, true), 1331.13);
   assert.equal(borderEstimateOf([], 500, false), 500);
 });
+
+test('driver nights given for the trip: allowance x nights locally, a typed amount wins', async () => {
+  const { withServerInputs, computeCosting } = await import('../rules.ts');
+  const local = {
+    trip_type: 'ROUND_TRIP',
+    distance_km: 1136.8,
+    duration_minutes: 880,
+    load_kg: 28000,
+    vehicle: { id: 11, name: 'Superlink', capacity: 34, rated_burn_l_per_100km: 42 },
+    diesel: { zone: 'INLAND', mode: 'LIVE', official_price: 32.7989 },
+    operating_cost_per_km: 16,
+    tolls: { one_way: 1043.48 },
+    driver: { allowance_per_night: 450, nights: 3, amount: null },
+  };
+  const driverLine = (inp) => computeCosting(inp).lines.find((l) => l.key === 'driver');
+  // Before the server answers: the form's own nights price the line.
+  assert.equal(driverLine(local).nights, 3);
+  assert.equal(driverLine(local).amount, 1350);
+  // The server's reply keeps the form's nights; with none on the form, the echoed ones.
+  const server = { ...local, driver: { allowance_per_night: 450, nights: 3 } };
+  assert.equal(withServerInputs(local, server, 11).driver.nights, 3);
+  const noLocal = { ...local, driver: { allowance_per_night: 450, nights: null, amount: null } };
+  assert.equal(withServerInputs(noLocal, server, 11).driver.nights, 3);
+  assert.equal(driverLine(withServerInputs(local, server, 11)).amount, 1350);
+  // A typed driver amount wins over the nights.
+  assert.equal(driverLine({ ...local, driver: { allowance_per_night: 450, nights: 3, amount: 1000 } }).amount, 1000);
+});

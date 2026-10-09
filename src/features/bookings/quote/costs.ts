@@ -53,6 +53,18 @@ export interface ComputeCostsInput {
   liveFuel?: Record<string, unknown> | null;
   /** A per-quote fuel price applied from the market price check. */
   aiFuelPrice?: number | null;
+  /**
+   * A price per litre the person gave for this quote (said or typed in the
+   * description): the backend's own per-quote override (source 'override'),
+   * not a market figure. The market figure wins when both are set.
+   */
+  quoteFuelPrice?: number | null;
+  /**
+   * Nights out given for this trip (costing_inputs.driver_nights): the driver
+   * line is allowance × these nights instead of the route's suggestion. A typed
+   * driver amount (driverOverride) still wins.
+   */
+  driverNights?: number | null;
   /** "Use official price" on this quote while the company is on its own price. */
   useOfficialDiesel?: boolean;
   /** A market toll total applied from the price check, per one-way leg. */
@@ -206,6 +218,8 @@ export function computeCosts({
   serviceCharge,
   liveFuel,
   aiFuelPrice,
+  quoteFuelPrice,
+  driverNights,
   useOfficialDiesel,
   aiTollOneWay,
   returnLoadBooked,
@@ -239,7 +253,11 @@ export function computeCosts({
   const dieselInput: CostingInputs['diesel'] = fuelInputFromApi(company, liveFuel, fuelType, {
     now,
     useOfficial: !!useOfficialDiesel,
-    overridePrice: fuelFromMarketCheck ? (aiFuelPrice as number) : null,
+    overridePrice: fuelFromMarketCheck
+      ? (aiFuelPrice as number)
+      : quoteFuelPrice != null && quoteFuelPrice > 0
+        ? quoteFuelPrice
+        : null,
   });
   // The company's price for this fuel without this quote's choices.
   const companyFuel = resolveDieselInput(fuelInputFromApi(company, liveFuel, fuelType, { now }));
@@ -355,7 +373,7 @@ export function computeCosts({
     },
     driver: {
       allowance_per_night: nullIfNotPositive(pick(c, ['driver_allowance_per_night'])),
-      nights: null,
+      nights: driverNights != null && driverNights >= 0 ? driverNights : null,
       amount: driverOverride,
     },
     hours_per_day: null,

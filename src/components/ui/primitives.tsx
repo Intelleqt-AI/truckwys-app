@@ -42,10 +42,16 @@ export function Button({
   disabled,
   fullWidth,
   className = '',
+  accessibilityLabel,
+  selected,
 }: {
   label: string;
   onPress?: () => void;
   variant?: ButtonVariant;
+  /** Read instead of `label` when the visible word alone isn't enough. */
+  accessibilityLabel?: string;
+  /** A toggle-like button that is on (e.g. Stop while recording). */
+  selected?: boolean;
   /**
    * `sm` is for inline affordances sitting beside a field or a section heading,
    * where the 44px primary height would dominate the row. Still a real button
@@ -90,7 +96,8 @@ export function Button({
   return (
     <TouchableOpacity
       accessibilityRole="button"
-      accessibilityState={{ disabled: inactive }}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled: inactive, ...(selected != null ? { selected } : {}) }}
       disabled={inactive}
       // The 32pt `sm` button keeps its drawn size but gets a 44pt hit area (web R7).
       hitSlop={size === 'sm' ? { top: 6, bottom: 6, left: 4, right: 4 } : undefined}

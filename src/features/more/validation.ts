@@ -43,6 +43,15 @@ export function vehicleTypeSchema() {
       'Fuel sensitivity',
       FUEL_SENSITIVITY_MAX,
     ),
+    // Gross combination mass in tonnes (sent as kg): what border schedules are
+    // written about. Blank = unknown (border costs then say "assumed").
+    gross_mass_t: numericOptionalField('Gross mass', 200).optional(),
+    // Axles per unit, horse first: "3+2+2", "3+3", "3". Blank = unknown.
+    axle_configuration: z
+      .string()
+      .trim()
+      .regex(/^$|^\d(\+\d){0,3}$/, 'Like 3+2+2 (axles per unit, horse first)')
+      .optional(),
     // 'true' | 'false' as a string, matching the SelectField options it drives.
     active: z.string(),
   });
@@ -80,5 +89,7 @@ export const VEHICLE_TYPE_FIELD_ORDER: (keyof VehicleTypeFormValues)[] = [
   'fuel_type',
   'fuel_consumption_l_per_100km',
   'fuel_consumption_sensitivity_pct',
+  'gross_mass_t',
+  'axle_configuration',
   'active',
 ];

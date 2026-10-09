@@ -8,6 +8,7 @@ import {
   operatingCostPerKm,
   phoneWarning,
   withServerInputs,
+  borderEstimateOf,
   borderCostsUnknownFromRoute,
   type Costing,
   type CostingInputs,
@@ -61,6 +62,9 @@ export interface ComputeCostsInput {
   international?: boolean;
   /** Border, permit and non-SA toll costs typed for all legs. */
   borderOverride?: number | null;
+  /** The clearing agent's fee typed on this quote (replaces the agent estimate). */
+  agentFeeOverride?: number | null;
+
   tollsConfirmedNone: boolean;
   distanceConfirmed: boolean;
   /**
@@ -130,6 +134,24 @@ export interface CostBreakdown {
   borderMissing: boolean;
   /** Operating cost line flagged for a check (e.g. overlapping costs). */
   operatingCheck: boolean;
+  /** The way home on its own route (newer backends): plazas and border lines. */
+  returnTollBreakdown: Record<string, unknown>[];
+  returnTollCost: number | null;
+  returnBorderBreakdown: Record<string, unknown>[];
+  /** Tolls are costed incl. VAT (a company that isn't VAT registered). */
+  tollsInclVat: boolean;
+  /** SANRAL class the tolls are priced on, when the route says. */
+  tollClass: number | null;
+  /** The clearing agent's estimate on this route (rand), when there is one. */
+  agentEstimate: number | null;
+  /** Saved with the quote (costing_inputs) so the backend re-prices it the same way. */
+  savedCostingExtras: {
+    toll_cost_return: number | null;
+    border_cost_empty_return: number | null;
+    border_estimate: number | null;
+    border_estimate_empty_return: number | null;
+    clearing_agent_fee: number | null;
+  };
   /** Target-margin price with the other empty-return answer (one-way, 300 km+). */
   altReturnTargetPrice: number | null;
   /** The price is the rules' default price (nobody set a rate or price). */
@@ -189,6 +211,7 @@ export function computeCosts({
   returnLoadBooked,
   international,
   borderOverride,
+  agentFeeOverride,
   tollsConfirmedNone,
   distanceConfirmed,
   serverInputs,
@@ -245,12 +268,62 @@ export function computeCosts({
       : asArray(pick(rd, ['toll_breakdown']))
   ) as Record<string, unknown>[];
 
-  const add = (pick(rd, ['additional_costs']) ?? {}) as Record<string, unknown>;
-  const borderFees = num(pick(add, ['border_fees']));
+  // The way home on its own route (newer backends, when asked): its own
+  // plazas, tolls and exit-only border charges. Absent → the outbound leg is
+  // the stand-in, as before.
+  // Newer backends give every route option its own border lines, totals and
+  // way home: the selected option's data wins, else the response's.
+  const optHasBorders = 'cross_border' in currentRoute;
+  const bsrc = optHasBorders ? currentRoute : rd;
+  const retRaw = 'return_leg' in currentRoute ? currentRoute.return_leg : rd.return_leg;
+  const ret = (retRaw && typeof retRaw === 'object' ? retRaw : null) as Record<
+    string,
+    unknown
+  > | null;
+  const retOk = !!ret && ret.available === true;
+  const retToll =
+    retOk && ret!.tolls_unknown !== true && typeof ret!.toll_cost_zar === 'number' ? (ret!.toll_cost_zar as number) : null;
+  const retTollBreakdown = retOk ? (asArray(ret!.toll_breakdown) as Record<string, unknown>[]) : [];
+  const ownRouteTolls = !tollEdited && !tollFromMarketCheck;
+
+  const add = (pick(bsrc, ['additional_costs']) ?? {}) as Record<string, unknown>;
+  const crossBorderBreakdown = asArray(pick(bsrc, ['cross_border_breakdown'])) as Record<string, unknown>[];
+  const retBreakdown = retOk ? (asArray(ret!.cross_border_breakdown) as Record<string, unknown>[]) : [];
+  // An agent's fee typed on this quote replaces the "agent estimate" line(s).
+  const agentSum = (items: Record<string, unknown>[]) =>
+    items.filter((i) => /agent/i.test(str(i.code))).reduce((sum, i) => sum + num(i.amount), 0);
+  const agentDelta = (items: Record<string, unknown>[]) =>
+    agentFeeOverride != null && agentSum(items) > 0 ? agentFeeOverride - agentSum(items) : 0;
+  const borderFees = num(pick(add, ['border_fees'])) + agentDelta(crossBorderBreakdown);
   const weighbridgeFees = num(pick(add, ['weighbridge_fees']));
   const nonSaTolls = num(pick(add, ['non_sa_tolls']));
-  const crossBorderBreakdown = asArray(pick(rd, ['cross_border_breakdown'])) as Record<string, unknown>[];
-  const borderTotal = (borderFees + weighbridgeFees + nonSaTolls) * legs;
+  const outBorder = borderFees + weighbridgeFees + nonSaTolls;
+  const retAdd = (retOk && ret!.additional_costs && typeof ret!.additional_costs === 'object'
+    ? ret!.additional_costs
+    : null) as Record<string, unknown> | null;
+  const retBorder = retAdd
+    ? num(retAdd.border_fees) + num(retAdd.weighbridge_fees) + num(retAdd.non_sa_tolls) + agentDelta(retBreakdown)
+    : null;
+  const borderTotal = legs === 2 && retBorder !== null ? outBorder + retBorder : outBorder * legs;
+  // The estimated share of the border fees: out + back on a round trip (the
+  // way home has its own lines); an agent line stops being an estimate once
+  // the person types their agent's fee.
+  const legEstimate = (items: Record<string, unknown>[], fallback: unknown) =>
+    borderEstimateOf(items, fallback, agentFeeOverride != null);
+  const estOut = legEstimate(crossBorderBreakdown, pick(bsrc, ['border_estimate_zar']));
+  const estBack =
+    legs === 2 ? (retOk ? legEstimate(retBreakdown, ret!.border_estimate_zar) : estOut) : 0;
+  const borderEstimate = Math.round((estOut + estBack) * 100) / 100 || null;
+  // The empty run home's own estimate (one-way with an empty return).
+  const borderEstimateEmptyReturn =
+    legs === 1 && retOk ? Math.round(legEstimate(retBreakdown, ret!.border_estimate_zar) * 100) / 100 || null : null;
+  // What the border schedules assumed about the truck (gross mass, axles).
+  const vp = (bsrc.border_vehicle_profile && typeof bsrc.border_vehicle_profile === 'object'
+    ? bsrc.border_vehicle_profile
+    : null) as Record<string, unknown> | null;
+  const vehicleAssumptions = asArray<Record<string, unknown>>(vp?.assumptions)
+    .map((a) => str(a.message))
+    .filter(Boolean);
 
   const op = operatingCostPerKm(company, truck, vtypes);
   const c = company ?? {};
@@ -275,7 +348,8 @@ export function computeCosts({
     operating_cost_source: op.source,
     tolls: {
       one_way: tollOneWay,
-      empty_return: null,
+      empty_return: ownRouteTolls && tripType === 'ONE_WAY' ? retToll : null,
+      return_leg: ownRouteTolls && tripType === 'ROUND_TRIP' ? retToll : null,
       lookup_failed: !tollEdited && !tollFromMarketCheck && lookupFailed,
       confirmed_none: tollsConfirmedNone,
     },
@@ -286,10 +360,13 @@ export function computeCosts({
     },
     hours_per_day: null,
     border_cost: borderOverride != null && borderOverride >= 0 ? borderOverride : borderTotal,
+    border_cost_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? retBorder : null,
+    border_estimate: borderOverride == null ? borderEstimate : null,
+    border_estimate_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? borderEstimateEmptyReturn : null,
     international: !!international,
     // Parts of the route with no border figures on file (newer backends);
     // a border figure the person typed covers them.
-    border_costs_unknown: borderCostsUnknownFromRoute(routeData),
+    border_costs_unknown: borderCostsUnknownFromRoute(bsrc),
     border_cost_is_override: borderOverride != null && borderOverride >= 0,
     include_empty_return: returnLoadBooked ? false : null,
     settings: {
@@ -336,6 +413,30 @@ export function computeCosts({
       ? costing.warnings
       : costing.warnings.filter((w) => !['distance_missing', 'tolls_unknown', 'driver_nights_unknown'].includes(w.code))
   ).map((w) => phoneWarning(w, costing, target));
+  // Border fees worked out on an assumed gross mass / axle layout: say so,
+  // with the way to set it on the truck.
+  if (hasRoute && vehicleAssumptions.length && (borderOverride == null || borderOverride < 0)) {
+    warnings.push({
+      code: 'border_vehicle_assumed',
+      severity: 'warn',
+      title: vp?.gross_assumed === true ? "Border fees assume the truck's gross mass" : "Border fees assume the truck's axles",
+      detail: vehicleAssumptions.join('. '),
+      impact_zar: null,
+      actions: [{ id: 'edit_vehicle', label: 'Set gross mass' }],
+    });
+  }
+  // The trip date is after the newest published SA toll schedule.
+  const tsw = (rd.toll_schedule_warning ?? null) as Record<string, unknown> | null;
+  if (hasRoute && tsw && typeof tsw === 'object') {
+    warnings.push({
+      code: str(tsw.code) || 'toll_tariffs_not_published',
+      severity: 'warn',
+      title: 'Toll tariffs for this date are not published yet',
+      detail: str(tsw.message),
+      impact_zar: null,
+      actions: [],
+    });
+  }
   const emptyLines = costing.lines.filter((l) => l.leg === 'empty_return');
   const emptyReturnTotal = emptyLines.length
     ? emptyLines.every((l) => l.amount !== null)
@@ -356,6 +457,19 @@ export function computeCosts({
 
   return {
     altReturnTargetPrice: altReturnPrice,
+    returnTollBreakdown: retTollBreakdown,
+    returnTollCost: retToll,
+    returnBorderBreakdown: retBreakdown,
+    tollsInclVat: rd.toll_cost_includes_vat === true,
+    tollClass: typeof rd.toll_sanral_class === 'number' ? (rd.toll_sanral_class as number) : null,
+    agentEstimate: agentSum(crossBorderBreakdown) > 0 && agentFeeOverride == null ? agentSum(crossBorderBreakdown) : agentFeeOverride ?? null,
+    savedCostingExtras: {
+      toll_cost_return: ownRouteTolls && tripType === 'ROUND_TRIP' ? retToll : null,
+      border_cost_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? retBorder : null,
+      border_estimate: borderOverride == null ? borderEstimate : null,
+      border_estimate_empty_return: tripType === 'ONE_WAY' && borderOverride == null ? borderEstimateEmptyReturn : null,
+      clearing_agent_fee: agentFeeOverride ?? null,
+    },
     priceIsDefault,
     defaultPrice,
     ratePerKmShown: loadedKm > 0 ? baseCost / loadedKm : baseRateNum,

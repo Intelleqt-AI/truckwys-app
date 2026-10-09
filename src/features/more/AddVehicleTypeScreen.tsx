@@ -62,6 +62,8 @@ function fromRecord(r: Record<string, unknown>): VehicleTypeFormValues {
       pick(r, ['fuel_consumption_sensitivity_pct']) != null
         ? String(num(pick(r, ['fuel_consumption_sensitivity_pct'])))
         : '',
+    gross_mass_t: pick(r, ['gross_mass_kg']) != null ? String(num(pick(r, ['gross_mass_kg'])) / 1000) : '',
+    axle_configuration: str(pick(r, ['axle_configuration'])),
     active: pick(r, ['active']) === false ? 'false' : 'true',
   };
 }
@@ -203,6 +205,10 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
         : {}),
       // Fuel sensitivity is no longer a setting (QUOTE-RULES §4: burn scales
       // with the load ratio), so it is never sent.
+      // Border schedules (C-BRTA class, permits, access tolls) by gross mass
+      // and axles; blank clears. Older backends ignore both.
+      gross_mass_kg: v.gross_mass_t?.trim() ? Math.round((parseNum(v.gross_mass_t) ?? 0) * 1000) : null,
+      axle_configuration: (v.axle_configuration ?? '').trim(),
       active: v.active === 'true',
     };
     try {
@@ -323,6 +329,23 @@ export function AddVehicleTypeScreen({ route, navigation }: Props) {
                 />
               </View>
             </View>
+            <VTText
+              control={control}
+              name="gross_mass_t"
+              anchors={anchors}
+              label="Gross mass (t)"
+              placeholder="e.g. 56"
+              keyboardType="numeric"
+              numeric
+            />
+            <VTText
+              control={control}
+              name="axle_configuration"
+              anchors={anchors}
+              label="Axles per unit"
+              placeholder="e.g. 3+2+2"
+            />
+            <Txt className="-mt-1 text-caption text-faint">Border fees depend on these.</Txt>
             <FuelCostNote control={control} />
           </View>
 

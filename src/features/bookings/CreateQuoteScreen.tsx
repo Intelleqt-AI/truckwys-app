@@ -109,6 +109,7 @@ import { QuoteWarnings } from './quote/QuoteWarnings';
 import { CostFloorModal } from './quote/CostFloorModal';
 import { useServerCosting } from './quote/useServerCosting';
 import { analysisPayload } from './quote/analysisPayload';
+import { reopenedInputs } from './quote/reopenInputs';
 import { buildQuotePayload } from './quote/payload';
 import { compactStoredSnapshot } from './quote/routeSnapshot';
 import { LocationField } from './quote/LocationField';
@@ -273,6 +274,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const [returnLoadBooked, setReturnLoadBooked] = useState(false);
   // Border costs typed on this quote (all legs); '' = the route's figure.
   const [borderOverride, setBorderOverride] = useState('');
+  // The clearing agent's fee typed on this quote; '' = the agent estimate.
+  const [agentFee, setAgentFee] = useState('');
+  // An abnormal load (Zimbabwe charges it a different access toll).
+  const [abnormalLoad, setAbnormalLoad] = useState(false);
   const [tollsConfirmedNone, setTollsConfirmedNone] = useState(false);
   const [distanceConfirmed, setDistanceConfirmed] = useState(false);
   // "Use official price" on this quote while the company prices on its own.
@@ -732,6 +737,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       setTollsConfirmedNone(snap.tolls_confirmed_none === true);
       setDistanceConfirmed(snap.distance_confirmed === true);
       setUseOfficialDiesel(snap.use_official === true);
+      // The quote's own border choices (costing_inputs, newer backends).
+      const ci = (pick(q, ['costing_inputs']) ?? {}) as Record<string, unknown>;
+      const reopened = reopenedInputs(ci);
+      setAbnormalLoad(reopened.abnormalLoad);
+      setAgentFee(reopened.agentFee);
+      setBorderOverride(reopened.borderOverride);
       rateTouchedRef.current = true;
       const fuelUsed = num(pick(q, ['fuel_price_used'])) || num(snap.fuel_price_per_litre_used);
       savedPricingRef.current = {
@@ -917,6 +928,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           vehicle_type: pricedTruckName || 'Flatbed',
           // The id pins the exact type (toll class, fuel) when names repeat.
           ...(pricedTruckId != null ? { vehicle_type_id: pricedTruckId } : {}),
+          // Tariffs in force on the collection date (newer backends warn when
+          // it's past the published year); today when not set.
+          ...(pickupDate ? { pickup_date: pickupDate, trip_date: pickupDate } : {}),
+          // The way home on its own route: round trip, or a one-way trip that
+          // may come back empty. Older backends ignore these.
+          trip_type: tripType,
+          include_return: tripType === 'ONE_WAY' && !returnLoadBooked,
+          // The agent's fee typed on this quote (priced into the border lines).
+          // Zimbabwe charges an abnormal load its own access toll.
+          ...(abnormalLoad ? { abnormal_load: true } : {}),
           // No fallback needed: this effect only runs once `ready`, and
           // weight is one of the priceGaps, so weightKg is guaranteed
           // positive here.
@@ -946,7 +967,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       }
     }, 500);
     return () => clearTimeout(t);
-  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce]);
+    // abnormalLoad changes the border lines the route prices. The agent's fee
+    // does not re-route (every lookup costs): it's applied to the border
+    // lines already here, and sent with the costing and the save.
+  }, [ready, pickup, delivery, stops, pricedTruckName, pricedTruckId, weightKg, routeNonce, pickupDate, tripType, returnLoadBooked, abnormalLoad]);
 
   // A confirmation ("no tolls", "distance is right") belongs to the route it
   // was given for: a new route asks again.
@@ -1033,6 +1057,9 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             fuel_price_override: aiFuelPrice ?? null,
             is_international: crossesBorder,
             cargo_description: cargo || null,
+            ...(pickupDate ? { pickup_date: pickupDate } : {}),
+            ...(parseNum(agentFee) != null ? { clearing_agent_fee_zar: parseNum(agentFee) } : {}),
+            ...(abnormalLoad ? { abnormal_load: true } : {}),
             // The route's own border data: the server works out what's unknown.
             route: {
               cross_border: !!pick(routeData ?? {}, ['cross_border']),
@@ -1046,7 +1073,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             _suggest_key: suggestKey,
           }
         : null,
-    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride],
+    [ready, routeData, pricedTruck, routeOneWayKm, routeMinutes, tripType, weightKg, returnLoadBooked, useOfficialDiesel, aiFuelPrice, crossesBorder, cargo, suggestKey, borderOverride, pickupDate, agentFee, abnormalLoad],
   );
   const serverCosting = useServerCosting(serverPayload);
   const nextServerSuggested =
@@ -1058,6 +1085,15 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     const at = nextServerSuggested.indexOf('@');
     setServerSuggested({ id: nextServerSuggested.slice(0, at), key: nextServerSuggested.slice(at + 1) });
   }, [nextServerSuggested]);
+
+  // A border schedule that depends on an abnormal load: Zimbabwe's access toll.
+  const routeCrossesZimbabwe = [
+    ...asArray<string>(pick(routeData ?? {}, ['countries'])),
+    ...asArray<string>(pick(currentRoute, ['countries'])),
+    pickup?.cc,
+    delivery?.cc,
+    ...stops.map((st) => st.loc?.cc),
+  ].some((c) => /^(ZW|ZWE|Zimbabwe)$/i.test(String(c ?? '')));
 
   // ── Cost breakdown ──────────────────────────────────────────────────────
   // quote/costs.ts: the price lines, and the cost floor, margin and warnings
@@ -1085,6 +1121,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         returnLoadBooked,
         international: crossesBorder,
         borderOverride: parseNum(borderOverride),
+        agentFeeOverride: parseNum(agentFee),
         tollsConfirmedNone,
         distanceConfirmed,
         serverInputs: serverCosting?.inputs ?? null,
@@ -1110,6 +1147,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       returnLoadBooked,
       crossesBorder,
       borderOverride,
+      agentFee,
       tollsConfirmedNone,
       distanceConfirmed,
       serverCosting,
@@ -2012,8 +2050,13 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       // The saved driver figure is the person's only when they typed it.
       driver_cost_is_override: driverEdited,
     };
-    if (costs.crossBorderCost > 0) out.border_cost = costs.crossBorderCost;
+    // A typed border figure is saved even at R 0, so a reopen restores it.
+    if (costs.crossBorderCost > 0 || costs.costingInputs.border_cost_is_override) out.border_cost = costs.crossBorderCost;
     if (costs.costingInputs.border_cost_is_override) out.border_cost_is_override = true;
+    // The way home and border figures the route gave, so the backend re-prices
+    // the saved quote the same way (newer backends keep them).
+    for (const [k, v] of Object.entries(costs.savedCostingExtras)) if (v != null && v >= 0) out[k] = v;
+    if (abnormalLoad) out.abnormal_load = true;
     // Saved so the send check knows which border costs aren't on file.
     if (costs.costingInputs.border_costs_unknown) out.border_costs_unknown = costs.costingInputs.border_costs_unknown;
     if (returnLoadBooked) out.include_empty_return = false;
@@ -2680,6 +2723,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 />
                 {/* §5: a long one-way trip prices the empty run home unless a
                     return load is booked. Reserved height: no layout jump. */}
+                {/* Only where a border schedule depends on it (Zimbabwe). */}
+                {routeCrossesZimbabwe && (
+                  <View className="mt-3">
+                    <Label className="mb-2 text-muted">Abnormal load</Label>
+                    <SegmentedControl
+                      options={[
+                        { label: 'No', value: 'NO' },
+                        { label: 'Yes', value: 'YES' },
+                      ]}
+                      value={abnormalLoad ? 'YES' : 'NO'}
+                      onChange={(v) => setAbnormalLoad(v === 'YES')}
+                      tall
+                    />
+                  </View>
+                )}
                 {tripType === 'ONE_WAY' && costs.emptyReturnEligible && (
                   <View className="mt-3">
                     <Label className="mb-2 text-muted">Truck comes back</Label>
@@ -2902,6 +2960,18 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             visible={borderModal}
             onClose={() => setBorderModal(false)}
             costs={costs}
+            agentFeeTyped={parseNum(agentFee) != null}
+            agentFeeValue={parseNum(agentFee)}
+            agentEdit={
+              costs.agentEstimate !== null
+                ? {
+                    label: "Your agent's fee",
+                    value: agentFee !== '' ? agentFee : formatPlain(costs.agentEstimate),
+                    onChangeText: setAgentFee,
+                    back: agentFee !== '' ? { label: 'Use the estimate', onPress: () => setAgentFee('') } : null,
+                  }
+                : null
+            }
             edit={{
               label: costs.legs === 2 ? 'Border costs, both legs' : 'Border costs',
               value: borderOverride !== '' ? borderOverride : costs.crossBorderCost > 0 ? formatPlain(costs.crossBorderCost) : '',

@@ -150,13 +150,20 @@ export function invalidateForTopics(qc: QueryClient, topics: readonly string[]):
 }
 
 export function invalidateForServerEvent(qc: QueryClient, event: string): void {
+  invalidateForServerEvents(qc, [event]);
+}
+
+/** Several named events at once: one invalidation pass over the union of what they touch. */
+export function invalidateForServerEvents(qc: QueryClient, names: readonly string[]): void {
   // Every server event also lands in the bell.
-  const events: DomainEvent[] = ['notification'];
-  for (const [prefix, mapped] of EVENT_PREFIX) {
-    if ((event || '').startsWith(prefix)) {
-      events.push(...mapped);
-      break;
+  const events = new Set<DomainEvent>(['notification']);
+  for (const event of names) {
+    for (const [prefix, mapped] of EVENT_PREFIX) {
+      if ((event || '').startsWith(prefix)) {
+        for (const m of mapped) events.add(m);
+        break;
+      }
     }
   }
-  invalidateFromServer(qc, events);
+  invalidateFromServer(qc, [...events]);
 }

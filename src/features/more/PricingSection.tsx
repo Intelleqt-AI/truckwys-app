@@ -45,6 +45,20 @@ export function PricingSection({ focus }: { focus?: string }) {
 
 type BasicKey = 'margin_target_pct' | 'operating_cost_per_km' | 'driver_allowance_per_night';
 
+// Quotes price at a target between 1% and 40% (the backend's target_margin()
+// clamp): a saved figure outside that range is allowed, but say what pricing
+// actually uses (web marginRangeNote).
+const TARGET_MARGIN_RANGE: [number, number] = [1, 40];
+function marginRangeNote(raw: string): string | null {
+  const t = raw.trim().replace(',', '.');
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
+  const n = Number(t);
+  const [lo, hi] = TARGET_MARGIN_RANGE;
+  if (n > hi) return `Pricing uses at most ${hi}%.`;
+  if (n > 0 && n < lo) return `Pricing uses at least ${lo}%.`;
+  return null;
+}
+
 const BASICS: {
   key: BasicKey;
   item: string;
@@ -230,6 +244,9 @@ function PricingBasics({ focus }: { focus?: string }) {
                 }}
                 error={errors[b.key]}
               />
+              {b.key === 'margin_target_pct' && !errors[b.key] && marginRangeNote(draft?.[b.key] ?? '') ? (
+                <Txt className="mt-1.5 text-caption text-faint">{marginRangeNote(draft?.[b.key] ?? '')}</Txt>
+              ) : null}
               {notSet(b.item) && (
                 <View className="mt-1.5 flex-row flex-wrap items-center gap-2">
                   <Badge label="Not set yet" tone="warning" dot />

@@ -6,7 +6,6 @@ import {
   Platform,
   Keyboard,
   InputAccessoryView,
-  InteractionManager,
   type TextInputProps,
 } from 'react-native';
 import Animated, {
@@ -130,7 +129,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   //    there (the common first-focus case — a value seeded from the API has
   //    never been through the blur-side grouping, so there's nothing to undo).
   //  - When it DOES need to write, that write is deferred a tick via
-  //    InteractionManager (same idiom as CreateQuoteScreen.tsx's post-save
+  //    requestIdleCallback (same idiom as CreateQuoteScreen.tsx's post-save
   //    invalidate) rather than run inline. `onChangeText` here is a
   //    react-hook-form Controller write, which re-renders every subscriber —
   //    running it synchronously inside onFocus/onBlur landed that render on
@@ -148,7 +147,7 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
         })
       : formatPlain(n, decimals);
     if (next === props.value) return;
-    InteractionManager.runAfterInteractions(() => props.onChangeText?.(next));
+    requestIdleCallback(() => props.onChangeText?.(next), { timeout: 100 });
   };
 
   // These compose with the caller's handlers instead of replacing them: props

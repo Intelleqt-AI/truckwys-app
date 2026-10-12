@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
-import { connectLiveEvents, type LiveEvent } from '@/lib/liveEvents';
-import { ALL_DATA_TOPICS, invalidateForServerEvent, invalidateForTopics } from '@/lib/queryInvalidation';
+import { appVisibility, connectLiveEvents, type LiveEvent } from '@/lib/liveEvents';
+import { createCoalescedRefresh } from '@/lib/liveRefresh';
+import { ALL_DATA_TOPICS, invalidateForServerEvents, invalidateForTopics } from '@/lib/queryInvalidation';
 import { useAuthStore } from '@/stores/authStore';
 import { toast } from '@/lib/toast';
 
@@ -50,7 +51,11 @@ const SERVER_WORDED_EVENTS = new Set([
   'quote.no_answer',
 ]);
 
+// A burst waits 250 ms for its last event, a steady stream still flushes every
+// 2 s, and two flushes never start less than 2 s apart (the web's own numbers).
 const DATA_CHANGED_DEBOUNCE_MS = 250;
+const DATA_CHANGED_MAX_WAIT_MS = 2000;
+const DATA_CHANGED_MIN_INTERVAL_MS = 2000;
 
 export function useLiveEvents() {
   const qc = useQueryClient();
@@ -74,17 +79,29 @@ export function useLiveEvents() {
   useEffect(() => {
     if (!token) return;
 
-    // data.changed pushes arrive in bursts (a payment fires invoice + payment,
-    // a delivery fires load + invoice + trip), so topics are collected for a
-    // moment and invalidated together, as the web app does.
-    const pending = new Set<string>();
-    let flushTimer: ReturnType<typeof setTimeout> | null = null;
-    const flush = () => {
-      flushTimer = null;
-      const topics = [...pending];
-      pending.clear();
-      invalidateForTopics(qc, topics);
-    };
+    // Live pushes never map 1:1 onto requests (web 0ebb24e). data.changed pushes
+    // arrive in bursts (a payment fires invoice + payment, a delivery fires load
+    // + invoice + trip; an import fires dozens), and each invalidation refetches
+    // every open screen's queries. So topics and named events are collected and
+    // invalidated together: a burst is one pass, and passes are spaced out.
+    const pendingTopics = new Set<string>();
+    const pendingNamed = new Set<string>();
+    const refresh = createCoalescedRefresh(
+      () => {
+        const topics = [...pendingTopics];
+        const named = [...pendingNamed];
+        pendingTopics.clear();
+        pendingNamed.clear();
+        if (topics.length) invalidateForTopics(qc, topics);
+        if (named.length) invalidateForServerEvents(qc, named);
+      },
+      {
+        debounceMs: DATA_CHANGED_DEBOUNCE_MS,
+        maxWaitMs: DATA_CHANGED_MAX_WAIT_MS,
+        minIntervalMs: DATA_CHANGED_MIN_INTERVAL_MS,
+        visibility: appVisibility,
+      },
+    );
 
     const handle = connectLiveEvents(
       token,
@@ -92,22 +109,25 @@ export function useLiveEvents() {
         if (e.event === 'data.changed') {
           // Always refresh, including for our own change: the server's version
           // of the record is the one to show. Never toasts.
-          for (const t of e.data?.topics ?? []) pending.add(t);
-          if (!flushTimer) flushTimer = setTimeout(flush, DATA_CHANGED_DEBOUNCE_MS);
+          for (const t of e.data?.topics ?? []) pendingTopics.add(t);
+          refresh.request();
           return;
         }
         handleNamedEvent(e);
       },
-      (isReconnect) => {
-        // Pushes sent while the socket was down are gone for good.
-        if (isReconnect) invalidateForTopics(qc, ALL_DATA_TOPICS);
+      () => {
+        // The socket is back after a gap: pushes sent while it was down are
+        // gone for good. Already throttled to once a minute by the socket.
+        for (const t of ALL_DATA_TOPICS) pendingTopics.add(t);
+        refresh.request();
       },
     );
 
     function handleNamedEvent(e: LiveEvent) {
       // Always refresh, even for our own actions — the actor's device still
       // needs the server's version of the record.
-      invalidateForServerEvent(qc, e.event);
+      pendingNamed.add(e.event);
+      refresh.request();
 
       // subscription_status rides on the auth user, not on a query, so cache
       // invalidation alone can't refresh it — and it gates quoting and
@@ -138,7 +158,7 @@ export function useLiveEvents() {
     }
 
     return () => {
-      if (flushTimer) clearTimeout(flushTimer);
+      refresh.dispose();
       handle.close();
     };
   }, [qc, token, userId]);

@@ -18,7 +18,7 @@ import {
 } from '@/components/ui';
 import { str, pick } from '@/lib/api/list';
 import { convertQuoteToLoad, linkReturnLoad, seedLoad, useBookingPreview, useQuote } from './api';
-import { callOffCap, checkCallOff } from './quote/tonnage';
+import { callOffCap, checkCallOff, fmtTonnes } from './quote/tonnage';
 import {
   bookErrorText,
   bookingBodyFor,
@@ -38,6 +38,9 @@ import { CandidateRow, InvoicePreviewGroup, TripMarginCard } from './trip/TripUi
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
+
+/** A heavy per-tonne consignment books as several loads: say so, and where the others are. */
+const multiLoadNote = (n: number) => `Booked ${n} loads. The truck is on the first; assign the others from Orders.`;
 
 type Props = NativeStackScreenProps<AppStackParamList, 'BookJob'>;
 
@@ -201,6 +204,7 @@ export function BookJobScreen({ route, navigation }: Props) {
           }
         }
         if (booked.alreadyConverted) toast.info(`Already booked as ${booked.loadNumber || 'a job'}`);
+        else if (booked.loadsCreated > 1) toast.notice(multiLoadNote(booked.loadsCreated));
         else if (note) toast.info(note.startsWith('Booked') ? note : `Booked. ${note}`);
         else toast.success('Booked');
         openJob(booked.loadId, booked.loadNumber);
@@ -208,11 +212,13 @@ export function BookJobScreen({ route, navigation }: Props) {
       }
       if (!booked.hasBooking) {
         // Older backend: no booking block to show, straight to the job.
-        toast.success('Booked');
+        if (booked.loadsCreated > 1) toast.notice(multiLoadNote(booked.loadsCreated));
+        else toast.success('Booked');
         openJob(booked.loadId, booked.loadNumber);
         return;
       }
       if (booked.alreadyConverted) toast.info(`Already booked as ${booked.loadNumber || 'a job'}`);
+      else if (booked.loadsCreated > 1) toast.notice(multiLoadNote(booked.loadsCreated));
       setResult(booked);
     } catch (e) {
       toast.error(bookErrorText(e));
@@ -375,6 +381,14 @@ export function BookJobScreen({ route, navigation }: Props) {
         <View className="mb-5">
           <Banner tone="warning" message={preview.blockedText} />
         </View>
+      )}
+      {/* Quoted (and accepted) as several loads: booking creates every one. */}
+      {!callOff && (preview?.loadsPlanned.length ?? 0) > 1 && (
+        <Txt className="mb-5 text-sub text-muted" accessibilityRole="text">
+          {`This creates ${preview!.loadsPlanned.length} loads: ${preview!.loadsPlanned
+            .map((t) => fmtTonnes(t))
+            .join(' + ')}. The truck below goes on the first load; assign the others from Orders.`}
+        </Txt>
       )}
 
       <View className="gap-4">

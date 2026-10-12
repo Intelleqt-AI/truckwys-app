@@ -44,10 +44,10 @@ export function capacityTons(raw: unknown): number | null {
 
 // Heuristic 3-letter lane code (mirrors web QuoteBuilder.tsx's extractCode).
 //
-// These codes are not cosmetic: analyzeQuote and benchmarkQuote key off them, and
+// These codes are not cosmetic: the pricing analysis keys the lane's market off them, and
 // an unrecognised address falls through to the first three letters of whatever
-// string arrives — which lands the quote in a junk lane, so the market rate
-// resolves to nothing and AI pricing silently drops to a cost anchor.
+// string arrives — which lands the quote in a junk lane, so the market
+// resolves to nothing and the prices drop to the cost floor plus margin.
 //
 // Durban is deliberately DUR here, matching QuoteBuilder.tsx's own extractCode
 // — not DBN. Web's two quote screens disagree with each other on this

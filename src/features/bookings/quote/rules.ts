@@ -917,6 +917,30 @@ export function borderCostsUnknownFromRoute(route: Record<string, unknown> | nul
   return { countries, crossings, known };
 }
 
+/**
+ * The trip's unknown border parts: the way out, plus the way home when the
+ * quote costs that leg (round trip, or a one-way trip coming back empty). A
+ * crossing missing only on the way home must block the quote too, never be
+ * left out of the price (web tripBorderUnknown / backend border_costs_unknown_input).
+ */
+export function tripBorderUnknown(out: BorderCostsUnknown | null, back: BorderCostsUnknown | null): BorderCostsUnknown | null {
+  if (!back) return out;
+  const backCrossings = back.crossings ?? [];
+  if (!out) {
+    return { countries: back.countries ?? [], crossings: backCrossings.map((c) => `${c} (way home)`), known: back.known };
+  }
+  const uniq = (xs: string[]) => [...new Set(xs)];
+  const outCrossings = out.crossings ?? [];
+  return {
+    countries: uniq([...(out.countries ?? []), ...(back.countries ?? [])]).slice(0, 10),
+    crossings: uniq([
+      ...outCrossings,
+      ...backCrossings.filter((c) => !outCrossings.includes(c)).map((c) => `${c} (way home)`),
+    ]).slice(0, 10),
+    known: out.known,
+  };
+}
+
 export interface CostingInputs {
   trip_type?: 'ONE_WAY' | 'ROUND_TRIP' | string;
   distance_km?: number | null;
@@ -1732,8 +1756,25 @@ export function withServerInputs(
 export function borderEstimateOf(items: Record<string, unknown>[], fallback: unknown, agentFeeTyped: boolean): number {
   if (!items.length) return toNum(fallback) ?? 0;
   return items
-    .filter((i) => i.verified !== true && !(agentFeeTyped && /agent/i.test(String(i.code ?? ''))))
+    .filter((i) => borderKind(i) !== 'published' && !(agentFeeTyped && borderKind(i) === 'agent'))
     .reduce((sum, i) => sum + (toNum(i.amount) ?? 0), 0);
+}
+
+export type BorderKind = 'published' | 'estimate' | 'unverified' | 'agent';
+
+/**
+ * What a border line is, as the web's routeTolls.borderKind: a clearing-agent
+ * estimate (replaced by the agent fee the person types), a published tariff
+ * (verified, or labelled so), unverified, else an estimate.
+ */
+export function borderKind(b: Record<string, unknown>): BorderKind {
+  const source = String(b.source ?? '');
+  if (b.code === 'zw_clearing_agent' || (/agent/i.test(source) && /enter your agent/i.test(String(b.source ?? b.detail ?? '')))) {
+    return 'agent';
+  }
+  if (b.verified === true || b.label === 'published') return 'published';
+  if (b.label === 'unverified') return 'unverified';
+  return 'estimate';
 }
 
 // ── Tonnage quotes (rate per tonne) ─────────────────────────────────────────

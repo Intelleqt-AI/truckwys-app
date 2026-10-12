@@ -11,6 +11,8 @@ import {
   withServerInputs,
   borderEstimateOf,
   borderCostsUnknownFromRoute,
+  borderKind,
+  tripBorderUnknown,
   type Costing,
   type CostingInputs,
   type CostingLine,
@@ -206,6 +208,10 @@ const nullIfNotPositive = (v: unknown) => {
   return n > 0 ? n : null;
 };
 
+/** The backend fell back to a straight-line distance (routing call failed). */
+export const isDistanceEstimated = (rd: Record<string, unknown> | null | undefined): boolean =>
+  rd?.distance_estimated === true || str(pick(rd ?? {}, ['source'])) === 'estimated';
+
 export function computeCosts({
   currentRoute,
   routeData,
@@ -244,7 +250,7 @@ export function computeCosts({
     num(pick(currentRoute, ['duration_minutes'])) ||
     num(pick(currentRoute, ['duration_min'])) ||
     num(pick(rd, ['duration_minutes']));
-  const distanceEstimated = rd.distance_estimated === true || str(pick(rd, ['source'])) === 'estimated';
+  const distanceEstimated = isDistanceEstimated(rd);
 
   const truck = (vtypes ?? []).find((v) => v.name === vehicleType) ?? null;
 
@@ -313,10 +319,15 @@ export function computeCosts({
   const crossBorderBreakdown = asArray(pick(bsrc, ['cross_border_breakdown'])) as Record<string, unknown>[];
   const retBreakdown = retOk ? (asArray(ret!.cross_border_breakdown) as Record<string, unknown>[]) : [];
   // An agent's fee typed on this quote replaces the "agent estimate" line(s).
+  // The typed fee replaces each agent line's estimate, so it counts once per
+  // agent line on the route (web borderTotalWithAgentFee).
+  const agentLines = (items: Record<string, unknown>[]) => items.filter((i) => borderKind(i) === 'agent');
   const agentSum = (items: Record<string, unknown>[]) =>
-    items.filter((i) => /agent/i.test(str(i.code))).reduce((sum, i) => sum + num(i.amount), 0);
-  const agentDelta = (items: Record<string, unknown>[]) =>
-    agentFeeOverride != null && agentSum(items) > 0 ? agentFeeOverride - agentSum(items) : 0;
+    agentLines(items).reduce((sum, i) => sum + num(i.amount), 0);
+  const agentDelta = (items: Record<string, unknown>[]) => {
+    const n = agentLines(items).length;
+    return agentFeeOverride != null && n > 0 ? agentFeeOverride * n - agentSum(items) : 0;
+  };
   const borderFees = num(pick(add, ['border_fees'])) + agentDelta(crossBorderBreakdown);
   const weighbridgeFees = num(pick(add, ['weighbridge_fees']));
   const nonSaTolls = num(pick(add, ['non_sa_tolls']));
@@ -390,7 +401,13 @@ export function computeCosts({
     international: !!international,
     // Parts of the route with no border figures on file (newer backends);
     // a border figure the person typed covers them.
-    border_costs_unknown: borderCostsUnknownFromRoute(bsrc),
+    // The way home's own unknown crossings count when that leg is costed (a
+    // round trip, or a one-way trip coming back empty): a crossing missing
+    // only on the way home blocks the quote, it is never left out of the price.
+    border_costs_unknown: tripBorderUnknown(
+      borderCostsUnknownFromRoute(bsrc),
+      retOk && (tripType === 'ROUND_TRIP' || !returnLoadBooked) ? borderCostsUnknownFromRoute(ret) : null,
+    ),
     border_cost_is_override: borderOverride != null && borderOverride >= 0,
     include_empty_return: returnLoadBooked ? false : null,
     settings: {

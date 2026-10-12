@@ -65,7 +65,11 @@ import {
   type NotificationChannel,
   type NotificationPrefs,
 } from './api';
-import { normalizeVehicleType } from '@/features/bookings/api';
+import { normalizeVehicleType, refreshFuelPrices } from '@/features/bookings/api';
+import type { VehicleTypeFuel } from '@/features/bookings/quote/fleetFuel';
+import { FleetFuelStrip, FuelDetailSheet, FuelUseLine } from '@/features/fleet/FleetFuel';
+import { setBurnMode, useFleetFuel, useReplaceFuelRow } from '@/features/fleet/fuelActuals';
+import { vatNumberProblem } from '@/lib/finance/validation';
 import {
   dieselInputFromApi,
   hasPetrolRule,
@@ -498,6 +502,39 @@ function VehicleTypesSection() {
   const list = useMemo(() => data ?? [], [data]);
   const [busy, setBusy] = useState(false);
 
+  // Measured fuel use per type (Cartrack), FLEET-ACTUALS-CLIENT-SPEC.md. Only
+  // admins can change which figure quotes use (the server enforces it too).
+  const fuel = useFleetFuel();
+  const replaceFuelRow = useReplaceFuelRow();
+  const isFuelAdmin = useRole() === 'ADMIN' && !demo.isDemo;
+  const [fuelTypeId, setFuelTypeId] = useState<string | null>(null);
+  const fuelRowOf = (t: (typeof list)[number]): VehicleTypeFuel => {
+    const r = fuel.data?.vehicle_types.find((x) => String(x.id) === String(t.id));
+    if (r) return r;
+    // Fuel actuals not loaded: what the vehicle types API says is in use.
+    const typed = t.fuel_consumption_l_per_100km != null ? Number(t.fuel_consumption_l_per_100km) : null;
+    const typedOk = typed != null && Number.isFinite(typed) && typed > 0;
+    return {
+      id: Number(t.id),
+      name: t.name,
+      in_use:
+        t.fuel_use_in_use ?? {
+          value: typedOk ? typed : null,
+          source: !typedOk ? 'missing' : t.company === null ? 'standard' : 'configured',
+        },
+      measured: null,
+    };
+  };
+  const applyMeasured = async (id: string | number) => {
+    try {
+      replaceFuelRow(await setBurnMode(id, 'MEASURED'));
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Couldn't change the figure.");
+    }
+  };
+  const fuelDetailRow =
+    fuelTypeId != null ? (fuel.data?.vehicle_types.find((x) => String(x.id) === fuelTypeId) ?? null) : null;
+
   // Batch-delete selection mode.
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -659,6 +696,8 @@ function VehicleTypesSection() {
             <StatCard label="Active" value={String(activeCount)} />
           </View>
 
+          {fuel.data ? <FleetFuelStrip data={fuel.data} isAdmin={isFuelAdmin} /> : null}
+
           <View>
             {sorted.map((t, i) => {
               const r = t as unknown as Record<string, unknown>;
@@ -666,7 +705,6 @@ function VehicleTypesSection() {
               const cap = num(pick(r, ['capacity']));
               const rate = num(pick(r, ['base_rate']));
               const fuelType = str(pick(r, ['fuel_type']));
-              const consumption = num(pick(r, ['fuel_consumption_l_per_100km']));
               const description = str(pick(r, ['description']));
               const isActive = pick(r, ['active']) !== false;
               const isSel = selected.has(tid);
@@ -691,7 +729,6 @@ function VehicleTypesSection() {
                 cap ? `${capacityTons(cap) ?? cap} t` : null,
                 rate ? `R ${rate}/km` : null,
                 fuelType || null,
-                consumption ? `${consumption} L/100km` : null,
               ]
                 .filter(Boolean)
                 .join(' · ');
@@ -755,6 +792,13 @@ function VehicleTypesSection() {
                             {meta}
                           </Mono>
                         )}
+                        <FuelUseLine
+                          row={fuelRowOf(t)}
+                          isAdmin={isFuelAdmin}
+                          onDetail={() => setFuelTypeId(tid)}
+                          onSet={openEdit}
+                          onUseMeasured={() => applyMeasured(tid)}
+                        />
                       </View>
                       {isDeleting ? (
                         <ActivityIndicator size="small" color={colors.faint} />
@@ -788,6 +832,15 @@ function VehicleTypesSection() {
           fullWidth
         />
       )}
+
+      {/* Measured fuel use (Cartrack) for one type. */}
+      <FuelDetailSheet
+        row={fuelDetailRow}
+        open={fuelTypeId != null}
+        onClose={() => setFuelTypeId(null)}
+        isAdmin={isFuelAdmin}
+        minKm={fuel.data?.rules?.min_distance_km ?? 2000}
+      />
     </View>
   );
 }
@@ -1313,6 +1366,8 @@ function CompanySection() {
   const [industry, setIndustry] = useState('general_freight');
   const [regNumber, setRegNumber] = useState('');
   const [vatNumber, setVatNumber] = useState('');
+  // Only a business registered with SARS as a VAT vendor may charge VAT.
+  const [vatRegistered, setVatRegistered] = useState('yes');
   const [website, setWebsite] = useState('');
   const [description, setDescription] = useState('');
   const [street, setStreet] = useState('');
@@ -1392,6 +1447,7 @@ function CompanySection() {
     setIndustry(str(pick(data, ['industry']), 'general_freight'));
     setRegNumber(str(pick(data, ['registration_number'])));
     setVatNumber(str(pick(data, ['vat_number'])));
+    setVatRegistered(data.vat_registered === false ? 'no' : 'yes');
     setWebsite(str(pick(data, ['website'])));
     setDescription(str(pick(data, ['description'])));
     setStreet(str(pick(addr, ['street'])));
@@ -1475,6 +1531,8 @@ function CompanySection() {
 
   const save = async (confirmed = false) => {
     if (demo.block()) return;
+    const vatProblem = vatNumberProblem(vatNumber);
+    if (vatProblem) return toast.error(vatProblem);
     // Every numeric box is validated through parseNum first. The old guards
     // compared Number(v) against bounds, and BOTH sides of a comparison are
     // false for NaN — so a comma value passed every check and NaN went to the
@@ -1652,6 +1710,7 @@ function CompanySection() {
         industry,
         registration_number: regNumber.trim(),
         vat_number: vatNumber.trim(),
+        vat_registered: vatRegistered === 'yes',
         website: website.trim(),
         description: description.trim(),
         address: {
@@ -1739,12 +1798,16 @@ function CompanySection() {
   const loadLivePrice = async () => {
     setFetchingLive(true);
     try {
-      const d = (await fetchFuelPrices(true)) as Record<string, unknown>;
+      // POST fuel-prices/refresh/ re-checks the source for anyone; the old
+      // GET ?force=true is staff-only now and silently returns the stored price.
+      const r = await refreshFuelPrices();
+      const d = (r.prices ?? (await fetchFuelPrices(false))) as Record<string, unknown>;
       setLivePrice(d);
-      if (pick(d, ['success']) === false) {
-        toast.error("Couldn't refresh prices");
+      if (pick(d, ['success']) === false || (r.ok === false && !r.throttled)) {
+        toast.error(r.message ?? "Couldn't refresh prices");
         return;
       }
+      if (r.message) toast.notice(r.message);
       // Petrol stays what the fleet typed: never prefilled from the official feed.
     } catch {
       toast.error("Couldn't refresh prices");
@@ -1835,7 +1898,26 @@ function CompanySection() {
         placeholder="4XXXXXXXXX"
         value={vatNumber}
         onChangeText={setVatNumber}
+        error={vatNumberProblem(vatNumber) ?? undefined}
       />
+      <View className="gap-1.5">
+        <SelectField
+          label="Registered for VAT"
+          options={[
+            { label: 'Yes, we charge VAT', value: 'yes' },
+            { label: 'No, not VAT registered', value: 'no' },
+          ]}
+          value={vatRegistered}
+          onSelect={setVatRegistered}
+        />
+        <Txt className="text-caption text-faint">
+          {vatRegistered === 'yes' && !vatNumber.trim()
+            ? 'Add your VAT number above: tax invoices must show it.'
+            : vatRegistered === 'yes'
+              ? 'Quotes and tax invoices include 15% VAT (0% for international trips).'
+              : 'Quotes and new invoices show no VAT, and invoices are titled INVOICE. Invoices already issued never change.'}
+        </Txt>
+      </View>
       <TextField
         label="Website"
         placeholder="https://"

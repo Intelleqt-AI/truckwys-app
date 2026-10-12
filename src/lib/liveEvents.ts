@@ -1,4 +1,7 @@
+import { AppState } from 'react-native';
 import { apiOrigin } from '@/lib/api/client';
+import type { Visibility } from '@/lib/liveRefresh';
+import { createLiveSocket, type SocketLike } from '@/lib/liveSocket';
 
 // Real-time company event stream — the mobile port of the web app's
 // LiveEvents component. Without it the phone only ever converged on fresh data
@@ -38,7 +41,6 @@ export interface LiveEvent {
   };
 }
 
-const RECONNECT_CAP_MS = 30_000;
 const PING_INTERVAL_MS = 25_000;
 // Auth failures aren't retryable: the token is dead or the user has no company,
 // so reconnecting in a loop just hammers the server until sign-in changes.
@@ -49,79 +51,68 @@ function wsUrl(token: string): string {
   return `${base}/ws/events/?token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * "Hidden" = the app is in the background: no reconnecting there (the OS has
+ * usually suspended the socket anyway), one reconnect when it is foregrounded.
+ * 'inactive' (iOS control centre, app switcher peek) is not hidden.
+ */
+export const appVisibility: Visibility = {
+  isHidden: () => AppState.currentState === 'background',
+  onVisible: (cb) => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') cb();
+    });
+    return () => sub.remove();
+  },
+};
+
 export interface LiveEventsHandle {
   close: () => void;
 }
 
 /**
  * Open the event stream and call `onEvent` for each event frame.
- * `onConnected(isReconnect)` fires on the server's `connected` frame; on a
- * reconnect, changes pushed while the socket was down were missed, so the
- * caller should refetch everything once.
- * Reconnects with capped exponential backoff. Never throws.
+ * `onReconnect` fires when the socket is open again after a gap: changes
+ * pushed while it was down were missed, so the caller should refetch
+ * everything once. It is throttled (at most once a minute however often the
+ * socket flaps), because every call is a refetch of every open screen.
+ * Reconnects with capped, jittered backoff that only resets once a socket has
+ * stayed up for a while (lib/liveSocket.ts). Never throws.
  */
 export function connectLiveEvents(
   token: string,
   onEvent: (e: LiveEvent) => void,
-  onConnected?: (isReconnect: boolean) => void,
+  onReconnect?: () => void,
 ): LiveEventsHandle {
-  let socket: WebSocket | null = null;
-  let stopped = false;
-  let attempt = 0;
-  let hasConnected = false;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let pingTimer: ReturnType<typeof setInterval> | null = null;
   // The same event can arrive twice (a reconnect can replay, and a push may
   // cover the same change) — event_id is a per-event uuid, so it dedupes.
   const seen = new Set<string>();
 
-  const clearTimers = () => {
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (pingTimer) clearInterval(pingTimer);
-    reconnectTimer = null;
-    pingTimer = null;
-  };
-
-  const connect = () => {
-    if (stopped || !token) return;
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(wsUrl(token));
-    } catch {
-      return;
-    }
-    socket = ws;
-
-    ws.onopen = () => {
-      attempt = 0;
-      // Keeps intermediaries from dropping an idle connection.
-      pingTimer = setInterval(() => {
-        try {
-          ws.send(JSON.stringify({ type: 'ping' }));
-        } catch {
-          /* the close handler will deal with it */
-        }
-      }, PING_INTERVAL_MS);
-    };
-
-    ws.onmessage = (e: WebSocketMessageEvent) => {
+  const socket = createLiveSocket({
+    url: () => (token ? wsUrl(token) : null),
+    createSocket: (url) => new WebSocket(url) as unknown as SocketLike,
+    pingMs: PING_INTERVAL_MS,
+    visibility: appVisibility,
+    isFatalClose: (ev) => {
+      const code = (ev as { code?: number } | undefined)?.code;
+      return !!code && FATAL_CLOSE_CODES.includes(code);
+    },
+    onReconnect: () => {
+      try {
+        onReconnect?.();
+      } catch {
+        /* a consumer error must not break the stream */
+      }
+    },
+    onMessage: (data) => {
       let msg: LiveEvent | { type?: string };
       try {
-        msg = JSON.parse(String(e.data));
+        msg = JSON.parse(String(data));
       } catch {
         return;
       }
-      if (msg?.type === 'connected') {
-        const isReconnect = hasConnected;
-        hasConnected = true;
-        try {
-          onConnected?.(isReconnect);
-        } catch {
-          /* a consumer error must not break the stream */
-        }
-        return;
-      }
-      if (!msg || msg.type !== 'event') return; // 'pong'
+      // 'connected' (server joined us to the company group) and 'pong' carry nothing to act on.
+      if (!msg || msg.type !== 'event') return;
       const evt = msg as LiveEvent;
       const eventId = evt.data?.event_id;
       if (eventId) {
@@ -131,39 +122,9 @@ export function connectLiveEvents(
         if (seen.size > 500) seen.clear();
       }
       onEvent(evt);
-    };
-
-    ws.onerror = () => {
-      try {
-        ws.close();
-      } catch {
-        /* noop */
-      }
-    };
-
-    ws.onclose = (e: WebSocketCloseEvent) => {
-      socket = null;
-      clearTimers();
-      if (stopped) return;
-      if (e?.code && FATAL_CLOSE_CODES.includes(e.code)) return;
-      const delay = Math.min(RECONNECT_CAP_MS, 1000 * 2 ** attempt);
-      attempt += 1;
-      reconnectTimer = setTimeout(connect, delay);
-    };
-  };
-
-  connect();
-
-  return {
-    close: () => {
-      stopped = true;
-      clearTimers();
-      try {
-        socket?.close();
-      } catch {
-        /* noop */
-      }
-      socket = null;
     },
-  };
+  });
+  socket.start();
+
+  return { close: () => socket.stop() };
 }

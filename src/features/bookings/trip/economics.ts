@@ -622,6 +622,8 @@ export interface BookingResult {
   outboundCandidates: Candidate[];
   invoice: InvoicePreviewView | null;
   economics: Economics | null;
+  /** One per-tonne consignment too heavy for one truck books as several loads: how many were created (1 normally). */
+  loadsCreated: number;
 }
 
 export function parseBooking(body: unknown): BookingResult {
@@ -633,6 +635,7 @@ export function parseBooking(body: unknown): BookingResult {
     loadNumber: text(b.load_number),
     hasBooking: !!bk,
     alreadyConverted: bk?.already_converted === true,
+    loadsCreated: arr(b.loads).length || 1,
     isReturnOf: (bk?.is_return_of as number | string | undefined) ?? null,
     returnLoadId: (bk?.return_load_id as number | string | undefined) ?? null,
     expectingReturn: bk?.expecting_return === true,
@@ -668,6 +671,8 @@ export interface BookingPreview {
   invoice: InvoicePreviewView | null;
   /** The backend takes `return_load_id` on convert_to_load (sent as `link_fields`). */
   linksInOneCall: boolean;
+  /** One per-tonne consignment too heavy for one truck: the tonnes of each load booking creates. */
+  loadsPlanned: number[];
 }
 
 function blockedSentence(raw: unknown): string | null {
@@ -694,6 +699,9 @@ export function parseBookingPreview(body: unknown): BookingPreview | null {
     outboundCandidates: parseCandidates(bk.outbound_candidates),
     invoice: invoicePreviewView(bk.invoice_preview),
     linksInOneCall: obj(bk.link_fields).return_candidates === 'return_load_id',
+    loadsPlanned: arr(b.loads_planned)
+      .map((t) => numOrNull(t))
+      .filter((t): t is number => t !== null),
   };
 }
 
@@ -802,4 +810,33 @@ export function actualsView(raw: unknown): ActualsView | null {
     cost: estCost == null ? null : randCents(estCost),
     backhaul,
   };
+}
+
+// ── A rate changed after the job was invoiced (web invoiceMismatchText) ──────
+// Invoices are never edited, so the load says it once with the way to fix it.
+
+export interface InvoiceMismatch {
+  code?: string;
+  invoice_id?: number | string;
+  invoice_number?: string;
+  invoice_excl_vat?: number | string;
+  load_total_excl_vat?: number | string;
+  difference?: number | string;
+}
+
+/** Banner text for a job whose rate changed after it was invoiced, or null. */
+export function invoiceMismatchText(m: unknown): { title: string; detail: string } | null {
+  const o = obj(m);
+  if (o.code !== 'invoice_differs_from_rate') return null;
+  const inv = numOrNull(o.invoice_excl_vat);
+  const job = numOrNull(o.load_total_excl_vat);
+  const diff = numOrNull(o.difference) ?? (inv !== null && job !== null ? job - inv : null);
+  const name = o.invoice_number ? `Invoice ${text(o.invoice_number)}` : 'The invoice';
+  const detail =
+    inv !== null && job !== null
+      ? `${name} is ${randCents(inv)} excl. VAT; the job is now ${randCents(job)}${
+          diff ? ` (${randCents(Math.abs(diff))} ${diff > 0 ? 'more' : 'less'})` : ''
+        }. Issue a credit note or a new invoice.`
+      : `${name} no longer matches the job's rate. Issue a credit note or a new invoice.`;
+  return { title: "Invoice differs from the job's rate", detail };
 }

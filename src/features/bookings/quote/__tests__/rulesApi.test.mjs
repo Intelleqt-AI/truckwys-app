@@ -332,6 +332,31 @@ test('border costs not on file: from the route response, names not codes', async
   assert.equal(got.floor, null);
 });
 
+test('border costs not on file on the way home block the quote too (web a2833ba)', async () => {
+  const { borderCostsUnknownFromRoute, tripBorderUnknown, computeCosting } = await import('../rules.ts');
+  const golden = JSON.parse((await import('node:fs')).readFileSync(new URL('./quote_golden.json', import.meta.url), 'utf8'));
+  const c = golden.cases.find((x) => x.name === 'international_border_unknown_country');
+  const back = borderCostsUnknownFromRoute({ cross_border: true, border_costs_unknown: { countries: ['ZM'], crossings: ['ZM-ZW'] } });
+  // Only the way home is unknown: it is listed, tagged, and blocks the floor.
+  const merged = tripBorderUnknown(null, back);
+  assert.deepEqual(merged.crossings, ['Zambia→Zimbabwe (way home)']);
+  assert.deepEqual(merged.countries, ['Zambia']);
+  const blocked = computeCosting({ ...c.inputs, border_costs_unknown: merged });
+  assert.equal(blocked.floor, null);
+  assert.equal(blocked.warnings.find((x) => x.code === 'border_costs_missing').severity, 'block');
+  // Nothing on the way home: unchanged. Nothing anywhere: null.
+  const out = borderCostsUnknownFromRoute({ cross_border: true, border_costs_unknown: { countries: ['AO'], crossings: ['NA-AO'] } });
+  assert.equal(tripBorderUnknown(out, null), out);
+  assert.equal(tripBorderUnknown(null, null), null);
+  // A crossing unknown both ways is listed once (outbound wins); the other is tagged.
+  const both = tripBorderUnknown(
+    out,
+    borderCostsUnknownFromRoute({ cross_border: true, border_costs_unknown: { countries: ['AO', 'ZM'], crossings: ['NA-AO', 'ZM-ZW'] } }),
+  );
+  assert.deepEqual(both.crossings, ['Namibia→Angola', 'Zambia→Zimbabwe (way home)']);
+  assert.deepEqual(both.countries, ['Angola', 'Zambia']);
+});
+
 test('way home on its own route: round-trip tolls, empty-return border, estimate note', async () => {
   const { computeCosting } = await import('../rules.ts');
   // Scratch backend a182b3e, JHB→DBN round trip on 12 Oct 2026: out R 886,96, back R 907,83.

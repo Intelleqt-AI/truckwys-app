@@ -44,6 +44,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
+import { invoiceMismatchText } from './trip/economics';
 import type { AppStackParamList } from '@/navigation/types';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'LoadDetail'>;
@@ -134,6 +135,10 @@ export function LoadDetailScreen({ route, navigation }: Props) {
   // history that's already in motion. Mirrors web's Bookings.tsx.
   const assignmentLocked = !['PENDING', 'ASSIGNED'].includes(status);
   const invoiceId = str(pick(l, ['invoice_id']));
+  const mismatchRaw = pick(l, ['invoice_mismatch']);
+  const mismatch = invoiceMismatchText(mismatchRaw);
+  const mismatchInvoiceId =
+    str(pick((mismatchRaw ?? {}) as Record<string, unknown>, ['invoice_id'])) || invoiceId;
 
   const stopsRaw = asArray<Record<string, unknown>>(pick(l, ['stops']));
   const stopPoints = stopsRaw
@@ -391,6 +396,22 @@ export function LoadDetailScreen({ route, navigation }: Props) {
             message={`Still ${STATUS_LABEL(status).toLowerCase()}, ${
               stale.overdue ? `${staleLabel(stale).days} past its delivery date` : `open ${staleLabel(stale).text}`
             }. ${staleAction({ status })}.`}
+          />
+        </View>
+      )}
+
+      {/* The rate changed after invoicing (a TMS update): invoices are never
+          edited, so say it once with the way to fix it. */}
+      {mismatch && (
+        <View className="mb-5">
+          <Banner
+            tone="warning"
+            message={`${mismatch.title}. ${mismatch.detail}`}
+            onPress={
+              mismatchInvoiceId
+                ? () => navigation.navigate('InvoiceDetail', { id: mismatchInvoiceId })
+                : undefined
+            }
           />
         </View>
       )}

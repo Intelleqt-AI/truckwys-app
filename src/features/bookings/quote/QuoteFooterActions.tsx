@@ -7,17 +7,11 @@ import { formatCurrency } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 
 /**
- * What the price bar offers beside the total, from the market price check:
- *  prompt   no current result: run the check
- *  apply    the market price differs: apply it
- *  applied  market figures are in use: undo them
- *  same     a current check found nothing to change
+ * What the price bar offers beside the total, from the pricing analysis: one
+ * tap puts a suggested price in the bar ("Use Balanced R 25 100"). Only ever
+ * offered from an analysis of exactly the quote's current values.
  */
-export type FooterOffer =
-  | { kind: 'prompt'; onPress: () => void }
-  | { kind: 'apply'; label: string; onPress: () => void }
-  | { kind: 'applied'; onPress: () => void }
-  | { kind: 'same' };
+export type FooterOffer = { kind: 'apply'; label: string; onPress: () => void };
 
 export interface FooterStrip {
   tone: 'danger' | 'warning';
@@ -49,7 +43,7 @@ function QuoteFooterActionsImpl({
   onSend,
 }: {
   total: number;
-  /** Market price check offer; null while there is nothing to offer. */
+  /** Pricing analysis offer; null while there is nothing to offer. */
   offer: FooterOffer | null;
   ready: boolean;
   /** What's still missing before a price can be worked out, e.g. "Pick a client
@@ -215,26 +209,10 @@ function QuoteFooterActionsImpl({
   );
 }
 
-/** The market price check's one-line action beside the total. */
+/** The pricing analysis' one-line action beside the total. */
 function OfferAction({ offer }: { offer: FooterOffer }) {
   const { colors } = useTheme();
-  if (offer.kind === 'same') {
-    return (
-      <Mono
-        className="min-w-0 shrink text-caption text-faint"
-        numberOfLines={1}
-        maxFontSizeMultiplier={1.2}
-      >
-        At market
-      </Mono>
-    );
-  }
-  const text =
-    offer.kind === 'prompt'
-      ? 'Check market'
-      : offer.kind === 'apply'
-        ? offer.label
-        : 'Undo market';
+  const text = offer.label;
   return (
     <TouchableOpacity
       onPress={offer.onPress}

@@ -28,6 +28,7 @@ import { ContractsTab } from './ContractsTab';
 import { str, pick } from '@/lib/api/list';
 import type { QuoteLite, LoadLite } from '@/types/domain';
 import { bookedLoadOf, quoteStage, type QuoteStage } from '@/lib/quoteStage';
+import { quoteIncomplete } from '@/lib/quoteIncomplete';
 import { staleOf, staleLabel } from '@/lib/staleWork';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { formatCurrency, formatDate, formatPercent } from '@/lib/formatters';
@@ -283,9 +284,14 @@ const QuoteCard = memo(function QuoteCard({ quote }: { quote: QuoteLite }) {
           {[quote.origin, ...quote.stopLabels, quote.destination].join(' → ')}
         </Txt>
         <View className="mt-3 flex-row items-center justify-between">
-          <Mono className="text-body font-semibold text-fg">{wholeRand(quote.amountInclVat)}</Mono>
-          {/* A quote has no live margin once it is booked or expired. */}
-          {quote.marginPct !== undefined && stage !== 'EXPIRED' && stage !== 'BOOKED' && (
+          {/* No price yet (a toll or border cost isn't known): never "R 0". */}
+          {quoteIncomplete(quote.raw) ? (
+            <Mono className="text-body font-semibold text-muted">Incomplete</Mono>
+          ) : (
+            <Mono className="text-body font-semibold text-fg">{wholeRand(quote.amountInclVat)}</Mono>
+          )}
+          {/* A quote has no live margin once it is booked or expired, or while incomplete. */}
+          {quote.marginPct !== undefined && stage !== 'EXPIRED' && stage !== 'BOOKED' && !quoteIncomplete(quote.raw) && (
             <Mono className="text-caption text-faint">
               Margin {quote.marginPct === null ? '—' : formatPercent(quote.marginPct)}
             </Mono>

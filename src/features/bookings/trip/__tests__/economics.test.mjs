@@ -414,3 +414,33 @@ test('fuel burn note (fleet actuals): the figure an estimated fuel cost used', a
   assert.equal(fuelBurnNote(g('actual', { value: 42, source: 'configured' })), null);
   assert.equal(fuelBurnNote(g('estimate', null)), null);
 });
+
+test('Book job: a heavy consignment books as several loads (web d52e3a5 / backend b1c3319)', () => {
+  const pv = parseBookingPreview({ can_book: true, preview: true, load_id: null, booking: {}, loads_planned: [34, 6] });
+  assert.deepEqual(pv.loadsPlanned, [34, 6]);
+  // Absent on a single-load quote and on an older backend.
+  assert.deepEqual(parseBookingPreview({ can_book: true, booking: {} }).loadsPlanned, []);
+  const booked = parseBooking({ id: 10, load_number: 'LD-10', loads: [{ id: 10 }, { id: 11 }] });
+  assert.equal(booked.loadsCreated, 2);
+  assert.equal(parseBooking({ id: 10, load_number: 'LD-10' }).loadsCreated, 1);
+});
+
+test('a rate changed after invoicing: the banner text (web invoiceMismatchText)', async () => {
+  const { invoiceMismatchText } = await import('../economics.ts');
+  const sp = (s) => s.replace(/[\u00a0\u202f]/g, ' ');
+  assert.equal(invoiceMismatchText({}), null);
+  assert.equal(invoiceMismatchText(null), null);
+  const mm = invoiceMismatchText({
+    code: 'invoice_differs_from_rate',
+    invoice_number: 'INV-7',
+    invoice_excl_vat: 31800,
+    load_total_excl_vat: 32700,
+    difference: 900,
+  });
+  assert.equal(mm.title, "Invoice differs from the job's rate");
+  assert.match(sp(mm.detail), /^Invoice INV-7 is R 31 800,00 excl\. VAT; the job is now R 32 700,00 \(R 900,00 more\)\. Issue a credit note or a new invoice\.$/);
+  assert.match(
+    invoiceMismatchText({ code: 'invoice_differs_from_rate' }).detail,
+    /^The invoice no longer matches the job's rate\./,
+  );
+});

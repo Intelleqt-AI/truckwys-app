@@ -55,6 +55,7 @@ import { canSeeInsights, useRole, visibleTabs } from '@/lib/access';
 import { CAPITAL_LAUNCHED } from '@/lib/features';
 import { laneOf, type Load } from '@/lib/ledger';
 import { quoteStage } from '@/lib/quoteStage';
+import { quoteIncomplete } from '@/lib/quoteIncomplete';
 import { useTheme } from '@/theme/ThemeProvider';
 import {
   formatCurrency,
@@ -470,8 +471,12 @@ export function HomeScreen() {
                       subtitle={q.customer}
                       trailing={
                         <View className="items-end gap-1">
-                          <Mono className="text-callout font-semibold text-fg">
-                            {formatCurrency(q.amountInclVat, { maximumFractionDigits: 0 })}
+                          <Mono
+                            className={`text-callout font-semibold ${quoteIncomplete(q.raw) ? 'text-muted' : 'text-fg'}`}
+                          >
+                            {quoteIncomplete(q.raw)
+                              ? 'Incomplete'
+                              : formatCurrency(q.amountInclVat, { maximumFractionDigits: 0 })}
                           </Mono>
                           <View>
                             {/* The stage, not the raw status: a lapsed Draft or Sent quote

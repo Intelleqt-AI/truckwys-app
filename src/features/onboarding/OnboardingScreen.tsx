@@ -4,7 +4,7 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Txt, Mono, TextField, SelectField, Button } from '@/components/ui';
+import { Txt, Mono, TextField, SelectField, Button, RadioRows } from '@/components/ui';
 import { ListSkeleton } from '@/components/feedback';
 import { useCompanyProfile, updateCompanyProfile } from '@/features/more/api';
 import { INDUSTRY_OPTIONS } from '@/lib/companyOptions';
@@ -15,6 +15,8 @@ import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { useAuthStore } from '@/stores/authStore';
 import type { AppStackParamList } from '@/navigation/types';
 import { ImportPanel } from '@/features/import/ImportPanel';
+import { PricingSetupCard } from '@/features/more/FollowUpPrompts';
+import { vatNumberProblem } from '@/lib/finance/validation';
 import { companyIdOf, markOnboardingDone } from './onboardingStorage';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'Onboarding'>;
@@ -31,6 +33,11 @@ export function OnboardingScreen({ navigation }: Props) {
   const [companyName, setCompanyName] = useState('');
   const [industry, setIndustry] = useState('general_freight');
   const [phone, setPhone] = useState('');
+  // Quotes and invoices carry VAT only for a VAT vendor. No default answer: a
+  // company that isn't registered must not start out charging 15% VAT
+  // (Company.vat_registered defaults to on).
+  const [vatRegistered, setVatRegistered] = useState<'yes' | 'no' | ''>('');
+  const [vatNumber, setVatNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [customersImported, setCustomersImported] = useState(0);
   const [vehiclesImported, setVehiclesImported] = useState(0);
@@ -41,6 +48,10 @@ export function OnboardingScreen({ navigation }: Props) {
     setIndustry(str(pick(profile, ['industry']), 'general_freight'));
     const contact = (pick(profile, ['contact']) ?? {}) as Record<string, unknown>;
     setPhone(str(pick(contact, ['phone'])));
+    const onFile = str(pick(profile, ['vat_number']));
+    setVatNumber(onFile);
+    // Only a number already on file answers the question for them.
+    if (onFile.trim()) setVatRegistered('yes');
   }, [profile]);
 
   // Finishing and skipping both end the wizard the same way: mark it done —
@@ -62,12 +73,23 @@ export function OnboardingScreen({ navigation }: Props) {
       toast.error('Please enter a company name');
       return;
     }
+    if (!vatRegistered) {
+      toast.error('Please say whether you are registered for VAT');
+      return;
+    }
+    const vatProblem = vatRegistered === 'yes' ? vatNumberProblem(vatNumber) : null;
+    if (vatProblem) {
+      toast.error(vatProblem);
+      return;
+    }
     setSubmitting(true);
     try {
       await updateCompanyProfile({
         company_name: companyName.trim(),
         industry,
         contact: { phone: phone.trim() },
+        vat_registered: vatRegistered === 'yes',
+        ...(vatRegistered === 'yes' ? { vat_number: vatNumber.replace(/[\s-]/g, '') } : {}),
       });
       invalidateFor(qc, 'company');
       setStep(2);
@@ -148,6 +170,32 @@ export function OnboardingScreen({ navigation }: Props) {
                   placeholder="e.g. +27 11 123 4567"
                   keyboardType="phone-pad"
                 />
+                <View className="gap-1.5">
+                  <RadioRows
+                    label="Are you registered for VAT with SARS?"
+                    value={vatRegistered}
+                    onSelect={(v) => setVatRegistered(v as 'yes' | 'no')}
+                    options={[
+                      { label: 'Yes, we charge VAT', value: 'yes' },
+                      { label: 'No, not VAT registered', value: 'no' },
+                    ]}
+                  />
+                  <Txt className="text-caption text-faint">
+                    {vatRegistered === 'no'
+                      ? 'Your invoices and quotes will show no VAT. You can change this later in Settings → Company.'
+                      : 'VAT vendors add 15% VAT to quotes and tax invoices. You can change this later in Settings → Company.'}
+                  </Txt>
+                </View>
+                {vatRegistered === 'yes' && (
+                  <TextField
+                    label="VAT number (optional)"
+                    value={vatNumber}
+                    onChangeText={setVatNumber}
+                    placeholder="4XXXXXXXXX"
+                    keyboardType="number-pad"
+                    error={vatNumberProblem(vatNumber) ?? undefined}
+                  />
+                )}
                 <Button label="Continue" onPress={handleStep1Submit} loading={submitting} fullWidth />
                 <Button
                   label="Set up later"
@@ -196,6 +244,11 @@ export function OnboardingScreen({ navigation }: Props) {
                 ? `${summaryBits.join(' and ')} imported. Jump in and price your first load. You can add more any time from the app.`
                 : 'Your business is ready. Jump in and create your first quote. You can import your customers and fleet any time from the app.'}
             </Txt>
+            {/* Pricing basics (admins, while any is not set): what quotes use
+                until the company sets its own. */}
+            <View className="w-full">
+              <PricingSetupCard />
+            </View>
             <Button label="Go to dashboard" onPress={finish} fullWidth />
             {/* Vehicles were just offered as their own step, so pointing back
                 at Fleet here asked again for something already answered. */}

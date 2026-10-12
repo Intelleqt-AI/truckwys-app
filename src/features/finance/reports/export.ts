@@ -126,9 +126,12 @@ export async function printReport(args: Parameters<typeof reportHtml>[0]) {
 }
 
 /** Renders the report to a PDF file and opens the share sheet. */
-export async function sharePdf(args: Parameters<typeof reportHtml>[0], name: string) {
+export const sharePdf = (args: Parameters<typeof reportHtml>[0], name: string) => shareHtmlPdf(reportHtml(args), name);
+
+/** Renders ready-made HTML to a PDF file and opens the share sheet. */
+export async function shareHtmlPdf(html: string, name: string) {
   try {
-    const { uri } = await Print.printToFileAsync({ html: reportHtml(args) });
+    const { uri } = await Print.printToFileAsync({ html });
     const target = `${FileSystem.cacheDirectory}truckwys-${slug(name)}.pdf`;
     await FileSystem.copyAsync({ from: uri, to: target });
     if (await Sharing.isAvailableAsync()) {

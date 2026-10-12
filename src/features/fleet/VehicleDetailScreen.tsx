@@ -21,6 +21,7 @@ import {
 import { ErrorState, DetailSkeleton, NotFoundState } from '@/components/feedback';
 import { useVehicle, useVehicleLoads, updateVehicle, deleteVehicle, VEHICLE_STATUSES } from './api';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
+import { TruckFuelCard } from './FleetFuel';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { capacityTons } from '@/features/bookings/quote/types';
 import {
@@ -213,6 +214,9 @@ export function VehicleDetailScreen({ route, navigation }: Props) {
             <DetailRow label="Year" value={str(pick(v, ['year']), '—')} />
             <DetailRow label="Driver" value={str(pick(v, ['driver_name']), 'Unassigned')} mono={false} last />
           </Group>
+
+          {/* Measured fuel use (Cartrack): nothing renders until there is a figure. */}
+          <TruckFuelCard vehicleId={id} />
 
           <Group label="Maintenance">
             <DetailRow label="Last maintenance" value={showDate(str(pick(v, ['last_maintenance_date'])))} />

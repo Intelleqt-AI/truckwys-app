@@ -13,6 +13,7 @@ export type ReportId =
   | 'customers'
   | 'lanes'
   | 'margin'
+  | 'weekly'
   | 'expenses'
   | 'vat';
 

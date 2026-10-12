@@ -25,6 +25,8 @@ export interface ServerCosting {
   forKey: string | null;
   /** The truck fuel figure priced on (resolution.rated_burn): measured by Cartrack, your figure or the standard estimate. */
   ratedBurn: RatedBurn | null;
+  /** Where an approved allowance rate comes from, e.g. 'NBCRFLI minimum R 243,63/night (from 1 Mar 2026)'. */
+  driverRateDetail: string | null;
 }
 
 /**
@@ -34,7 +36,23 @@ export interface ServerCosting {
  * when the server priced the same truck.
  */
 export function useServerCosting(payload: Record<string, unknown> | null): ServerCosting | null {
+  return useServerCostingState(payload).costing;
+}
+
+/**
+ * Same, plus whether the answer for the CURRENT payload has come back (or the
+ * request failed / the endpoint doesn't exist, so none is coming). `costing`
+ * keeps showing the previous answer meanwhile; `settled` is for the few
+ * decisions that must not be taken on stand-in company figures, such as the
+ * reopen "costs changed" notice (web fbe0c68: a false "Costs up" on a quote
+ * that hasn't changed).
+ */
+export function useServerCostingState(payload: Record<string, unknown> | null): {
+  costing: ServerCosting | null;
+  settled: boolean;
+} {
   const [result, setResult] = useState<{ key: string; value: ServerCosting } | null>(null);
+  const [settledKey, setSettledKey] = useState<string | null>(null);
   const reqRef = useRef(0);
   const key = payload ? JSON.stringify(payload) : '';
 
@@ -45,7 +63,12 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
       try {
         const { _suggest_key: forKey, ...data } = payload as Record<string, unknown>;
         const res = await postData<Record<string, unknown>>({ url: ENDPOINT, data });
-        if (id !== reqRef.current || !res || res.success !== true || typeof res.inputs !== 'object') return;
+        if (id !== reqRef.current) return;
+        if (!res || res.success !== true || typeof res.inputs !== 'object') {
+          setSettledKey(key); // an answer with no costing in it: none is coming
+          return;
+        }
+        setSettledKey(key);
         setResult({
           key,
           value: {
@@ -56,6 +79,10 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
             ratedBurn:
               ((res.resolution as Record<string, unknown> | undefined)?.rated_burn as RatedBurn | null | undefined) ??
               null,
+            driverRateDetail: (() => {
+              const d = (res.resolution as Record<string, unknown> | undefined)?.driver_rate_detail;
+              return typeof d === 'string' && d ? d : null;
+            })(),
             suggestedVehicleTypeId:
               ((res.resolution as Record<string, unknown> | undefined)?.suggested_vehicle_type_id as
                 | number
@@ -67,6 +94,7 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
       } catch (e) {
         // No endpoint on this backend (or method not allowed / not built).
         if ([404, 405, 501].includes(Number((e as { status?: number })?.status))) unavailable = true;
+        if (id === reqRef.current) setSettledKey(key);
       }
     }, 600);
     return () => clearTimeout(t);
@@ -74,5 +102,6 @@ export function useServerCosting(payload: Record<string, unknown> | null): Serve
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  return result?.value ?? null;
+  const costing = result?.value ?? null;
+  return { costing, settled: !payload || unavailable || settledKey === key };
 }

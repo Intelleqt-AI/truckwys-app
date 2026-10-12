@@ -12,6 +12,8 @@ export interface AuthUser {
   company?: number | { id: number; name?: string } | null;
   /** True for the single shared public demo company (Company.is_demo). */
   is_demo?: boolean;
+  /** A team test company (Company.is_test_company): shows the quote builder's testing tools. */
+  is_test_company?: boolean;
   /** Per-UserSession (this login's own token), not per-company — whether
    *  THIS demo session has already used its one free quote. */
   demo_quote_used?: boolean;

@@ -14,7 +14,6 @@ import {
   type BookingPreview,
   parseCandidates,
   parseEconomics,
-  returnHistoryText,
   type Candidate,
   type CandidateDirection,
   type Economics,
@@ -313,17 +312,39 @@ export function useCompanyProfileData() {
  * Re-check the official fuel price now: POST fuel-prices/refresh/ (newer
  * backends, any user), else the older GET ?force=true.
  */
-export async function refreshFuelPrices(): Promise<{ ok: boolean; message: string | null }> {
+export interface FuelRefreshResult {
+  ok: boolean;
+  /** A newer official price came in. */
+  changed: boolean;
+  /** The server declined to re-check yet (neutral, not an error). */
+  throttled: boolean;
+  message: string | null;
+  /** The answer, same shape as GET fuel-prices/current/ (null on the old fallback). */
+  prices: Record<string, unknown> | null;
+  /** The official price's effective-from after the refresh. */
+  effectiveFrom: string | null;
+}
+
+export async function refreshFuelPrices(): Promise<FuelRefreshResult> {
   try {
     const res = (await postData<Record<string, unknown>>({ url: 'fuel-prices/refresh/', data: {} })) ?? {};
     // refresh {attempted, ok, throttled, changed, message}
-    const r = (res.refresh ?? res) as Record<string, unknown>;
-    return { ok: r.ok !== false, message: typeof r.message === 'string' && r.message ? r.message : null };
+    const r = (res.refresh ?? {}) as Record<string, unknown>;
+    const official = ((res.company_price as Record<string, unknown> | undefined)?.official ?? {}) as Record<string, unknown>;
+    const eff = official.effective_from ?? res.effective_from;
+    return {
+      ok: r.ok !== false,
+      changed: r.changed === true,
+      throttled: r.throttled === true,
+      message: typeof r.message === 'string' && r.message ? r.message : null,
+      prices: res,
+      effectiveFrom: typeof eff === 'string' && eff ? eff : null,
+    };
   } catch (e) {
     const status = Number((e as { status?: number }).status);
     if ([404, 405, 501].includes(status)) {
-      await fetchData('fuel-prices/current/?force=true');
-      return { ok: true, message: null };
+      const prices = await fetchData<Record<string, unknown>>('fuel-prices/current/?force=true');
+      return { ok: true, changed: false, throttled: false, message: null, prices: prices ?? null, effectiveFrom: null };
     }
     throw e;
   }
@@ -350,14 +371,20 @@ export const fetchRecentLocations = (q?: string) =>
 
 // Fire-and-forget: builds the recent-locations history, never blocks or
 // surfaces an error to the location-picking flow.
-export const recordLocationPick = (label: string, lat: number, lon: number) =>
+export const recordLocationPick = (label: string, lat: number, lon: number, countryCode?: string) =>
   postData({
     url: 'location/recent/',
     // LocationSearchHistory.lat/lon are DecimalField(max_digits=9,
     // decimal_places=6) — one decimal place tighter than the (12,7) quote
     // coordinate columns roundCoord targets, so round to this column's own
-    // precision rather than reusing that helper.
-    data: { location_text: label, lat: roundTo(lat, 6), lon: roundTo(lon, 6) },
+    // precision rather than reusing that helper. country_code (backend
+    // 0159) lets a reused foreign pick be recognised before the route is in.
+    data: {
+      location_text: label,
+      lat: roundTo(lat, 6),
+      lon: roundTo(lon, 6),
+      ...(countryCode ? { country_code: countryCode } : {}),
+    },
   }).catch(() => {});
 
 // X-TW-Quote-Rules: 1 opts into the QUOTE-RULES response shape (unknown
@@ -368,18 +395,8 @@ export const QUOTE_RULES_HEADER = { 'X-TW-Quote-Rules': '1' };
 export const calculateRoute = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'route/calculate/', data, config: { headers: QUOTE_RULES_HEADER } });
 
-export const analyzeQuote = (data: Record<string, unknown>) =>
-  postData<Record<string, unknown>>({ url: 'quotes/analyze/', data });
-
 export const guardQuote = (data: Record<string, unknown>) =>
   postData<Record<string, unknown>>({ url: 'quotes/guard/', data });
-
-export const benchmarkQuote = (origin: string, destination: string, vehicleType: string) =>
-  fetchData<Record<string, unknown>>(
-    `quotes/benchmark/?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(
-      destination,
-    )}&vehicle_type=${encodeURIComponent(vehicleType.toLowerCase())}`,
-  );
 
 // ── AI quote (chat + voice) ─────────────────────────────────────────────────
 
@@ -451,14 +468,56 @@ export const sendQuote = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `quotes/${id}/send_to_customer/`, data: {} });
 
 // Won/lost capture. PATCH, not POST — matches the web outcome modal.
+// A loss carries the optional loss_reason code and note (lib/pricing
+// lossReasonPayload) and the same reason as the free-text rejection_reason.
 export interface QuoteOutcome {
   outcome: 'accepted' | 'rejected';
+  /** The price the customer agreed, excl. VAT (kept with the outcome only). */
   final_price?: number;
+  loss_reason?: string;
+  loss_reason_note?: string;
   rejection_reason?: string;
 }
 
-export const recordQuoteOutcome = (id: string | number, data: QuoteOutcome) =>
-  patchData({ url: `quotes/${id}/outcome/`, data });
+/**
+ * Accepted and Declined go through update_status: it records the outcome (the
+ * win model's label) and the optional loss reason; a plain PATCH does neither.
+ * Any other status is a plain PATCH.
+ */
+export const updateQuoteStatus = (
+  id: string | number,
+  status: string,
+  extra: Record<string, unknown> = {},
+) =>
+  status === 'DECLINED' || status === 'ACCEPTED'
+    ? patchData<Record<string, unknown>>({ url: `quotes/${id}/update_status/`, data: { status, ...extra } })
+    : patchQuote(id, { status });
+
+/**
+ * The answer moves the quote too (Accepted -> ACCEPTED, Rejected -> DECLINED).
+ * The outcome endpoint does that itself on newer APIs; when its reply doesn't
+ * show the new status, update_status follows (idempotent: the outcome row is
+ * kept), as on the web.
+ */
+export async function recordQuoteOutcome(
+  id: string | number,
+  data: QuoteOutcome,
+  currentStatus?: string,
+) {
+  const res = await patchData<Record<string, unknown> | null>({ url: `quotes/${id}/outcome/`, data });
+  const target = data.outcome === 'accepted' ? 'ACCEPTED' : 'DECLINED';
+  const current = str(pick(res ?? {}, ['status'])).toUpperCase() || (currentStatus ?? '').toUpperCase();
+  const moved =
+    target === 'ACCEPTED' ? ['ACCEPTED', 'IT', 'COMPLETED'].includes(current) : current === 'DECLINED';
+  if (!moved) {
+    const { outcome: _o, final_price: _f, ...extra } = data;
+    await patchData({
+      url: `quotes/${id}/update_status/`,
+      data: { status: target, ...(target === 'DECLINED' ? extra : {}) },
+    });
+  }
+  return res;
+}
 
 // Driver/vehicle are optional — converting with neither leaves the booking
 // unassigned, to be picked up later from the load detail screen.
@@ -656,38 +715,3 @@ export const closeLoadCosts = (id: string | number, closed: boolean) =>
 /** POST loads/{id}/unlink-return/ (either leg). */
 export const unlinkReturnLoad = (id: string | number) =>
   postData<Record<string, unknown>>({ url: `loads/${id}/unlink-return/`, data: {} });
-
-/**
- * Fallback for backends whose /quotes/analyze/ predates `return_load_history`:
- * one pricing-analysis call per lane, only once the analysis has answered
- * without the field. Null on any failure.
- */
-export function useReturnLoadHistory(
-  lane: { origin: string; destination: string; pickup?: string; delivery?: string } | null,
-  needed: boolean,
-) {
-  return useQuery<string | null>({
-    queryKey: ['return-load-history', lane?.origin ?? '', lane?.destination ?? ''],
-    enabled: needed && !!lane && !!lane.origin && !!lane.destination,
-    retry: false,
-    staleTime: 30 * 60 * 1000,
-    queryFn: async () => {
-      try {
-        const res = await postData<Record<string, unknown>>({
-          url: 'quotes/pricing-analysis/',
-          data: {
-            origin: lane!.origin,
-            destination: lane!.destination,
-            pickup_location: lane!.pickup ?? lane!.origin,
-            delivery_location: lane!.delivery ?? lane!.destination,
-            trip_type: 'ONE_WAY',
-          },
-          config: { timeout: 10000 },
-        });
-        return returnHistoryText(res);
-      } catch {
-        return null;
-      }
-    },
-  });
-}

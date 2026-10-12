@@ -13,7 +13,6 @@ import {
   StatusPill,
   SelectField,
   TextField,
-  RadioRows,
   Badge,
   Banner,
   Button,
@@ -33,9 +32,9 @@ import {
   useBookedQuotedMargin,
   sendQuote,
   recordQuoteOutcome,
+  updateQuoteStatus,
   deleteQuote,
   downloadQuotePdf,
-  patchQuote,
 } from './api';
 import { num, str, pick, asArray } from '@/lib/api/list';
 import { postData } from '@/lib/api/client';
@@ -69,6 +68,16 @@ import { actualsView, percent } from './trip/economics';
 import { useFollowUp, useFuelAdjustment } from './followupsApi';
 import { DraftClauseLine, FollowUpCard, FuelAdjustmentGroup } from './FollowUps';
 import { showFollowUp } from '@/lib/followups';
+import {
+  LOSS_REASONS,
+  agreedMarginOf,
+  agreedPriceOf,
+  lossReasonPayload,
+  pricingDecisionOf,
+  type LossReason,
+} from '@/lib/pricing';
+import { PricingDecisionRows, AgreedPriceRows } from './quote/pricing/PricingDecisionRows';
+import { LossReasonDialog } from './quote/pricing/LossReasonDialog';
 
 type Props = NativeStackScreenProps<AppStackParamList, 'QuoteDetail'>;
 
@@ -88,13 +97,23 @@ const LEGACY_STATUS_LABELS: Record<string, string> = {
   COMPLETED: 'Completed',
 };
 
-// Same fixed reasons the web outcome modal offers.
-const REJECTION_REASONS = [
-  'Price too high',
-  'Went with competitor',
-  'Job cancelled',
-  'Other',
-] as const;
+// The stored loss reason: the code's label and the note, else the free text.
+// Detail responses carry loss_reason as {reason, note} (null when none).
+function lossReasonText(q: Record<string, unknown>): string {
+  const lr = (q.loss_reason ?? null) as { reason?: string; note?: string } | null;
+  const label = LOSS_REASONS.find((r) => r.code === lr?.reason)?.label;
+  const text = label
+    ? [label, (lr?.note || '').trim()].filter(Boolean).join(': ')
+    : String(q.rejection_reason || '');
+  // Amounts typed in a note ("R 21 500") never split across lines.
+  return text.replace(/\bR (?=\d)/g, 'R\u00A0').replace(/(\d) (?=\d{3}\b)/g, '$1\u00A0');
+}
+
+/** "R 25 100" when the cents are zero, else "R 1 448,78". */
+const formatRand = (n: number) =>
+  Math.abs(Math.round(n * 100)) % 100 === 0
+    ? formatCurrency(n, { maximumFractionDigits: 0 })
+    : formatCurrency(n);
 
 export function QuoteDetailScreen({ route, navigation }: Props) {
   const { colors } = useTheme();
@@ -129,7 +148,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [outcomeType, setOutcomeType] = useState<'accepted' | 'rejected' | null>(null);
+  const [outcomeType, setOutcomeType] = useState<'accepted' | null>(null);
   const [outcomeBusy, setOutcomeBusy] = useState(false);
   const [finalPrice, setFinalPrice] = useState('');
   const finalPriceNum = parseNum(finalPrice);
@@ -141,8 +160,8 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const finalPriceInvalid =
     finalPrice.trim() !== '' &&
     (finalPriceNum == null || finalPriceNum < 0 || finalPriceNum > FINAL_PRICE_MAX);
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [customReason, setCustomReason] = useState('');
+  // The loss-reason step: marking a quote rejected (outcome) or declined (status).
+  const [lossFor, setLossFor] = useState<'outcome' | 'status' | null>(null);
 
   // A 404 means the quote was deleted or moved, which retrying can't fix.
   if (isError && !data && (error as { status?: number } | null)?.status === 404) {
@@ -192,12 +211,27 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const tollsUnknown =
     costingInputs.tolls_unknown === true ||
     (serverTollLine != null && serverTollLine.amount === null);
-  const costFloor = tollsUnknown && serverFloor === null ? null : (serverFloor ?? storedFloor);
+  // The server says a cost isn't known (border costs not on file, tolls): no
+  // floor, no margin, never an R 0 line (web 44a9954). customer_price then
+  // comes back null/incomplete, so the VAT rows below drop out on their own.
+  const rawCp = rawPrice && typeof rawPrice === 'object' ? (rawPrice as Record<string, unknown>) : null;
+  const pricingIncomplete =
+    pick(q, ['pricing_complete']) === false || rawCp?.incomplete === true;
+  const incompleteReason =
+    (typeof rawCp?.incomplete_reason === 'string' && rawCp.incomplete_reason) ||
+    (tollsUnknown ? 'Incomplete: tolls unknown' : 'Incomplete: some costs are not known yet');
+  const floorUnknown = tollsUnknown || pricingIncomplete;
+  const costFloor = floorUnknown && serverFloor === null ? null : (serverFloor ?? storedFloor);
   const marginPct = costFloor !== null && total > 0 ? ((total - costFloor) / total) * 100 : null;
   const targetMargin = Math.min(
     Math.max(num(pick(company ?? {}, ['margin_target_pct'])) || 10, 1),
     40,
   );
+  // How it was priced: the stored pricing decision, read honestly (never
+  // recomputed), and the price the customer agreed when it differs.
+  const decision = pricingDecisionOf(q as Parameters<typeof pricingDecisionOf>[0]);
+  const agreed = agreedPriceOf(q);
+  const agreedMargin = agreed !== null ? agreedMarginOf(q) : null;
   const roundTrip = str(pick(q, ['trip_type'])).toUpperCase() === 'ROUND_TRIP';
   const token = str(pick(q, ['token', 'view_token']));
   const shareUrl = token ? quoteShareUrl(id, token) : undefined;
@@ -417,6 +451,11 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
       ? `${Math.ceil((validMs - Date.now()) / 3600_000)} h left`
       : '';
   const outcome = str(pick(q, ['outcome'])).toLowerCase();
+  // Why a declined quote was lost: the stored reason and note.
+  const lossText =
+    (status === 'DECLINED' || outcome === 'rejected') && (q.rejection_reason || (q.loss_reason as { reason?: string } | null)?.reason)
+      ? lossReasonText(q)
+      : '';
   // Web only offers won/lost capture while the quote is still open.
   const canRecordOutcome = !outcome && ['SENT', 'DRAFT'].includes(status);
 
@@ -548,41 +587,66 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
   const closeOutcome = () => {
     setOutcomeType(null);
     setFinalPrice('');
-    setRejectionReason('');
-    setCustomReason('');
   };
 
-  const reasonText = rejectionReason === 'Other' ? customReason.trim() : rejectionReason;
-  const canSubmitOutcome = outcomeType === 'accepted' ? !finalPriceInvalid : !!reasonText;
+  const canSubmitOutcome = !finalPriceInvalid;
 
+  // Accepted: the agreed price is optional and kept with the outcome only (the
+  // booking and invoice use the quote total).
   const submitOutcome = () => {
-    if (!outcomeType || !canSubmitOutcome) return;
-    const payload =
-      outcomeType === 'accepted'
-        ? {
-            outcome: 'accepted' as const,
-            // Blank is legitimate here ("keep the quoted total"), but an
-            // unparseable value is not — Number() silently dropped it and closed
-            // the quote at the old total.
-            ...(finalPriceNum != null && finalPriceNum > 0
-              ? { final_price: round2(finalPriceNum) }
-              : {}),
-          }
-        : { outcome: 'rejected' as const, rejection_reason: reasonText };
+    if (outcomeType !== 'accepted' || !canSubmitOutcome) return;
+    const payload = {
+      outcome: 'accepted' as const,
+      // Blank is legitimate here ("keep the quoted total"), but an
+      // unparseable value is not — Number() silently dropped it and closed
+      // the quote at the old total.
+      ...(finalPriceNum != null && finalPriceNum > 0 ? { final_price: round2(finalPriceNum) } : {}),
+    };
     run(
       setOutcomeBusy,
       async () => {
-        await recordQuoteOutcome(id, payload);
+        await recordQuoteOutcome(id, payload, status);
         closeOutcome();
       },
-      outcomeType === 'accepted' ? 'Marked as won' : 'Marked as lost',
+      'Marked as won',
     );
+  };
+
+  // Rejected / Declined: an optional loss reason first (nothing is required).
+  // Both routes send the code, the note and the same words as rejection_reason.
+  const confirmLoss = (reason: LossReason) => {
+    const extra = lossReasonPayload(reason);
+    if (lossFor === 'outcome') {
+      run(
+        setOutcomeBusy,
+        async () => {
+          await recordQuoteOutcome(id, { outcome: 'rejected', ...extra }, status);
+          setLossFor(null);
+        },
+        'Marked as lost',
+      );
+    } else {
+      run(
+        setStatusBusy,
+        async () => {
+          await updateQuoteStatus(id, 'DECLINED', extra);
+          setLossFor(null);
+        },
+        'Status updated',
+      );
+    }
   };
 
   const editQuote = () => navigation.navigate('CreateQuote', { quoteId: id });
   const changeStatus = (s: string) => {
     if (s === status || statusBusy || sendChecking) return;
-    const go = () => run(setStatusBusy, () => patchQuote(id, { status: s }), 'Status updated');
+    // Declined asks for an optional loss reason first, then goes through
+    // update_status, which records the outcome the win model learns from.
+    if (s === 'DECLINED') {
+      setLossFor('status');
+      return;
+    }
+    const go = () => run(setStatusBusy, () => updateQuoteStatus(id, s), 'Status updated');
     if (s === 'SENT') void guardedSend(go);
     else go();
   };
@@ -613,11 +677,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
     }
   };
 
+  // Sharing the link is sending it (§11): an open quote goes through the same
+  // send check as Send, so a blocked quote can't go out by link either.
   const share = async () => {
     if (!shareUrl) return toast.info('No share link yet. Send the quote first');
-    await Share.share({
-      message: `Truckwys quote ${str(pick(q, ['quote_number']), '')}: ${shareUrl}`,
-    });
+    const go = () =>
+      Share.share({
+        message: `Truckwys quote ${str(pick(q, ['quote_number']), '')}: ${shareUrl}`,
+      });
+    if (status === 'DRAFT' || status === 'SENT') await guardedSend(go);
+    else await go();
   };
 
   const confirmDelete = () =>
@@ -703,7 +772,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         icon: 'checkCircle',
         onPress: () => setOutcomeType('accepted'),
       },
-      { label: 'Mark rejected', icon: 'x', onPress: () => setOutcomeType('rejected') },
+      { label: 'Mark rejected', icon: 'x', onPress: () => setLossFor('outcome') },
     );
   }
   menuActions.push({
@@ -916,13 +985,16 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             </Txt>
             <Mono className="text-heading font-semibold text-fg">{formatCurrency(total)}</Mono>
           </View>
+          {/* What the customer agreed when it differs from the quote. Display
+              only: the booking and invoice use the quoted total. */}
+          {agreed !== null && <AgreedPriceRows agreed={agreed} quoted={total} margin={agreedMargin} />}
           {status === 'DRAFT' && (
             <DraftClauseLine quote={q} adjustment={fuelAdjustment} className="border-b border-line-row px-3.5 py-2.5" />
           )}
-          {costFloor === null && tollsUnknown && (
+          {costFloor === null && floorUnknown && (
             <DetailRow
               label="Cost floor"
-              hint="Incomplete: tolls unknown"
+              hint={incompleteReason}
               value="—"
               valueColor={colors.danger}
             />
@@ -961,6 +1033,17 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
               <DetailRow label="VAT" value="Not charged (not VAT-registered)" mono={false} last />
             )
           ) : null}
+        </Group>
+      )}
+
+      {decision && !perTonne && (
+        <Group label="How it was priced">
+          <PricingDecisionRows
+            decision={decision}
+            marginShownElsewhere={costFloor !== null && marginPct !== null}
+            floorIncomplete={floorUnknown}
+            tollsUnknown={tollsUnknown}
+          />
         </Group>
       )}
 
@@ -1021,7 +1104,14 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             hintColor={lapsed ? colors.danger : undefined}
           />
         ) : null}
-        {createdAt ? <DetailRow label="Created" value={formatDate(createdAt)} last /> : null}
+        {createdAt ? (
+          <DetailRow
+            label="Created"
+            value={formatDate(createdAt)}
+            last={!lossText}
+          />
+        ) : null}
+        {lossText ? <DetailRow label="Why it was lost" value={lossText} mono={false} last /> : null}
       </Group>
 
       {notes ? (
@@ -1082,7 +1172,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
         />
       )}
 
-      {outcomeType && (
+      {outcomeType === 'accepted' && (
         <Modal visible transparent animationType="fade" onRequestClose={closeOutcome}>
           <TouchableOpacity
             activeOpacity={1}
@@ -1095,56 +1185,36 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
                 onPress={() => {}}
                 className="rounded-panel border border-line bg-surface p-5"
               >
-                <Txt className="text-heading font-semibold text-fg">
-                  {outcomeType === 'accepted' ? 'Mark quote as accepted' : 'Mark quote as rejected'}
-                </Txt>
+                <Txt className="text-heading font-semibold text-fg">Mark quote as accepted</Txt>
 
-                {outcomeType === 'accepted' ? (
-                  <View className="mt-4">
-                    <TextField
-                      label="Final agreed price (optional)"
-                      placeholder={formatNumber(total, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                      prefix="R"
-                      keyboardType="decimal-pad"
-                      numeric
-                      decimals={2}
-                      error={
-                        finalPriceInvalid
-                          ? finalPriceNum != null && finalPriceNum > FINAL_PRICE_MAX
-                            ? "That's too large a price to record"
-                            : 'Enter a number, e.g. 12 500,00'
-                          : undefined
-                      }
-                      value={finalPrice}
-                      onChangeText={setFinalPrice}
-                    />
-                    <Txt className="mt-1.5 text-caption text-faint">
-                      Leave blank to keep the quoted {formatCurrency(total)}.
-                    </Txt>
-                  </View>
-                ) : (
-                  <View className="mt-4 gap-3.5">
-                    {/* Inline rows, not a SelectField — its picker is itself a
-                      Modal, and nesting Modals is unreliable on iOS. */}
-                    <RadioRows
-                      label="Reason"
-                      options={REJECTION_REASONS.map((r) => ({ label: r, value: r }))}
-                      value={rejectionReason}
-                      onSelect={setRejectionReason}
-                    />
-                    {rejectionReason === 'Other' && (
-                      <TextField
-                        label="Please specify"
-                        placeholder="Why was this quote lost?"
-                        value={customReason}
-                        onChangeText={setCustomReason}
-                      />
-                    )}
-                  </View>
-                )}
+                <View className="mt-4">
+                  <TextField
+                    label="Final price agreed, excl. VAT (optional)"
+                    placeholder={formatNumber(total, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                    prefix="R"
+                    keyboardType="decimal-pad"
+                    numeric
+                    decimals={2}
+                    error={
+                      finalPriceInvalid
+                        ? finalPriceNum != null && finalPriceNum > FINAL_PRICE_MAX
+                          ? "That's too large a price to record"
+                          : 'Enter a number, e.g. 12 500,00'
+                        : undefined
+                    }
+                    value={finalPrice}
+                    onChangeText={setFinalPrice}
+                  />
+                  {/* The agreed price is kept with the outcome only (pricing
+                      insights): billing follows the quote's own total. */}
+                  <Txt className="mt-1.5 text-caption text-faint">
+                    Kept with the outcome for pricing insights. The booking and invoice use the quote
+                    total, {formatRand(total)} excl. VAT; edit the quote to change it.
+                  </Txt>
+                </View>
 
                 <View className="mt-5 flex-row gap-2.5">
                   <View className="flex-1">
@@ -1152,8 +1222,7 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
                   </View>
                   <View className="flex-1">
                     <Button
-                      label={outcomeType === 'accepted' ? 'Mark accepted' : 'Mark rejected'}
-                      variant={outcomeType === 'accepted' ? 'primary' : 'danger'}
+                      label="Mark accepted"
                       loading={outcomeBusy}
                       disabled={!canSubmitOutcome}
                       onPress={submitOutcome}
@@ -1165,6 +1234,17 @@ export function QuoteDetailScreen({ route, navigation }: Props) {
             </KeyboardAvoidingView>
           </TouchableOpacity>
         </Modal>
+      )}
+
+      {lossFor && (
+        <LossReasonDialog
+          quoteNumber={str(pick(q, ['quote_number'])) || undefined}
+          title={lossFor === 'outcome' ? 'Mark quote as rejected' : 'Mark quote as declined'}
+          confirmLabel={lossFor === 'outcome' ? 'Mark rejected' : 'Mark declined'}
+          busy={lossFor === 'outcome' ? outcomeBusy : statusBusy}
+          onCancel={() => setLossFor(null)}
+          onConfirm={confirmLoss}
+        />
       )}
     </SheetScreen>
   );

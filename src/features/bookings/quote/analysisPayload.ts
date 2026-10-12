@@ -1,5 +1,5 @@
-// The quote rules' inputs that /quotes/analyze/ and /quotes/ai-price-analysis/
-// take with every request (QUOTE-RULES §8): the same trip, truck and cost
+// The quote rules' inputs that the pricing analysis (quotes/pricing-analysis/, via
+// pricing/flags.ts) takes with every request (QUOTE-RULES §8): the same trip, truck and cost
 // flags the builder priced on, so the server's floor is the builder's.
 // Pure, no imports: runs under `node --test`.
 

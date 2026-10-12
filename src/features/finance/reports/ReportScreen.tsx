@@ -13,6 +13,7 @@ import { CustomerStatement } from './CustomerStatement';
 import { DebtorsAge } from './DebtorsAge';
 import { ExpenseReport } from './ExpenseReport';
 import { LaneMargin } from './LaneMargin';
+import { WeeklyMargin } from './WeeklyMargin';
 import { ProfitLoss } from './ProfitLoss';
 import { RevenueByCustomer } from './RevenueByCustomer';
 import { RevenueByLane } from './RevenueByLane';
@@ -90,6 +91,8 @@ export function ReportScreen({ navigation, route }: Props) {
         return <RevenueByLane {...props} />;
       case 'margin':
         return <LaneMargin {...props} />;
+      case 'weekly':
+        return <WeeklyMargin {...props} />;
       case 'expenses':
         return <ExpenseReport {...props} />;
       case 'vat':

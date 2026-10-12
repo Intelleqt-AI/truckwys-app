@@ -4,9 +4,10 @@ import type { GeoPoint } from '@/lib/routeGeometry';
 import { extractCode, roundCoord, round2, type Loc, type StopEntry } from './types';
 
 // The quote save payload (DRF contract). Additive keys only: `is_international`
-// (left out when the route/points don't say either way) and the §9 pricing
-// snapshot (fuel_price_used … empty_return_included), which older backends
-// ignore.
+// (left out when the route/points don't say either way), the §9 pricing
+// snapshot (fuel_price_used … empty_return_included) and `pricing_decision`
+// (what the pricing analysis showed and which price was picked), which older
+// backends ignore.
 
 export interface BuildQuotePayloadInput {
   customerId: string;
@@ -24,13 +25,21 @@ export interface BuildQuotePayloadInput {
   company: Record<string, unknown> | undefined;
   validUntil: string;
   tripType: 'ONE_WAY' | 'ROUND_TRIP';
-  winProb: number;
   stops: StopEntry[];
   routeGeometry: GeoPoint[];
   /** The R/km the base rate was priced at (blank or zero saves nothing). */
   baseRateNum: number;
-  /** The market price check applied to this quote, if any. */
-  aiApplied: { logId: number | null; key: string; winProbability: number | null } | null;
+  /**
+   * The pricing analysis answers exactly the values being saved. Only then is
+   * the margin sent (an analysis still refreshing would save a stale figure)
+   * and pricing_decision attached.
+   */
+  analysisCurrent: boolean;
+  /**
+   * pricing_decision (quote/pricing/analysis pricingDecision) for the price
+   * saved, or null: per-tonne quotes, no analysis, or one that is not current.
+   */
+  pricingDecision: Record<string, unknown> | null;
   /**
    * route_snapshot to save (an object; the API caps it at 200 KB and rejects
    * anything else). Null leaves whatever is already stored alone: a PATCH
@@ -72,11 +81,11 @@ export function buildQuotePayload(
     company,
     validUntil,
     tripType,
-    winProb,
     stops,
     routeGeometry,
     baseRateNum,
-    aiApplied,
+    analysisCurrent,
+    pricingDecision,
     routeSnapshot,
     pricing,
     costingInputs,
@@ -126,8 +135,9 @@ export function buildQuotePayload(
     additional_charges: round2(costs.crossBorderCost + serviceCharge),
     total_amount: round2(costs.total),
     // One margin definition: (price − cost floor) / price. Sent only when the
-    // floor is known, so a save never wipes a stored figure with a guess.
-    ...(costs.costing.margin_pct !== null
+    // floor is known, so a save never wipes a stored figure with a guess, and
+    // only from an analysis of exactly these values (not one still refreshing).
+    ...(analysisCurrent && costs.costing.margin_pct !== null
       ? { margin_percentage: Math.max(-999.99, Math.min(999.99, round2(costs.costing.margin_pct))) }
       : {}),
     notes,
@@ -136,13 +146,9 @@ export function buildQuotePayload(
     sla_hours: num(pick(company ?? {}, ['default_sla_hours'])) || 48,
     valid_until: validUntil,
     trip_type: tripType,
-    // The win chance shown for an applied market price, else the analysis's.
-    win_probability:
-      aiApplied?.winProbability != null
-        ? Math.round(aiApplied.winProbability * 100)
-        : winProb
-          ? Math.round(winProb * 100)
-          : null,
+    // No win_probability from here: the server sets it from the win model's
+    // chance at the final price (model level only).
+    ...(pricingDecision ? { pricing_decision: pricingDecision } : {}),
     // The per-km rate the base was priced at (a Quote field since 2026-09).
     base_rate_per_km: baseRateNum > 0 ? round2(baseRateNum) : null,
     ...(routeSnapshot

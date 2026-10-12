@@ -5,6 +5,7 @@ import { Icon, Badge, Button, Card, TextField, Txt, Label, Mono, INPUT_TEXT } fr
 import { useTheme } from '@/theme/ThemeProvider';
 import { asArray, num, str, pick } from '@/lib/api/list';
 import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
+import { countryNear } from '@/lib/locationCountry';
 import { suggestLocations, fetchRecentLocations, recordLocationPick } from '../api';
 import { roundCoord, isForeignCc, type Loc, type LocSuggest } from './types';
 
@@ -307,7 +308,31 @@ function LocationFieldImpl({
                 onChange(r);
                 setText(r.label);
                 setResults([]);
-                recordLocationPick(r.label, r.lat, r.lon);
+                if (r.cc) {
+                  recordLocationPick(r.label, r.lat, r.lon, r.cc);
+                  return;
+                }
+                // A "used before" pick is stored without its country, which drives
+                // cross-border detection before the route is in. Look it up from
+                // the geocoder (the result nearest the saved point), apply it if
+                // this is still the pick, and record it for next time (web e4389e3).
+                const picked = r;
+                suggestLocations(picked.label)
+                  .then((raw) => {
+                    const cc = countryNear(
+                      asArray(raw).map((x) => {
+                        const s = toLocSuggest(x);
+                        return { lat: s.lat, lon: s.lon, country_code: s.cc };
+                      }),
+                      picked.lat,
+                      picked.lon,
+                    );
+                    if (cc && chosen.current === picked.label) {
+                      onChange({ ...picked, cc });
+                    }
+                    recordLocationPick(picked.label, picked.lat, picked.lon, cc);
+                  })
+                  .catch(() => recordLocationPick(picked.label, picked.lat, picked.lon));
               }}
               className="flex-row items-center gap-2.5 border-b border-line-row px-3 py-3"
             >

@@ -181,9 +181,8 @@ export function LoadDetailScreen({ route, navigation }: Props) {
         const driverName = str(pick(l, ['driver_name']));
         const vehicleInfo = str(pick(l, ['vehicle_info']));
         const meta = [driverName, vehicleInfo].filter(Boolean).join(' · ');
-        // The check attests to an assignment, not to lifecycle position: the
-        // backend only enforces driver+vehicle for the ASSIGNED status itself,
-        // so a load can legitimately reach IN_TRANSIT with neither. Deriving
+        // The check attests to an assignment, not to lifecycle position: a load
+        // can legitimately be Assigned or in transit with neither. Deriving
         // `done` from the same `meta` that gets rendered makes a checkmark over
         // "Not yet assigned" unrepresentable.
         return { ...base, done: base.done && !!meta, meta: meta || 'Not yet assigned' };
@@ -244,11 +243,11 @@ export function LoadDetailScreen({ route, navigation }: Props) {
 
   const changeStatus = (next: string) => {
     if (next === status || busy) return;
-    // Backend requires a vehicle to reach Assigned — driver is optional. If
-    // the vehicle is missing, open the assign screen right here instead of
-    // letting the PATCH 400. Confirming it also moves the status
-    // (activateOnAssign). Mirrors web's Bookings.tsx (vehicle-only check).
-    if (next === 'ASSIGNED' && !current.vehicleId) {
+    // Vehicle and driver are both optional for Assigned. With neither on the
+    // load, open the assign screen right here so one can be picked (or skipped)
+    // in one step; confirming also moves the status (activateOnAssign).
+    // Mirrors web's Bookings.tsx.
+    if (next === 'ASSIGNED' && !current.vehicleId && !current.driverId) {
       nav.openAssign({
         mode: 'reassign',
         loadId: id,

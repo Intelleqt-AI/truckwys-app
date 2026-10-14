@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchData } from '@/lib/api/client';
 
-// Fast Pay is not live (lib/features.ts CAPITAL_LAUNCHED), so nothing in the
-// app applies for it; the Capital screen only shows the receivables Fast Pay
-// would work on and the invoice checks that would hold invoices back.
+// Fast Pay is not live (lib/features.ts CAPITAL_LAUNCHED), so the app has no
+// in-app request: an eligible invoice applies on the partner's own site (see
+// MERCHANT_CAPITAL_URL below). The Capital screen shows the receivables Fast
+// Pay would work on and the invoice checks that would hold invoices back.
 //
 // Eligibility data from capital/eligible/, shared under one query key.
 //
@@ -83,9 +85,10 @@ const EMPTY: CapitalEligible = {
   ineligible_invoices: [],
 };
 
-export function useCapitalEligible() {
+export function useCapitalEligible(opts: { enabled?: boolean } = {}) {
   return useQuery<CapitalEligible>({
     queryKey: ['capital-eligible'],
+    enabled: opts.enabled ?? true,
     // A company with no facility is a normal state, not an error — fail soft to
     // an empty payload so the invoice screen still renders.
     queryFn: async () => {
@@ -138,7 +141,15 @@ export const INVOICE_CHECKS: {
     key: 'pod',
     label: 'No proof of delivery on file',
     codes: ['E-POD-V0'],
-    text: /proof of delivery/i,
+    // The E-POD-V0 wording only. A reused POD also says "proof of delivery",
+    // but that is the duplicate check below.
+    text: /add a delivery photo \(proof of delivery\)/i,
+  },
+  {
+    key: 'duplicate',
+    label: 'Looks like a duplicate',
+    codes: ['E-DUPLICATE'],
+    text: /same file as the one on|already bills this same delivery|already submitted/i,
   },
   {
     key: 'delivered',
@@ -173,6 +184,35 @@ export const INVOICE_CHECKS: {
     text: /registration or VAT number|government customers|outside South Africa|this customer/i,
   },
 ];
+
+// Applications happen on Merchant Capital's own site, so there's nothing on our
+// backend to record that one was started. Web keeps the same list in
+// localStorage under this key; mobile mirrors it in AsyncStorage. Device-local
+// by nature — it won't follow the user to another handset.
+const APPLIED_KEY = 'mc_applied_invoice_ids';
+
+export const MERCHANT_CAPITAL_URL =
+  'https://getstarted.merchantcapital.co.za?actiontype=C_C&channel=Part_Trad&who=IA_SP';
+
+export async function loadAppliedIds(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(APPLIED_KEY);
+    return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+export async function saveAppliedId(id: string | number): Promise<Set<string>> {
+  const next = await loadAppliedIds();
+  next.add(String(id));
+  try {
+    await AsyncStorage.setItem(APPLIED_KEY, JSON.stringify([...next]));
+  } catch {
+    // Losing the flag only means the button reads "Apply" again — never block.
+  }
+  return next;
+}
 
 /** Which invoice checks an ineligible invoice fails (keys of INVOICE_CHECKS). */
 export function checksFor(inv: IneligibleInvoice): string[] {

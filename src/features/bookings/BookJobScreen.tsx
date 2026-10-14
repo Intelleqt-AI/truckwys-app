@@ -136,8 +136,6 @@ export function BookJobScreen({ route, navigation }: Props) {
   const noDrivers = !driversLoading && driverOptions.length === 1;
   const noVehicles = !vehiclesLoading && vehicleOptions.length === 1;
 
-  const driverWithoutTruck = !!driverId && !vehicleId;
-
   // Back empty / expecting one, then the suggested loads (best first, 3 each).
   const returnOptions = useMemo(() => {
     const opts: { label: string; value: string; sub?: string }[] = [
@@ -160,7 +158,7 @@ export function BookJobScreen({ route, navigation }: Props) {
   }, [preview]);
   // A suggestion that dropped off a refreshed preview falls back to Back empty.
   const choiceShown = returnOptions.some((o) => o.value === choice) ? choice : 'empty';
-  const canBook = !busy && !driverWithoutTruck && !datesOutOfOrder && !tonnesBad && preview?.canBook !== false;
+  const canBook = !busy && !datesOutOfOrder && !tonnesBad && preview?.canBook !== false;
 
   const openJob = (id: number | string, title?: string) => {
     navigation.pop(popCallerOnSuccess ? 2 : 1);
@@ -414,9 +412,6 @@ export function BookJobScreen({ route, navigation }: Props) {
           onSelect={setDriverId}
           warning={noDrivers ? 'No available drivers. Check the Fleet tab.' : undefined}
         />
-        {driverWithoutTruck && (
-          <Mono className="-mt-2 text-caption text-warning">Pick a truck for this driver, or clear the driver.</Mono>
-        )}
         {callOff && (
           <TextField
             label="Tonnes on this load"

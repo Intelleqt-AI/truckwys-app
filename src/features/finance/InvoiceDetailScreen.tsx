@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { View, Share, Modal, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Share, Modal, StyleSheet, TouchableOpacity, Alert, Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useQueryClient } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -46,6 +46,12 @@ import {
 import { usePaymentsManaged } from '@/features/accounting/api';
 import { FastPayInvoicePanel } from '@/features/capital/FastPayInvoicePanel';
 import { CAPITAL_LAUNCHED } from '@/lib/features';
+import {
+  useCapitalEligible,
+  loadAppliedIds,
+  saveAppliedId,
+  MERCHANT_CAPITAL_URL,
+} from './fastpay';
 import { isManualPayment } from '@/lib/finance/payments';
 import { sumLines, taxCodeShort, toNumber } from '@/lib/finance/tax';
 import {
@@ -111,6 +117,14 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   const [voidBusy, setVoidBusy] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteBusy, setNoteBusy] = useState(false);
+  // Until Fast Pay launches in-app, an eligible invoice applies on the partner's
+  // site. Eligibility is the server's list (never computed here); "applied" is a
+  // device-local note that the application was opened.
+  const capital = useCapitalEligible({ enabled: !CAPITAL_LAUNCHED });
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!CAPITAL_LAUNCHED) void loadAppliedIds().then(setAppliedIds);
+  }, []);
   const { colors } = useTheme();
 
   // A deleted or moved invoice is a 404, which is not worth retrying.
@@ -184,6 +198,19 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
   // What can be done to an invoice that has gone out (web InvoiceDetail rules):
   // credit what's left; void only one nothing has happened to yet.
   const issued = status !== 'DRAFT' && !isVoid;
+  const canApplyExternally =
+    !CAPITAL_LAUNCHED &&
+    issued &&
+    (capital.data?.invoices ?? []).some((e) => String(e.id) === String(id));
+  const hasApplied = appliedIds.has(String(id));
+  const applyForAdvance = async () => {
+    setAppliedIds(await saveAppliedId(id));
+    try {
+      await Linking.openURL(MERCHANT_CAPITAL_URL);
+    } catch {
+      toast.error("Couldn't open the application. Try again.");
+    }
+  };
   const canCredit = issued && !isFinanced && status !== 'CREDITED' && total - credited > 0.005;
   const canVoid = issued && !isFinanced && paid === 0 && (payments?.length ?? 0) === 0 && issuedCreditNotes.length === 0;
   const canDeleteDraft = status === 'DRAFT' && canEdit;
@@ -448,6 +475,15 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
     ...(primary !== 'pdf'
       ? [{ label: 'Download PDF', icon: 'download' as const, onPress: openPdf }]
       : []),
+    ...(canApplyExternally
+      ? [
+          {
+            label: hasApplied ? 'Apply for advance again' : 'Apply for advance',
+            icon: 'externalLink' as const,
+            onPress: () => void applyForAdvance(),
+          },
+        ]
+      : []),
     ...(canEditNote
       ? [{ label: 'Edit note', icon: 'edit' as const, onPress: () => setNoteOpen(true) }]
       : []),
@@ -561,6 +597,20 @@ export function InvoiceDetailScreen({ route, navigation }: Props) {
           tone={daysLate ? 'danger' : undefined}
         />
       </View>
+
+      {/* Applications are completed on the partner's own site, so this opens the
+          browser; "Applied" only records that it was opened on this device. */}
+      {canApplyExternally && (
+        <View className="mb-5">
+          <Button
+            label={hasApplied ? 'Applied ✓ · open again' : 'Apply for advance'}
+            icon="externalLink"
+            variant="secondary"
+            onPress={() => void applyForAdvance()}
+            fullWidth
+          />
+        </View>
+      )}
 
       <Group label="Details">
         <DetailRow label="Customer" value={str(pick(inv, ['customer_name', 'customer']), '—')} mono={false} />

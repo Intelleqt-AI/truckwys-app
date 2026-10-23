@@ -10,6 +10,7 @@ import {
   fuelInputFromApi,
   resolveDieselInput,
   suggestTruck,
+  suggestTrucks,
 } from '../rules.ts';
 
 const NOW = new Date('2026-10-07T10:00:00Z');
@@ -102,6 +103,24 @@ test('suggested truck: smallest that carries the load, then lowest burn', () => 
   assert.equal(suggestTruck(types, 8)?.name, 'Rigid');
   assert.equal(suggestTruck(types, 31)?.name, 'Superlink');
   assert.equal(suggestTruck(types, 40), null);
+});
+
+test('suggested truck chips: up to three that carry the load, smallest then lowest burn (web 3f64bd9)', () => {
+  const types = [
+    { id: 1, name: 'Superlink', capacity: 34, fuel_consumption_l_per_100km: 42 },
+    { id: 2, name: 'Tri-axle', capacity: 30000, fuel_consumption_l_per_100km: 38 },
+    { id: 3, name: 'Flatbed', capacity: 30, fuel_consumption_l_per_100km: 36 },
+    { id: 4, name: 'Rigid', capacity: 8, fuel_consumption_l_per_100km: 24 },
+    { id: 5, name: 'Unrated', capacity: 30 },
+    { id: 6, name: 'Parked', capacity: 30, available_vehicle_count: 0 },
+    { id: 7, name: 'Flatbed', capacity: 30, fuel_consumption_l_per_100km: 30 },
+  ];
+  // 20 t: the 30 t trucks by burn (unrated last), the duplicate name once, the 34 t cut by the limit of 3.
+  assert.deepEqual(suggestTrucks(types, 20).map((t) => t.id), [3, 2, 5]);
+  assert.deepEqual(suggestTrucks(types, 5).map((t) => t.id), [4, 3, 2]);
+  assert.deepEqual(suggestTrucks(types, 31).map((t) => t.id), [1]);
+  assert.deepEqual(suggestTrucks(types, 40), []);
+  assert.deepEqual(suggestTrucks(types, 0), []);
 });
 
 test('old backend: a price from before the previous period is unusable', () => {

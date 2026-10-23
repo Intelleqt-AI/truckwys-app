@@ -741,6 +741,29 @@ export function suggestTruck<T extends TruckLike & { available_vehicle_count?: n
   return fits[0]!.t;
 }
 
+/**
+ * Up to `limit` trucks that carry the load, for the one-tap chips under the
+ * Truck picker (web 3f64bd9): smallest capacity first, then lowest rated burn
+ * (none sorts last), then id. Unlike suggestTruck there is no burn or body
+ * requirement, so the chips match what the picker lists.
+ */
+export function suggestTrucks<T extends TruckLike & { available_vehicle_count?: number }>(
+  types: T[],
+  loadT: number,
+  limit = 3,
+): T[] {
+  if (!(loadT > 0)) return [];
+  const seen = new Set<string>();
+  return types
+    .filter((t) => (t.available_vehicle_count ?? 1) > 0)
+    .filter((t) => (seen.has(t.name) ? false : (seen.add(t.name), true)))
+    .map((t) => ({ t, cap: capacityTonnes(t.capacity), burn: ratedBurn(t) ?? Infinity }))
+    .filter((x): x is { t: T; cap: number; burn: number } => x.cap !== null && x.cap >= loadT)
+    .sort((a, b) => a.cap - b.cap || a.burn - b.burn || Number(a.t.id ?? 0) - Number(b.t.id ?? 0))
+    .slice(0, limit)
+    .map((x) => x.t);
+}
+
 // ── Operating cost per km (§6) ──────────────────────────────────────────────
 
 // Class defaults, R/km excl. fuel and tolls: the backend's OPERATING_COST_CLASSES.

@@ -3,9 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchData } from '@/lib/api/client';
 
 // Fast Pay is not live (lib/features.ts CAPITAL_LAUNCHED), so the app has no
-// in-app request: an eligible invoice applies on the partner's own site (see
-// MERCHANT_CAPITAL_URL below). The Capital screen shows the receivables Fast
-// Pay would work on and the invoice checks that would hold invoices back.
+// in-app request: business funding is applied for on the partner's own site,
+// from the Finance header (see MERCHANT_CAPITAL_URL below). The Capital screen
+// shows the receivables Fast Pay would work on and the invoice checks that
+// would hold invoices back.
 //
 // Eligibility data from capital/eligible/, shared under one query key.
 //
@@ -185,10 +186,11 @@ export const INVOICE_CHECKS: {
   },
 ];
 
-// Applications happen on Merchant Capital's own site, so there's nothing on our
-// backend to record that one was started. Web keeps the same list in
-// localStorage under this key; mobile mirrors it in AsyncStorage. Device-local
-// by nature — it won't follow the user to another handset.
+// Merchant Capital's own application is general business funding for the
+// company, not an advance on any one invoice, so it opens from one Capital
+// button in the Finance header. Invoices applied for before that move are still
+// marked: web keeps the list in localStorage under this key and mobile mirrors
+// it in AsyncStorage. Device-local, and read-only now (nothing adds to it).
 const APPLIED_KEY = 'mc_applied_invoice_ids';
 
 export const MERCHANT_CAPITAL_URL =
@@ -201,17 +203,6 @@ export async function loadAppliedIds(): Promise<Set<string>> {
   } catch {
     return new Set<string>();
   }
-}
-
-export async function saveAppliedId(id: string | number): Promise<Set<string>> {
-  const next = await loadAppliedIds();
-  next.add(String(id));
-  try {
-    await AsyncStorage.setItem(APPLIED_KEY, JSON.stringify([...next]));
-  } catch {
-    // Losing the flag only means the button reads "Apply" again — never block.
-  }
-  return next;
 }
 
 /** Which invoice checks an ineligible invoice fails (keys of INVOICE_CHECKS). */

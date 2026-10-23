@@ -7,8 +7,10 @@ import { staleWork, staleLabel } from '@/lib/staleWork';
 // "Doing now" for a truck: what the open order naming it says it is doing. Port
 // of the web Vehicles page (pages/Vehicles.tsx doingNow). The order itself comes
 // from the server on each row (`active_load`, backend core.services.vehicle_list).
-// The status on a truck is set by hand and is often wrong, so a status the
-// orders contradict is said plainly, never shown as normal.
+// The server now moves a truck between In use and Available as its orders start
+// and finish (core.services.vehicle_status), so a status the orders contradict
+// is a hand edit, an order left open, or a row from before that. It is said
+// plainly, never shown as normal.
 
 export interface DoingNow {
   text: string;

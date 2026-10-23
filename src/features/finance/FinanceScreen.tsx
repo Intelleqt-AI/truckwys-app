@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, Alert, ActivityIndicator, Linking } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
@@ -38,6 +38,7 @@ import {
   EXPENSE_STATUSES,
   expenseCategoryLabel,
 } from './api';
+import { MERCHANT_CAPITAL_URL } from './fastpay';
 import type { ExpenseLite, InvoiceLite } from '@/types/domain';
 import { useAppNavigation } from '@/navigation/useAppNavigation';
 import { toast } from '@/lib/toast';
@@ -57,6 +58,14 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 
 type Props = BottomTabScreenProps<TabParamList, 'Finance'>;
 
+const openCapitalApplication = async () => {
+  try {
+    await Linking.openURL(MERCHANT_CAPITAL_URL);
+  } catch {
+    toast.error("Couldn't open the application. Try again.");
+  }
+};
+
 export function FinanceScreen({ route }: Props) {
   const [tab, setTab] = useState<FinanceTab>(route.params?.tab ?? 'invoices');
   const insets = useSafeAreaInsets();
@@ -75,17 +84,29 @@ export function FinanceScreen({ route }: Props) {
         <AppHeader
           title="Finance"
           right={
-            // Ghost slot on Reports keeps the header height identical across
-            // tabs, so the pager never jumps vertically.
-            <View
-              style={noAdd ? { opacity: 0 } : undefined}
-              pointerEvents={noAdd ? 'none' : 'auto'}
-            >
-              <IconButton
-                name="plus"
-                accessibilityLabel={tab === 'expenses' ? 'New expense' : 'New invoice'}
-                onPress={() => nav.navigate(tab === 'expenses' ? 'AddExpense' : 'CreateInvoice')}
+            <View className="flex-row items-center gap-1">
+              {/* Merchant Capital's business-funding application (the web's
+                  "Access capital"): on every Finance tab, never per invoice. */}
+              <Button
+                label="Capital"
+                icon="externalLink"
+                variant="secondary"
+                size="sm"
+                accessibilityLabel="Access capital. Opens Merchant Capital's application."
+                onPress={openCapitalApplication}
               />
+              {/* Ghost slot on Reports keeps the header height identical across
+                  tabs, so the pager never jumps vertically. */}
+              <View
+                style={noAdd ? { opacity: 0 } : undefined}
+                pointerEvents={noAdd ? 'none' : 'auto'}
+              >
+                <IconButton
+                  name="plus"
+                  accessibilityLabel={tab === 'expenses' ? 'New expense' : 'New invoice'}
+                  onPress={() => nav.navigate(tab === 'expenses' ? 'AddExpense' : 'CreateInvoice')}
+                />
+              </View>
             </View>
           }
         />

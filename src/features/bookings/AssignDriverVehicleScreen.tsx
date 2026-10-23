@@ -6,6 +6,7 @@ import { fetchAllRows } from '@/lib/api/fetchAllPages';
 import { SheetScreen, SelectField, Button, Txt, type Option } from '@/components/ui';
 import { str, pick } from '@/lib/api/list';
 import { assignLoadDriver, convertQuoteToLoad, seedLoad, updateLoadStatus } from './api';
+import { useVehicle } from '@/features/fleet/api';
 import { invalidateFor } from '@/lib/queryInvalidation';
 import { toast } from '@/lib/toast';
 import type { AppStackParamList } from '@/navigation/types';
@@ -93,8 +94,20 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
     ];
   }, [driversRaw, driverClearLabel]);
 
+  // The server marks a truck In use while it has a current load, so the load's
+  // own truck is no longer in the Available list. Fetch it by id and keep it as
+  // an option, or the picker would show nothing selected for a truck still set.
+  const { data: currentVehicle } = useVehicle(initialVehicleId, undefined, !!initialVehicleId);
+
   const vehicleOptions: Option[] = useMemo(() => {
-    const rows = vehiclesRaw ?? [];
+    const rows: VehicleOption[] = [...(vehiclesRaw ?? [])];
+    if (
+      initialVehicleId &&
+      currentVehicle &&
+      !rows.some((v) => String(v.id) === initialVehicleId)
+    ) {
+      rows.unshift(currentVehicle as unknown as VehicleOption);
+    }
     const mapped = rows.map((v) => {
       const name = [v.make, v.model].filter(Boolean).join(' ');
       return {
@@ -103,7 +116,7 @@ export function AssignDriverVehicleScreen({ route, navigation }: Props) {
       };
     });
     return [{ label: vehicleClearLabel, value: '' }, ...mapped];
-  }, [vehiclesRaw, vehicleClearLabel]);
+  }, [vehiclesRaw, currentVehicle, initialVehicleId, vehicleClearLabel]);
 
   const canProceed = !busy;
 

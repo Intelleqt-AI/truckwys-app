@@ -112,6 +112,7 @@ import {
 import { computeCosts, isDistanceEstimated } from './quote/costs';
 import {
   suggestTruck,
+  suggestTrucks,
   pricedInEarlierPeriod,
   changesSincePriced,
   saShortDate,
@@ -1033,6 +1034,16 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     return fromServer ?? local;
   }, [vtypes, weightTons, cargo, quoteUsage, serverSuggested, suggestKey]);
   const pricedTruckName = vehicleType || (perTonne ? autoBasisName : null) || suggestedTruck?.name || '';
+  // One-tap trucks under the picker (web 3f64bd9): up to three that carry the
+  // load, smallest first, then the lowest burn quotes use.
+  const truckChips = useMemo(
+    () =>
+      suggestTrucks(
+        (vtypes ?? []).map((v) => ({ ...v, fuel_consumption_l_per_100km: burnInUse(v) ?? undefined })),
+        weightTons ?? 0,
+      ),
+    [vtypes, weightTons],
+  );
   const pricedTruckId = (vtypes ?? []).find((v) => v.name === pricedTruckName)?.id ?? null;
 
   // The rate follows the suggested truck until the person types a rate.
@@ -3579,6 +3590,44 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 onSelect={handleVehicleTypeSelect}
                 openRequest={truckPickerReq}
               />
+              {truckChips.length > 0 && (
+                <View
+                  className="mt-2 gap-1.5"
+                  accessibilityRole="radiogroup"
+                  accessibilityLabel={`Suggested trucks for this ${formatPlain(weightTons ?? 0)} tonne load`}
+                >
+                  <Label className="text-muted">{`Suggested for this ${formatPlain(weightTons ?? 0)} t load`}</Label>
+                  <View className="flex-row flex-wrap gap-2">
+                    {truckChips.map((v) => {
+                      const picked = pricedTruckName === v.name;
+                      const cap = capacityTons(v.capacity);
+                      // No "(30 t)" when the name already says the tonnes, as in the picker.
+                      const named = /\d\s*(t|ton|tons|tonne|tonnes)\b/i.test(v.name);
+                      const text = cap && !named ? `${v.name} (${formatPlain(cap)} t)` : v.name;
+                      return (
+                        <TouchableOpacity
+                          key={String(v.id ?? v.name)}
+                          onPress={() => handleVehicleTypeSelect(v.name)}
+                          activeOpacity={0.7}
+                          accessibilityRole="radio"
+                          accessibilityState={{ selected: picked }}
+                          accessibilityLabel={text}
+                          className={`min-h-[44px] justify-center rounded-control border px-3 py-2 ${
+                            picked ? 'border-line-strong bg-raised' : 'border-line bg-surface'
+                          }`}
+                        >
+                          <Mono
+                            className={`text-caption font-medium ${picked ? 'text-fg' : 'text-muted'}`}
+                            numberOfLines={1}
+                          >
+                            {text}
+                          </Mono>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
               {lowFields.has('vehicle') && <CheckHint lang={nlLang} />}
               </View>
               <TextField

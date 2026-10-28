@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { BottomSheetTextInput } from '@gorhom/bottom-sheet';
+import Animated from 'react-native-reanimated';
 import { Icon, Badge, Button, Card, TextField, Txt, Label, Mono, INPUT_TEXT } from '@/components/ui';
 import { useTheme } from '@/theme/ThemeProvider';
 import { asArray, num, str, pick } from '@/lib/api/list';
@@ -8,6 +9,7 @@ import { reverseGeocode, parseCoordinates, looksSwapped } from '@/lib/geocode';
 import { countryNear } from '@/lib/locationCountry';
 import { suggestLocations, fetchRecentLocations, recordLocationPick } from '../api';
 import { roundCoord, isForeignCc, type Loc, type LocSuggest } from './types';
+import { useQuoteMotion } from './motion';
 
 function toLocSuggest(raw: unknown, forceRecent?: boolean): LocSuggest {
   const o = raw as Record<string, unknown>;
@@ -53,6 +55,7 @@ function LocationFieldImpl({
   error?: string;
 }) {
   const { colors } = useTheme();
+  const motion = useQuoteMotion();
   const [text, setText] = useState(value?.label ?? '');
   // Coordinate entry, matching what the web builder offers — but as one
   // paste-friendly field rather than two number boxes, because the useful case
@@ -194,24 +197,26 @@ function LocationFieldImpl({
 
   return (
     <View>
-      <View className="mb-1.5 flex-row items-center justify-between">
-        <Label className="text-muted">{label}</Label>
-        {headerRight}
+      {/* A row on the route rail (RouteTimeline), so it carries no box of its
+          own: the caption, an underlined input, and the two ways in besides
+          typing. The underline (accent while focused, danger on an error) is
+          what marks the input as an input without a full border; the pin icon
+          the old box carried is now the rail's marker. */}
+      <View className="min-h-[20px] flex-row items-center gap-2">
+        <Label className={error ? 'text-danger' : focused ? 'text-fg' : 'text-muted'}>
+          {label}
+        </Label>
+        {value?.cc && isForeignCc(value.cc) ? <Badge label="Cross-border" tone="warning" /> : null}
+        {headerRight ? <View className="-my-0.5 ml-auto">{headerRight}</View> : null}
       </View>
-      {/* Shell matches TextField/SelectField exactly — min height rather than a
-          fixed one, padding on the input rather than a stretched height, and a
-          17px icon. It used to be h-12 with a 16px pin, which read a notch low
-          against the Client and Vehicle-type rows directly above it. */}
       <View
-        className={`min-h-[48px] flex-row items-center gap-2 rounded-control border bg-surface px-3 ${
-          error ? 'border-danger' : focused ? 'border-accent' : 'border-line'
-        }`}
+        className={`border-b ${error ? 'border-danger' : focused ? 'border-accent' : 'border-line-active'}`}
       >
-        <Icon name="pin" size={17} color={value ? colors.accent : colors.faint} />
         <BottomSheetTextInput
-          className="flex-1 text-fg"
+          className="text-fg"
           placeholder={placeholder}
           placeholderTextColor={colors.placeholder}
+          accessibilityLabel={label}
           value={text}
           onChangeText={(t) => {
             // A real keystroke means the settled value no longer applies, so
@@ -226,17 +231,19 @@ function LocationFieldImpl({
             if (blurTimer.current) clearTimeout(blurTimer.current);
             blurTimer.current = setTimeout(() => setFocused(false), 150);
           }}
-          style={[INPUT_TEXT, { paddingVertical: 12 }]}
+          style={[INPUT_TEXT, { paddingVertical: 10 }]}
         />
       </View>
       {error && <Mono className="mt-1 text-caption text-danger">{error}</Mono>}
-      {/* Two ways in besides typing: the map, and raw coordinates. */}
-      <View className="mt-2 flex-row items-center gap-2">
+      {/* Two ways in besides typing: the map, and raw coordinates. Real
+          buttons (a border and a fill), not bare labels — see Button's `sm`. */}
+      <View className="mt-2.5 flex-row items-center gap-2">
         {onPickOnMap && (
           <Button
             label="Set on map"
             icon="pin"
             variant="secondary"
+            size="sm"
             onPress={onPickOnMap}
           />
         )}
@@ -244,20 +251,20 @@ function LocationFieldImpl({
           label={coordMode ? 'Search instead' : 'Coordinates'}
           icon={coordMode ? 'search' : 'gauge'}
           variant="secondary"
+          size="sm"
           onPress={() => {
             setCoordError(null);
             setCoordMode((m) => !m);
           }}
         />
-        {value?.cc && isForeignCc(value.cc) ? (
-          <View className="ml-auto">
-            <Badge label="Cross-border" tone="warning" />
-          </View>
-        ) : null}
       </View>
 
       {coordMode && (
-        <Card className="mt-2 gap-2 p-3">
+        <Animated.View
+          entering={motion.enterDown}
+          exiting={motion.exit}
+          className="mt-2 gap-2 overflow-hidden rounded-card border border-line bg-surface-hover p-3"
+        >
           <TextField
             label="Latitude, longitude"
             placeholder="e.g. -33.9249, 18.4241"
@@ -292,7 +299,7 @@ function LocationFieldImpl({
               />
             </View>
           </View>
-        </Card>
+        </Animated.View>
       )}
       {focused && results.length > 0 && (
         <Card className="mt-2">

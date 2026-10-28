@@ -1,8 +1,11 @@
 import { useEffect } from 'react';
 import { View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { Button, Icon, Txt, Mono } from '@/components/ui';
+import { useCountUp } from '@/hooks/useCountUp';
 import { formatCurrency } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
+import { useQuoteMotion } from './motion';
 
 export interface QuoteSentOverlayProps {
   visible: boolean;
@@ -33,6 +36,10 @@ export function QuoteSentOverlay({
   onDone,
 }: QuoteSentOverlayProps) {
   const { colors } = useTheme();
+  const m = useQuoteMotion();
+  // Before the early return below, so the hook order never changes. The overlay
+  // stays mounted with total 0 while hidden, so each showing rolls up from R 0.
+  const shownTotal = useCountUp(total);
   // Draft-saving is routine — auto-dismiss. Sending emails a client; that's
   // a money event a human should close themselves, so it waits. Either
   // button tap changes `visible`/unmounts this, which clears the timer.
@@ -53,18 +60,26 @@ export function QuoteSentOverlay({
         : "Email pending. We'll retry";
 
   return (
-    <View
+    <Animated.View
+      entering={m.enter}
       className="absolute inset-0 items-center justify-center bg-backdrop px-8"
       accessibilityViewIsModal
     >
-      <View className="w-full max-w-[300px] items-center rounded-panel border border-line bg-surface px-6 py-8">
+      <Animated.View
+        entering={m.zoomSpring}
+        className="w-full max-w-[300px] items-center rounded-panel border border-line bg-surface px-6 py-8"
+      >
         <View className="h-12 w-12 items-center justify-center rounded-pill bg-success-bg">
           <Icon name="checkCircle" size={28} color={colors.successDot} />
         </View>
         <Txt className="mt-4 text-center text-heading font-semibold text-fg">{title}</Txt>
         {total > 0 && (
-          <Mono className="mt-1 text-callout font-semibold text-fg" numberOfLines={1}>
-            {formatCurrency(total)}
+          <Mono
+            className="mt-1 text-callout font-semibold text-fg"
+            numberOfLines={1}
+            accessibilityLabel={formatCurrency(total)}
+          >
+            {formatCurrency(shownTotal)}
           </Mono>
         )}
         <Txt className="mt-1.5 text-center text-caption text-faint">{subtitle}</Txt>
@@ -77,7 +92,7 @@ export function QuoteSentOverlay({
             <Button label="Done" onPress={onDone} fullWidth />
           </View>
         </View>
-      </View>
-    </View>
+      </Animated.View>
+    </Animated.View>
   );
 }

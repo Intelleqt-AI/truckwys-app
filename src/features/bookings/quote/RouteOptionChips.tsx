@@ -5,8 +5,10 @@ import { View, TouchableOpacity } from 'react-native';
 // touch arbitration and never gets to claim a horizontal swipe (documented
 // gorhom/bottom-sheet gotcha for any scrollable nested in sheet content).
 import { ScrollView } from 'react-native-gesture-handler';
-import { Label, Mono } from '@/components/ui';
+import { Badge, Label, Mono } from '@/components/ui';
+import { useTheme } from '@/theme/ThemeProvider';
 import { routeChipText } from './routeSummary';
+import { tapHaptic } from './motion';
 import { asArray, num, pick, str } from '@/lib/api/list';
 import { formatCurrency, formatDuration } from '@/lib/formatters';
 
@@ -36,6 +38,7 @@ function RouteOptionChipsImpl({
   bestIndex: number;
   onSelect: (index: number) => void;
 }) {
+  const { colors } = useTheme();
   if (routes.length <= 1) return null;
 
   const stats: RouteStat[] = routes.map((r) => ({
@@ -91,27 +94,52 @@ function RouteOptionChipsImpl({
           return (
             <TouchableOpacity
               key={i}
-              onPress={() => onSelect(i)}
+              onPress={() => {
+                if (!active) tapHaptic();
+                onSelect(i);
+              }}
               activeOpacity={0.7}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
               accessibilityLabel={a11yLabel}
-              className={`min-w-[152px] justify-center gap-1 rounded-control border px-3 py-2.5 ${
-                active ? 'border-line-strong bg-raised' : 'border-line bg-surface'
+              // 1.5px in both states so selecting never shifts the content by a
+              // half pixel; the selected card is the ink outline, with no tint.
+              style={{ borderWidth: 1.5 }}
+              className={`min-w-[172px] justify-center gap-1 rounded-card px-3 py-3 ${
+                active ? 'border-fg bg-surface' : 'border-line bg-surface'
               }`}
             >
-              <View className="flex-row items-center gap-1.5">
+              <View className="flex-row items-center gap-2">
+                <View
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: 14,
+                    borderWidth: 1.5,
+                    borderColor: active ? colors.fg : colors.lineStrong,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {active ? (
+                    <View
+                      style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: colors.fg }}
+                    />
+                  ) : null}
+                </View>
                 <Mono
-                  className={`flex-shrink text-caption font-medium ${active ? 'text-fg' : 'text-muted'}`}
+                  className={`shrink text-caption font-medium ${active ? 'text-fg' : 'text-muted'}`}
                   numberOfLines={1}
                 >
                   {label}
-                  {tags[0] && !summary ? (
-                    <Mono className="text-caption font-medium text-success">{` · ${tags[0]}`}</Mono>
-                  ) : null}
                 </Mono>
+                {/* A backend toll_summary title already carries the tag ("Fastest · via
+                    N17"), so a badge there would say it twice. */}
+                {tags[0] && !summary ? (
+                  <Badge label={tags[0]} tone={tags[0] === 'Recommended' ? 'accent' : 'success'} />
+                ) : null}
               </View>
-              <Mono className="text-caption text-faint" numberOfLines={1}>
+              <Mono className="text-heading font-semibold text-fg" numberOfLines={1}>
                 {Math.round(s.distanceKm)} km · {formatDuration(s.durationMin / 60)}
               </Mono>
               <Mono className={`text-caption ${s.tollsUnavailable ? 'text-danger' : 'text-faint'}`} numberOfLines={1}>

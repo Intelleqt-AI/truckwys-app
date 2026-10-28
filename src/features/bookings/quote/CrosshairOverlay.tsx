@@ -80,9 +80,13 @@ function CrosshairOverlayImpl({
       {/* Readout + confirm, above whatever the sheet is occupying. */}
       <View className="absolute left-0 right-0 px-4" style={{ bottom: bottomInset + 12 }}>
         <View className="gap-2.5 rounded-card border border-line bg-elevated p-3.5">
-          <Label className="text-muted">
-            {isPickup ? 'Collection point' : isStop ? 'Stop point' : 'Delivery point'}
-          </Label>
+          <View className="flex-row items-center gap-2">
+            {/* The pin's own colour, so the card reads as belonging to the pin above it. */}
+            <View style={{ width: 10, height: 10, borderRadius: 10, backgroundColor: tint }} />
+            <Label className="text-muted">
+              {isPickup ? 'Collection point' : isStop ? 'Stop point' : 'Delivery point'}
+            </Label>
+          </View>
           {resolving ? (
             <View className="flex-row items-center gap-2">
               <ActivityIndicator size="small" color={tint} />

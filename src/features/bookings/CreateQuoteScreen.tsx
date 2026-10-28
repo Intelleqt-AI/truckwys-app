@@ -39,7 +39,6 @@ import {
   SelectField,
   TextField,
   DateField,
-  Button,
   Banner,
   Icon,
   Txt,
@@ -73,7 +72,7 @@ import { useFinanceSettings } from '@/lib/finance/api';
 import { previewQuoteVat } from '@/lib/vat';
 import { shareHtmlPdf } from '@/features/finance/reports/export';
 import { buildQuoteExportHtml } from './quote/workingExport';
-import { formatCurrency, formatDuration, formatNumber, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
+import { formatCurrency, formatDate, formatDuration, formatNumber, formatPlain, parseNum, decimalMax } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import { radius } from '@/theme/tokens';
 import { toast } from '@/lib/toast';
@@ -136,6 +135,9 @@ import { buildQuotePayload } from './quote/payload';
 import { compactStoredSnapshot } from './quote/routeSnapshot';
 import { LocationField } from './quote/LocationField';
 import { StopLocationRow } from './quote/StopLocationRow';
+import { RouteTimeline, RailRow, AddStopRow, SwapRouteButton } from './quote/RouteTimeline';
+import { tapHaptic } from './quote/motion';
+import { MapTopBar } from './quote/MapTopBar';
 import { NaturalLanguageBar, type NaturalLanguageBarHandle } from './quote/NaturalLanguageBar';
 import { FillSummary, CheckHint, type FillSuggestion } from './quote/FillSummary';
 import {
@@ -228,6 +230,19 @@ const SNAP = SNAP_FRACTIONS.map((f) => `${Math.round(f * 100)}%`);
 // recomputed per render.
 const SECTION_ORDER: SectionId[] = ['client', 'route', 'load', 'schedule', 'price'];
 
+// The validity periods offered beside "Valid until".
+const VALIDITY_DAYS = [7, 14, 30] as const;
+
+/** Whole days from one YYYY-MM-DD to another, or null if either isn't one. Calendar
+ *  dates, built in UTC from the parts, so a time-zone offset can't shift the count. */
+function daysBetween(from: string, to: string): number | null {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(from);
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(to);
+  if (!a || !b) return null;
+  const ms = Date.UTC(+b[1]!, +b[2]! - 1, +b[3]!) - Date.UTC(+a[1]!, +a[2]! - 1, +a[3]!);
+  return Math.round(ms / 86400000);
+}
+
 
 // A fuel price and a toll figure a saved quote was priced on from a market
 // check (route_snapshot): they come back with it when it is reopened.
@@ -267,6 +282,14 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     retry: false,
   });
   const [hydrated, setHydrated] = useState(false);
+  // Presentation only: entrances (a stop appearing) stay off until a saved quote
+  // has loaded and settled, so reopening one doesn't play every entrance at once.
+  const [motionReady, setMotionReady] = useState(false);
+  useEffect(() => {
+    if (editing && !hydrated) return;
+    const id = setTimeout(() => setMotionReady(true), 600);
+    return () => clearTimeout(id);
+  }, [editing, hydrated]);
   // A saved draft: the fuel clause its PDF will carry (null when the company has it off).
   const existingDraft = editing && str(existing?.status).toUpperCase() === 'DRAFT';
   const { data: draftFuelAdjustment } = useFuelAdjustment('quotes', editId ?? '', existingDraft);
@@ -2407,10 +2430,12 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   const firstBlock = visibleWarnings.find((w) => w.severity === 'block') ?? null;
 
   // ── Jump bar (Phase 2) ───────────────────────────────────────────────────
-  // Sticky chip bar above the scroll — a section's y offset is captured once
-  // by QuoteSection's onLayout and read back here, so jumping to it never
-  // depends on re-measuring anything. Declared before save()/the footer below
-  // (Phase 3) since onSend needs jumpTo's stable identity.
+  // Sticky chip bar above the scroll — a section's y offset is reported by
+  // QuoteSection's onLayout (which fires again whenever its frame changes) and
+  // read back here, so jumping to it never depends on re-measuring anything.
+  // `layout.y` is relative to the form's first View, so the sections must stay
+  // its direct children and nothing may sit above it. Declared before
+  // save()/the footer below (Phase 3) since onSend needs jumpTo's stable identity.
   const scrollRef = useRef<BottomSheetScrollViewMethods>(null);
   const jumpBarRef = useRef<QuoteJumpBarHandle>(null);
   const sectionY = useRef<Partial<Record<SectionId, number>>>({});
@@ -2528,6 +2553,61 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     submitAttempted,
     issues,
   ]);
+
+  // One line per section header: what it holds right now. Client has none, as
+  // the field beneath already shows the customer. Dates are YYYY-MM-DD strings
+  // read by formatDate as calendar dates, not UTC instants.
+  const sectionSummaries = useMemo<Partial<Record<SectionId, string>>>(() => {
+    const out: Partial<Record<SectionId, string>> = {};
+    const routeBits: string[] = [];
+    if (pickup && delivery && costs.chargeDistance > 0) {
+      routeBits.push(
+        `${costs.distanceEstimated && !distanceConfirmed ? '≈ ' : ''}${formatNumber(Math.round(costs.chargeDistance))} km`,
+      );
+    }
+    if (stops.length) routeBits.push(`${stops.length} stop${stops.length === 1 ? '' : 's'}`);
+    if (routeBits.length) out.route = routeBits.join(' · ');
+    if (weightTons != null && weightTons > 0) {
+      out.load = [tonsLabel(weightTons), pricedTruckName].filter(Boolean).join(' · ');
+    }
+    if (pickupDate && deliveryDate) {
+      const day = (iso: string) => formatDate(iso, { weekday: 'short', year: undefined });
+      out.schedule = `${day(pickupDate)} → ${day(deliveryDate)}`;
+    }
+    const shownTotal = perTonne ? tonnageTotal : costs.total;
+    if (shownTotal > 0) out.price = formatCurrency(shownTotal, { maximumFractionDigits: 0 });
+    return out;
+  }, [
+    pickup,
+    delivery,
+    stops.length,
+    costs.chargeDistance,
+    costs.distanceEstimated,
+    distanceConfirmed,
+    weightTons,
+    pricedTruckName,
+    pickupDate,
+    deliveryDate,
+    perTonne,
+    tonnageTotal,
+    costs.total,
+  ]);
+  // "2 days in transit" under the two dates; read-only.
+  const transitText = useMemo(() => {
+    const d = pickupDate && deliveryDate ? daysBetween(pickupDate, deliveryDate) : null;
+    if (d == null || d < 0) return null;
+    return d === 0 ? 'Same-day delivery' : `${d} day${d === 1 ? '' : 's'} in transit`;
+  }, [pickupDate, deliveryDate]);
+  // Props for a section's step header, off the same completeness the jump bar uses.
+  const stepProps = (id: SectionId, index: number) => {
+    const s = jumpSections.find((j) => j.id === id);
+    return {
+      index,
+      complete: s?.complete,
+      hasIssue: s?.hasIssue,
+      summary: sectionSummaries[id] ?? null,
+    };
+  };
 
   // buildQuotePayload is the same object literal as before (same key order —
   // it's the DRF contract), hoisted to quote/payload.ts (Phase 0 extraction).
@@ -3077,12 +3157,23 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
   // stays above the keyboard. Every dep below is either a primitive the footer
   // actually reads or a []-stable callback, so — unlike before — this doesn't
   // need a hand-trimmed, eslint-disabled dep list to stay correct.
+  // The figure the footer is showing right now. gorhom mounts renderFooter as a
+  // component, and it is a new function whenever the price changes, so the
+  // footer remounts on every price change; the rolling total reads and writes
+  // this ref so it carries on from the shown number instead of replaying from 0.
+  // A ref object is stable, so it is not a dependency below.
+  const footerShownTotal = useRef(0);
+  const footerMargin = perTonne ? null : costs.marginPct;
+  const footerTargetMargin = costs.costing.target_margin_pct ?? 10;
   const renderFooter = useCallback(
     (props: BottomSheetFooterProps) => (
       <BottomSheetFooter {...props} bottomInset={0}>
         <QuoteFooterBar insetsBottom={insets.bottom}>
           <QuoteFooterActions
             total={perTonne ? tonnageTotal : costs.total}
+            shownTotal={footerShownTotal}
+            marginPct={footerMargin}
+            targetMarginPct={footerTargetMargin}
             offer={priceOffer}
             ready={ready}
             priceHint={priceHint}
@@ -3108,6 +3199,8 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     [
       insets.bottom,
       costs.total,
+      footerMargin,
+      footerTargetMargin,
       perTonne,
       tonnageTotal,
       priceOffer,
@@ -3161,6 +3254,18 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
       ),
     [stops],
   );
+
+  // Swap Collection and Delivery. Only offered with no stops between them (a
+  // swap would otherwise put the route in the wrong order: A→S1→S2→B becoming
+  // B→S1→S2→A) and while no Fill is waiting on a Replace/Keep (Replace would
+  // write its stale locations over the swap). It re-prices like any edit to the
+  // route. Known limits, accepted: a "Check this" hint stays under the field it
+  // was on, and an Undo within 8 s of a Fill restores the pre-Fill values over it.
+  const canSwapRoute = !!(pickup && delivery) && stops.length === 0 && !pendingFill;
+  const swapRoute = () => {
+    setPickup(delivery);
+    setDelivery(pickup);
+  };
 
   // ── Testing tools (test companies) ───────────────────────────────────────
   // Clear: empty the form and start a new quote. A saved quote is kept; this
@@ -3234,6 +3339,45 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
     }
   };
 
+  // MapTopBar is memoized (it holds GlassViews), so it gets stable callbacks:
+  // clearQuote/exportWorking are new closures every render, so they go through a
+  // ref that is refreshed each render.
+  const goBack = useCallback(() => navigation.goBack(), [navigation]);
+  const onPillPress = useCallback(() => jumpTo('route'), [jumpTo]);
+  const toolsRef = useRef({ clear: clearQuote, run: exportWorking });
+  toolsRef.current = { clear: clearQuote, run: exportWorking };
+  const onClearTool = useCallback(() => toolsRef.current.clear(), []);
+  const onExportTool = useCallback(() => void toolsRef.current.run(), []);
+  // The route at a glance, from the figures the Route section already shows. Tolls
+  // that could not be calculated say so; they are never shown as R 0.
+  const mapPill = useMemo(() => {
+    if (!ready || routeBlockedMessage) return { text: null, tolls: null, busy: false };
+    if (!costs.distance) return { text: routeBusy ? 'Routing…' : null, tolls: null, busy: routeBusy };
+    const km = `${costs.distanceEstimated && !distanceConfirmed ? '≈ ' : ''}${formatNumber(
+      Math.round(costs.chargeDistance),
+    )} km`;
+    return {
+      text: costs.duration ? `${km} · ${formatDuration(costs.duration / 60)}` : km,
+      tolls: costs.tollKnown
+        ? costs.tollCost > 0
+          ? `${formatCurrency(costs.tollCost, { maximumFractionDigits: 0 })} tolls`
+          : 'No tolls'
+        : 'Tolls unknown',
+      busy: routeBusy,
+    };
+  }, [
+    ready,
+    routeBlockedMessage,
+    costs.distance,
+    costs.distanceEstimated,
+    costs.chargeDistance,
+    costs.duration,
+    costs.tollKnown,
+    costs.tollCost,
+    distanceConfirmed,
+    routeBusy,
+  ]);
+
   return (
     <View className="flex-1 bg-bg-deep">
       {/* The map is the page. It fills the screen and the sheet floats over it,
@@ -3257,47 +3401,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
         topInset={insets.top}
       />
 
-      {/* Own chrome, since the native header is off on this screen. A white
-          chevron in a translucent circle is the iOS pattern for a back control
-          over full-bleed content — Apple Maps and Photos both do this, because a
-          bare chevron loses contrast as the map moves under it. */}
-      <View
-        className="absolute left-0 right-0 flex-row items-center px-4"
-        style={{ top: insets.top + 6 }}
-      >
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.6}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          className="h-11 w-11 items-center justify-center rounded-pill bg-backdrop"
-        >
-          <Icon name="chevronLeft" size={24} color="#FFFFFF" strokeWidth={2.4} />
-        </TouchableOpacity>
-        {testTools && (
-          <View className="ml-auto flex-row gap-2">
-            {[
-              { label: 'Clear', onPress: clearQuote },
-              { label: 'Export working', onPress: () => void exportWorking() },
-            ].map((a) => (
-              <TouchableOpacity
-                key={a.label}
-                onPress={a.onPress}
-                activeOpacity={0.6}
-                hitSlop={6}
-                accessibilityRole="button"
-                accessibilityLabel={a.label}
-                className="h-11 items-center justify-center rounded-pill bg-backdrop px-4"
-              >
-                <Mono className="text-caption font-medium" style={{ color: '#FFFFFF' }}>
-                  {a.label}
-                </Mono>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-      </View>
+      {/* Own chrome, since the native header is off on this screen: back, the route at a
+          glance, and the testing tools, on Glass so they hold against any map tile and
+          follow light/dark (see MapTopBar). */}
+      <MapTopBar
+        top={insets.top}
+        onBack={goBack}
+        pillText={mapPill.text}
+        pillTolls={mapPill.tolls}
+        pillBusy={mapPill.busy}
+        onPillPress={onPillPress}
+        picking={!!picking}
+        tools={testTools}
+        onClear={onClearTool}
+        onExport={onExportTool}
+      />
 
       <BottomSheet
         ref={sheetRef}
@@ -3317,7 +3435,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           borderColor: colors.line,
           boxShadow: colors.shadowPop,
         }}
-        handleIndicatorStyle={{ backgroundColor: colors.faint, width: 42 }}
+        handleIndicatorStyle={{ backgroundColor: colors.lineStrong, width: 36, height: 5 }}
       >
         <QuoteJumpBar ref={jumpBarRef} sections={jumpSections} onPress={jumpTo} />
         <BottomSheetScrollView
@@ -3325,12 +3443,11 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
           contentContainerStyle={{
             paddingHorizontal: 16,
             // Clears the pinned footer, which overlays the scroll area. Extra
-            // margin beyond the footer's own measured height (border + pt-3 +
-            // 26px strip row + 8px gap + 48px button row + bottom inset) so the
-            // last section's content never sits flush against it.
-            // Pinned footer: 44 strip + 4 + 48 buttons + 12 top + 10 bottom
+            // margin beyond the footer's own measured height so the last
+            // section's content never sits flush against it.
+            // Pinned footer: 60 price row + 4 + 44 buttons + 12 top + 10 bottom
             // padding + border, plus breathing room.
-            paddingBottom: insets.bottom + 144,
+            paddingBottom: insets.bottom + 160,
             gap: 16,
           }}
           showsVerticalScrollIndicator={false}
@@ -3383,7 +3500,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
             {/* Five visible groupings (Phase 2) — still one continuous scroll, no
             accordion, no wizard. QuoteJumpBar above scrolls to each; the
             fields themselves keep the exact props/handlers they had before. */}
-            <QuoteSection id="client" label="" onLayout={registerSectionY}>
+            <QuoteSection id="client" label="Client" {...stepProps('client', 1)} onLayout={registerSectionY}>
               <View
                 ref={(r) => {
                   fieldRefs.current.client = r;
@@ -3402,62 +3519,70 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               </View>
             </QuoteSection>
 
-            <QuoteSection id="route" label="Route" onLayout={registerSectionY}>
-              <View
-                ref={(r) => {
-                  fieldRefs.current.pickup = r;
-                }}
-              >
-              <LocationField
-                label="Collection"
-                value={pickup}
-                onChange={setPickup}
-                placeholder="Search origin"
-                onPickOnMap={() => beginPick('pickup')}
-                error={showIssue('pickup', false)}
-              />
-              {lowFields.has('pickup') && <CheckHint lang={nlLang} />}
-              </View>
+            <QuoteSection id="route" label="Route" {...stepProps('route', 2)} onLayout={registerSectionY}>
+              {/* The route as one object: Collection, any stops, then Delivery, on a
+              rail whose markers match the map's pins. Each ref'd View still wraps
+              its row plus its "Check this" hint — onFillChipPress scrolls to it. */}
+              <RouteTimeline>
+                <View
+                  ref={(r) => {
+                    fieldRefs.current.pickup = r;
+                  }}
+                >
+                  <RailRow marker="pickup" first>
+                    <View>
+                      <LocationField
+                        label="Collection"
+                        value={pickup}
+                        onChange={setPickup}
+                        placeholder="Search origin"
+                        onPickOnMap={() => beginPick('pickup')}
+                        error={showIssue('pickup', false)}
+                      />
+                      {lowFields.has('pickup') && <CheckHint lang={nlLang} />}
+                    </View>
+                  </RailRow>
+                </View>
 
-              {/* Stops between Collection and Delivery, in visit order — mirrors the
-              physical route rather than sitting off to the side of it. */}
-              {stops.map((stop, i) => (
-                <StopLocationRow
-                  key={stop.id}
-                  stop={stop}
-                  index={i}
-                  isFirst={i === 0}
-                  isLast={i === stops.length - 1}
-                  updateStop={updateStop}
-                  moveStop={moveStop}
-                  removeStop={removeStop}
-                  beginPick={beginPick}
-                />
-              ))}
-              {pickup && delivery && (
-                <Button
-                  label="Add stop"
-                  icon="plus"
-                  variant="secondary"
-                  onPress={addStop}
-                />
-              )}
+                {/* Stops between Collection and Delivery, in visit order — mirrors the
+                physical route rather than sitting off to the side of it. */}
+                {stops.map((stop, i) => (
+                  <StopLocationRow
+                    key={stop.id}
+                    stop={stop}
+                    index={i}
+                    isFirst={i === 0}
+                    isLast={i === stops.length - 1}
+                    updateStop={updateStop}
+                    moveStop={moveStop}
+                    removeStop={removeStop}
+                    beginPick={beginPick}
+                    animate={motionReady}
+                  />
+                ))}
+                {pickup && delivery && <AddStopRow onPress={addStop} animate={motionReady} />}
 
-              <View
-                ref={(r) => {
-                  fieldRefs.current.delivery = r;
-                }}
-              >
-              <LocationField
-                label="Delivery"
-                value={delivery}
-                onChange={setDelivery}
-                placeholder="Search destination"
-                onPickOnMap={() => beginPick('dropoff')}
-                error={showIssue('dropoff', false)}
-              />
-              {lowFields.has('delivery') && <CheckHint lang={nlLang} />}
-              </View>
+                <View
+                  ref={(r) => {
+                    fieldRefs.current.delivery = r;
+                  }}
+                >
+                  <RailRow marker="delivery" last>
+                    <View>
+                      <LocationField
+                        label="Delivery"
+                        value={delivery}
+                        onChange={setDelivery}
+                        placeholder="Search destination"
+                        onPickOnMap={() => beginPick('dropoff')}
+                        error={showIssue('dropoff', false)}
+                        headerRight={canSwapRoute ? <SwapRouteButton onPress={swapRoute} /> : undefined}
+                      />
+                      {lowFields.has('delivery') && <CheckHint lang={nlLang} />}
+                    </View>
+                  </RailRow>
+                </View>
+              </RouteTimeline>
 
               {/* Early heads-up the moment a picked location is outside SA, before the
               rest of the form is filled in. The real enforcement happens once
@@ -3478,7 +3603,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                     { label: 'Loaded both ways', value: 'ROUND_TRIP' },
                   ]}
                   value={tripType}
-                  onChange={(v) => setTripType(v as 'ONE_WAY' | 'ROUND_TRIP')}
+                  onChange={(v) => {
+                    if (v !== tripType) tapHaptic();
+                    setTripType(v as 'ONE_WAY' | 'ROUND_TRIP');
+                  }}
                   tall
                 />
                 {/* §5: a long one-way trip prices the empty run home unless a
@@ -3493,7 +3621,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                         { label: 'Yes', value: 'YES' },
                       ]}
                       value={abnormalLoad ? 'YES' : 'NO'}
-                      onChange={(v) => setAbnormalLoad(v === 'YES')}
+                      onChange={(v) => {
+                        if ((v === 'YES') !== abnormalLoad) tapHaptic();
+                        setAbnormalLoad(v === 'YES');
+                      }}
                       tall
                     />
                   </View>
@@ -3507,7 +3638,10 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                         { label: 'Loaded', value: 'LOADED' },
                       ]}
                       value={returnLoadBooked ? 'LOADED' : 'EMPTY'}
-                      onChange={(v) => setReturnShape(v === 'LOADED')}
+                      onChange={(v) => {
+                        if ((v === 'LOADED') !== returnLoadBooked) tapHaptic();
+                        setReturnShape(v === 'LOADED');
+                      }}
                       tall
                     />
                     {/* The other answer's price at the target margin. */}
@@ -3560,20 +3694,36 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               )}
             </QuoteSection>
 
-            <QuoteSection id="load" label="Load" onLayout={registerSectionY}>
-              <TextField
-                ref={weightInputRef}
-                label={perTonne ? (isContract ? 'Tonnes per load' : 'Tonnes') : 'Weight (t)'}
-                required
-                placeholder="e.g. 20"
-                keyboardType="decimal-pad"
-                error={showIssue('weight', weightTouched)}
-                value={weight}
-                onChangeText={setWeight}
-                onBlur={() => setWeightTouched(true)}
-                bottomSheet
-              />
-              {lowFields.has('weight') && <CheckHint lang={nlLang} />}
+            <QuoteSection id="load" label="Load" {...stepProps('load', 3)} onLayout={registerSectionY}>
+              {/* Weight and cargo are both short answers, so they share a row. */}
+              <View className="flex-row items-start gap-3">
+                <View className="flex-[0.85]">
+                  <TextField
+                    ref={weightInputRef}
+                    label={perTonne ? (isContract ? 'Tonnes per load' : 'Tonnes') : 'Weight (t)'}
+                    required
+                    placeholder="e.g. 20"
+                    keyboardType="decimal-pad"
+                    error={showIssue('weight', weightTouched)}
+                    value={weight}
+                    onChangeText={setWeight}
+                    onBlur={() => setWeightTouched(true)}
+                    bottomSheet
+                  />
+                  {lowFields.has('weight') && <CheckHint lang={nlLang} />}
+                </View>
+                <View className="flex-1">
+                  <TextField
+                    ref={cargoInputRef}
+                    label="Cargo"
+                    placeholder="e.g. Steel coils"
+                    value={cargo}
+                    onChangeText={setCargo}
+                    bottomSheet
+                  />
+                  {lowFields.has('cargo') && <CheckHint lang={nlLang} />}
+                </View>
+              </View>
               {/* Every quote is priced on a real truck (§3): the suggested one
                   for the load until the person picks another. */}
               <View
@@ -3607,15 +3757,21 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                       return (
                         <TouchableOpacity
                           key={String(v.id ?? v.name)}
-                          onPress={() => handleVehicleTypeSelect(v.name)}
+                          onPress={() => {
+                            if (!picked) tapHaptic();
+                            handleVehicleTypeSelect(v.name);
+                          }}
                           activeOpacity={0.7}
                           accessibilityRole="radio"
                           accessibilityState={{ selected: picked }}
                           accessibilityLabel={text}
-                          className={`min-h-[44px] justify-center rounded-control border px-3 py-2 ${
-                            picked ? 'border-line-strong bg-raised' : 'border-line bg-surface'
+                          // 1.5px in both states, so picking one never nudges the row.
+                          style={{ borderWidth: 1.5 }}
+                          className={`min-h-[44px] flex-row items-center justify-center gap-1.5 rounded-control px-3 py-2 ${
+                            picked ? 'border-fg bg-surface' : 'border-line bg-surface'
                           }`}
                         >
+                          {picked && <Icon name="check" size={12} color={colors.fg} strokeWidth={2.6} />}
                           <Mono
                             className={`text-caption font-medium ${picked ? 'text-fg' : 'text-muted'}`}
                             numberOfLines={1}
@@ -3630,57 +3786,90 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               )}
               {lowFields.has('vehicle') && <CheckHint lang={nlLang} />}
               </View>
-              <TextField
-                ref={cargoInputRef}
-                label="Cargo"
-                placeholder="e.g. Steel coils"
-                value={cargo}
-                onChangeText={setCargo}
-                bottomSheet
-              />
-              {lowFields.has('cargo') && <CheckHint lang={nlLang} />}
             </QuoteSection>
 
-            <QuoteSection id="schedule" label="Schedule" onLayout={registerSectionY}>
-              <View
-                ref={(r) => {
-                  fieldRefs.current.pickupDate = r;
-                }}
-              >
-              <DateField
-                label="Pickup date"
-                required
-                value={pickupDate}
-                onChange={setPickupDate}
-                minimumDate={startOfToday()}
-                error={showIssue('pickupDate', false)}
-              />
-              {lowFields.has('pickupDate') && <CheckHint lang={nlLang} />}
+            <QuoteSection id="schedule" label="Schedule" {...stepProps('schedule', 4)} onLayout={registerSectionY}>
+              {/* Collection and delivery read as one span, so they share a row; the
+              transit caption below says how long it is. No arrow between them: the
+              date shows on one line ("29 Oct 2026"), and an arrow's width is what
+              would truncate the year on a 375pt screen. */}
+              <View className="flex-row items-start gap-3">
+                <View
+                  className="min-w-0 flex-1"
+                  ref={(r) => {
+                    fieldRefs.current.pickupDate = r;
+                  }}
+                >
+                  <DateField
+                    label="Pickup date"
+                    required
+                    value={pickupDate}
+                    onChange={setPickupDate}
+                    minimumDate={startOfToday()}
+                    error={showIssue('pickupDate', false)}
+                  />
+                  {lowFields.has('pickupDate') && <CheckHint lang={nlLang} />}
+                </View>
+                <View
+                  className="min-w-0 flex-1"
+                  ref={(r) => {
+                    fieldRefs.current.deliveryDate = r;
+                  }}
+                >
+                  <DateField
+                    label="Delivery date"
+                    required
+                    value={deliveryDate}
+                    onChange={(v) => {
+                      deliveryTouchedRef.current = true;
+                      setDeliveryDate(v);
+                    }}
+                    minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
+                    error={showIssue('deliveryDate', false)}
+                  />
+                  {lowFields.has('deliveryDate') && <CheckHint lang={nlLang} />}
+                </View>
               </View>
-              <View
-                ref={(r) => {
-                  fieldRefs.current.deliveryDate = r;
-                }}
-              >
-              <DateField
-                label="Delivery date"
-                required
-                value={deliveryDate}
-                onChange={(v) => {
-                  deliveryTouchedRef.current = true;
-                  setDeliveryDate(v);
-                }}
-                minimumDate={pickupDate ? new Date(pickupDate) : startOfToday()}
-                error={showIssue('deliveryDate', false)}
-              />
-              {lowFields.has('deliveryDate') && <CheckHint lang={nlLang} />}
+              {transitText && (
+                <Mono className="-mt-2 text-caption text-faint">{transitText}</Mono>
+              )}
+              <View>
+                <DateField
+                  label="Valid until"
+                  value={validUntil}
+                  onChange={setValidUntil}
+                  minimumDate={startOfToday()}
+                />
+                {/* The usual validity periods, one tap: the same field the date
+                picker sets. */}
+                <View className="mt-2 flex-row gap-2">
+                  {VALIDITY_DAYS.map((n) => {
+                    const iso = plusDays(n);
+                    const on = validUntil === iso;
+                    return (
+                      <TouchableOpacity
+                        key={n}
+                        onPress={() => {
+                          if (!on) tapHaptic();
+                          setValidUntil(iso);
+                        }}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={`Valid for ${n} days`}
+                        className={`min-h-[36px] items-center justify-center rounded-control border px-3 ${
+                          on ? 'border-line-strong bg-raised' : 'border-line bg-surface'
+                        }`}
+                        hitSlop={{ top: 4, bottom: 4 }}
+                      >
+                        <Mono className={`text-caption font-medium ${on ? 'text-fg' : 'text-muted'}`}>
+                          {n} days
+                        </Mono>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
-              <DateField
-                label="Valid until"
-                value={validUntil}
-                onChange={setValidUntil}
-                minimumDate={startOfToday()}
-              />
               <TextField
                 label="Notes"
                 placeholder="For the client"
@@ -3691,7 +3880,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
               />
             </QuoteSection>
 
-            <QuoteSection id="price" label="Price" onLayout={registerSectionY}>
+            <QuoteSection id="price" label="Price" {...stepProps('price', 5)} onLayout={registerSectionY}>
               <SegmentedControl
                 options={[
                   { label: 'Per load', value: 'per_load' },
@@ -3699,6 +3888,7 @@ export function CreateQuoteScreen({ route, navigation }: Props) {
                 ]}
                 value={pricingBasis}
                 onChange={(v) => {
+                  if (v !== pricingBasis) tapHaptic();
                   setPricingBasis(v);
                   if (v === 'per_load') setIsContract(false);
                 }}

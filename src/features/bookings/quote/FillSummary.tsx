@@ -54,7 +54,7 @@ function Chip({
       activeOpacity={0.7}
       accessibilityRole="button"
       accessibilityLabel={a11y}
-      className="min-h-[44px] flex-row items-center gap-1.5 rounded-control border border-line px-3"
+      className="min-h-[44px] flex-row items-center gap-1.5 rounded-control border border-line bg-raised px-3"
     >
       {low ? (
         <Dotted>

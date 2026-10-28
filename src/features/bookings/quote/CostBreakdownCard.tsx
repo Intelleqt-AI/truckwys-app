@@ -4,6 +4,7 @@ import { Card, Icon, Label, Txt, Mono } from '@/components/ui';
 import { formatCurrency } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
 import type { CostBreakdown } from './costs';
+import { MarginMeter } from './MarginMeter';
 
 /** Whole rands: the card and footer; cents live in the modals' line detail. */
 export const randWhole = (n: number) => formatCurrency(n, { maximumFractionDigits: 0 });
@@ -144,13 +145,18 @@ function CostBreakdownCardImpl({
           )}
           <TotalRow label="Price excl. VAT" value={randWhole(costs.total)} />
           <View
-            className="min-h-[48px] flex-row items-center justify-between gap-3 border-t border-line-row px-3.5"
+            className="gap-2.5 border-t border-line-row px-3.5 py-3"
             accessibilityLabel={margin === null ? 'Margin unknown' : `Margin ${pct(margin)}`}
           >
-            <Txt className="text-callout text-muted">Margin</Txt>
-            <Mono className={`text-sub font-semibold ${marginTone}`}>
-              {margin === null || profit === null ? '—' : `${pct(margin)} · ${randWhole(profit)}`}
-            </Mono>
+            <View className="min-h-[24px] flex-row items-center justify-between gap-3">
+              <Txt className="text-callout text-muted">Margin</Txt>
+              <Mono className={`text-sub font-semibold ${marginTone}`}>
+                {margin === null || profit === null ? '—' : `${pct(margin)} · ${randWhole(profit)}`}
+              </Mono>
+            </View>
+            {/* The margin against the target, at a glance; the figure above is the
+                accessible text. */}
+            <MarginMeter marginPct={margin} targetPct={costs.costing.target_margin_pct ?? 10} />
           </View>
           {onSettingsPress && (
             <TouchableOpacity
@@ -180,7 +186,7 @@ function TotalRow({ label, value, warn, onPress }: { label: string; value: strin
         {label}
       </Txt>
       <View className="shrink-0 flex-row items-center gap-1">
-        <Mono className={`text-heading font-semibold ${warn ? 'text-danger' : 'text-fg'}`} numberOfLines={1}>
+        <Mono className={`text-title font-semibold ${warn ? 'text-danger' : 'text-fg'}`} numberOfLines={1}>
           {value}
         </Mono>
         {onPress ? <Icon name="chevronRight" size={14} color={colors.faint} /> : <View style={{ width: 14 }} />}

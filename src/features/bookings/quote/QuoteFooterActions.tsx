@@ -1,10 +1,12 @@
-import { memo } from 'react';
+import { memo, type MutableRefObject } from 'react';
 import { View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useBottomSheetInternal, KEYBOARD_STATUS } from '@gorhom/bottom-sheet';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Button, Icon, Mono } from '@/components/ui';
 import { formatCurrency } from '@/lib/formatters';
 import { useTheme } from '@/theme/ThemeProvider';
+import { pct } from './CostBreakdownCard';
+import { useRollingTotal } from './useRollingTotal';
 
 /**
  * What the price bar offers beside the total, from the pricing analysis: one
@@ -30,6 +32,9 @@ export interface FooterStrip {
  */
 function QuoteFooterActionsImpl({
   total,
+  shownTotal,
+  marginPct,
+  targetMarginPct,
   offer,
   ready,
   priceHint,
@@ -43,6 +48,12 @@ function QuoteFooterActionsImpl({
   onSend,
 }: {
   total: number;
+  /** Owned by the screen, so the rolling total survives this footer remounting
+      (gorhom treats the screen's renderFooter as a component type). */
+  shownTotal: MutableRefObject<number>;
+  /** The quote's margin, for the dot beside "excl. VAT"; null per tonne or unknown. */
+  marginPct: number | null;
+  targetMarginPct: number;
   /** Pricing analysis offer; null while there is nothing to offer. */
   offer: FooterOffer | null;
   ready: boolean;
@@ -64,6 +75,9 @@ function QuoteFooterActionsImpl({
   // QuoteFooterBar's own padding animation around this component: the footer
   // already crowds the keyboard, a second row of text doesn't fit above it.
   const { animatedKeyboardState } = useBottomSheetInternal();
+  // Called here, not inside the showTotal branch, so the roll keeps running
+  // while a strip briefly replaces the figure.
+  const rolled = useRollingTotal(total, shownTotal);
 
   // The total used to be suppressed by *any* strip, which hid the price at the
   // one moment the user is watching for it — right after a Send attempt, while
@@ -88,8 +102,10 @@ function QuoteFooterActionsImpl({
       // and this row is overflow-hidden — 2px of slack meant the OS text-size
       // setting sliced the digits horizontally through the middle. Paired with
       // maxFontSizeMultiplier below, which bounds how far that can go.
-      // 44: the strip's links are tap targets (≥ 44 pt).
-      height: withTiming(hidden ? 0 : 44, { duration: animatedKeyboardState.value.duration }),
+      // 60: the price hero is two lines, text-display (30) over text-caption
+      // (16) = 46, which is 55 at maxFontSizeMultiplier 1.2. The strip's links
+      // are tap targets (≥ 44 pt) and fit inside this too.
+      height: withTiming(hidden ? 0 : 60, { duration: animatedKeyboardState.value.duration }),
       opacity: withTiming(hidden ? 0 : 1, { duration: animatedKeyboardState.value.duration }),
       marginBottom: withTiming(hidden ? 0 : 4, { duration: animatedKeyboardState.value.duration }),
     };
@@ -99,6 +115,14 @@ function QuoteFooterActionsImpl({
   // theme to match their own text colours.
   const { colors } = useTheme();
   const stripColor = strip?.tone === 'danger' ? colors.dangerDot : colors.warningDot;
+  const marginDot =
+    marginPct === null
+      ? null
+      : marginPct < 0
+        ? colors.dangerDot
+        : marginPct < targetMarginPct
+          ? colors.warningDot
+          : colors.successDot;
 
   return (
     <View>
@@ -121,20 +145,32 @@ function QuoteFooterActionsImpl({
             hands the strip the room it just gave up. */}
         <View className={`flex-row items-center gap-2 ${!strip && !ready ? 'flex-1' : 'shrink-0'}`}>
           {showTotal ? (
-            <>
+            <View accessible accessibilityLabel={`${formatCurrency(total, { maximumFractionDigits: 0 })}, excluding VAT${marginPct !== null ? `, margin ${pct(marginPct)}` : ''}`}>
+              {/* The hero: the price the whole screen is building. Reads the
+                  final figure to a screen reader, not the in-between ones. */}
               <Mono
-                className="text-callout font-semibold text-fg"
+                className="text-display font-semibold text-fg"
                 numberOfLines={1}
                 maxFontSizeMultiplier={1.2}
               >
-                {formatCurrency(total, { maximumFractionDigits: 0 })}
+                {formatCurrency(Math.round(rolled), { maximumFractionDigits: 0 })}
               </Mono>
-              {/* The one price: what the client is sent, excluding VAT. */}
-              <Mono className="shrink-0 text-caption text-muted" maxFontSizeMultiplier={1.2}>
-                excl. VAT
-              </Mono>
-              {calculating && <ActivityIndicator size="small" color={colors.faint} />}
-            </>
+              <View className="flex-row items-center gap-1.5">
+                {/* The one price: what the client is sent, excluding VAT. */}
+                <Mono className="shrink-0 text-caption text-muted" maxFontSizeMultiplier={1.2}>
+                  excl. VAT
+                </Mono>
+                {marginDot && marginPct !== null && (
+                  <>
+                    <View style={{ width: 6, height: 6, borderRadius: 6, backgroundColor: marginDot }} />
+                    <Mono className="shrink-0 text-caption text-muted" maxFontSizeMultiplier={1.2}>
+                      {pct(marginPct)} margin
+                    </Mono>
+                  </>
+                )}
+                {calculating && <ActivityIndicator size="small" color={colors.faint} />}
+              </View>
+            </View>
           ) : strip ? null : (
             // Tappable for the same reason the strip on the right is: the
             // hint itself is generic, but tapping still jumps to the first
@@ -194,7 +230,8 @@ function QuoteFooterActionsImpl({
             fullWidth
           />
         </View>
-        <View className="flex-1">
+        {/* Send is the primary (ink) action; Save draft beside it is the outline. */}
+        <View className="flex-[1.6]">
           <Button
             label="Send"
             icon="send"

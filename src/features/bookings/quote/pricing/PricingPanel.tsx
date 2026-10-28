@@ -581,13 +581,16 @@ function ChoiceRow({
       accessibilityLabel={`${c.label}${showRec ? ', recommended' : ''}: ${money(c.price)}, margin ${money(margin)} or ${signedPct(marginPct)}${
         chance ? `, ${chance}` : ''
       }. ${applied ? 'In your quote.' : 'Use this price.'}`}
-      className={`min-h-[44px] rounded-control border px-3 py-2.5 ${
-        applied ? 'border-line-strong bg-raised' : 'border-line bg-surface'
+      // 1.5px in both states, so applying a price never nudges the rows; the
+      // applied one is the ink outline.
+      style={{ borderWidth: 1.5 }}
+      className={`min-h-[44px] rounded-control px-3 py-2.5 ${
+        applied ? 'border-fg bg-surface' : 'border-line bg-surface'
       }`}
     >
       <View className="flex-row items-center justify-between gap-2">
         <View className="flex-1 flex-row flex-wrap items-center gap-x-2">
-          {applied && <Icon name="check" size={12} color={colors.fg} />}
+          {applied && <Icon name="check" size={12} color={colors.fg} strokeWidth={2.6} />}
           <Txt className="text-callout font-semibold text-fg">{c.label}</Txt>
           {showRec && <Badge label="Recommended" tone="accent" />}
         </View>
